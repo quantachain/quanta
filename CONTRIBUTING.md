@@ -5,7 +5,7 @@ Contributions welcome!
 ## Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/quanta.git
+git clone https://github.com/xaexaex/quanta.git
 cd quanta
 cargo build
 cargo test
@@ -61,3 +61,4 @@ Do not open public issues for vulnerabilities. Create draft security advisory on
 ## License
 
 MIT License - contributions will be licensed under same terms.
+
