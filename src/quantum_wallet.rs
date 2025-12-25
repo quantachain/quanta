@@ -58,12 +58,12 @@ impl QuantumWallet {
         let keypair = FalconKeypair::generate();
         let address = keypair.get_address();
         
-        tracing::info!("🔐 New FULLY Quantum-Resistant Wallet Created");
+        tracing::info!("New FULLY Quantum-Resistant Wallet Created");
         tracing::info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
         tracing::info!("Address: {}", address);
         tracing::info!("Signature: Falcon-512 (PQC)");
         tracing::info!("Encryption: Kyber-1024 + ChaCha20-Poly1305");
-        tracing::info!("🛡️  100% QUANTUM-SAFE");
+        tracing::info!("100% QUANTUM-SAFE");
         
         Self { keypair, address }
     }
@@ -119,9 +119,9 @@ impl QuantumWallet {
         let json = serde_json::to_string_pretty(&quantum_wallet)?;
         fs::write(filename, json)?;
         
-        tracing::info!("💾 Quantum-safe wallet saved to {}", filename);
-        tracing::info!("🔐 Encryption: Kyber-1024 + ChaCha20-Poly1305");
-        tracing::info!("🛡️  Quantum Resistance: MAXIMUM");
+        tracing::info!("Quantum-safe wallet saved to {}", filename);
+        tracing::info!("Encryption: Kyber-1024 + ChaCha20-Poly1305");
+        tracing::info!("Quantum Resistance: MAXIMUM");
         Ok(())
     }
 
@@ -172,7 +172,7 @@ impl QuantumWallet {
         
         let wallet: Self = serde_json::from_slice(&decrypted_data)?;
         
-        tracing::info!("📂 Quantum-safe wallet loaded from {}", filename);
+        tracing::info!("Quantum-safe wallet loaded from {}", filename);
         tracing::info!("Address: {}", wallet.address);
         
         Ok(wallet)
@@ -200,18 +200,18 @@ impl QuantumWallet {
         println!("║                                                                ║");
         println!("║ ── QUANTUM RESISTANCE LEVELS ──────────────────────────────────║");
         println!("║                                                                ║");
-        println!("║ 🛡️  Against Shor's Algorithm:    ✅ PROTECTED                  ║");
-        println!("║ 🛡️  Against Grover's Algorithm:  ✅ PROTECTED                  ║");
-        println!("║ 🛡️  NIST PQC Standards:          ✅ COMPLIANT                  ║");
-        println!("║ 🛡️  Classical Security:          ~128-bit                      ║");
-        println!("║ 🛡️  Quantum Security:            MAXIMUM                       ║");
+        println!("║ Against Shor's Algorithm:    PROTECTED                        ║");
+        println!("║ Against Grover's Algorithm:  PROTECTED                        ║");
+        println!("║ NIST PQC Standards:          COMPLIANT                        ║");
+        println!("║ Classical Security:          ~128-bit                         ║");
+        println!("║ Quantum Security:            MAXIMUM                          ║");
         println!("║                                                                ║");
         println!("║ ── THREAT ANALYSIS ────────────────────────────────────────────║");
         println!("║                                                                ║");
-        println!("║ ✅ Quantum Computer (2030s+):     SAFE                         ║");
-        println!("║ ✅ Classical Supercomputer:       SAFE                         ║");
-        println!("║ ✅ Harvest Now, Decrypt Later:    SAFE                         ║");
-        println!("║ ✅ Brute Force:                   IMPOSSIBLE                   ║");
+        println!("║ Quantum Computer (2030s+):     SAFE                           ║");
+        println!("║ Classical Supercomputer:       SAFE                           ║");
+        println!("║ Harvest Now, Decrypt Later:    SAFE                           ║");
+        println!("║ Brute Force:                   IMPOSSIBLE                     ║");
         println!("╚════════════════════════════════════════════════════════════════╝\n");
     }
 }

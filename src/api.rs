@@ -2,7 +2,9 @@ use axum::{
     extract::{State, Json, Path},
     routing::{get, post},
     Router, http::StatusCode,
+    http::{HeaderValue, Method},
 };
+use tower_http::cors::{CorsLayer, Any};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -11,12 +13,14 @@ use crate::transaction::Transaction;
 use crate::quantum_wallet::QuantumWallet;
 use crate::mempool::NodeMetrics;
 use crate::block::Block;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// API state
 pub struct ApiState {
     pub blockchain: Arc<RwLock<Blockchain>>,
     pub metrics: Option<Arc<crate::mempool::MetricsCollector>>,
     pub network: Option<Arc<crate::p2p::Network>>,
+    pub mining_active: Arc<AtomicBool>,
 }
 
 /// Request to create a transaction
@@ -193,6 +197,75 @@ async fn mine_block(
     }
 }
 
+/// Start continuous mining
+async fn start_continuous_mining(
+    State(state): State<Arc<ApiState>>,
+    Json(req): Json<MineRequest>,
+) -> (StatusCode, Json<serde_json::Value>) {
+    if state.mining_active.load(Ordering::Relaxed) {
+        return (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "already_running", "message": "Mining already active" }))
+        );
+    }
+    
+    state.mining_active.store(true, Ordering::Relaxed);
+    let blockchain = state.blockchain.clone();
+    let network = state.network.clone();
+    let mining_active = state.mining_active.clone();
+    let miner_address = req.miner_address.clone();
+    
+    tokio::spawn(async move {
+        while mining_active.load(Ordering::Relaxed) {
+            let mut bc = blockchain.write().await;
+            match bc.mine_pending_transactions(miner_address.clone()) {
+                Ok(_) => {
+                    let block = bc.get_chain().last().cloned();
+                    drop(bc);
+                    
+                    if let Some(block) = block {
+                        if let Some(ref net) = network {
+                            net.broadcast_block(block).await;
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Continuous mining error: {}", e);
+                    break;
+                }
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+    });
+    
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "status": "started", "message": "Continuous mining started" }))
+    )
+}
+
+/// Stop continuous mining
+async fn stop_continuous_mining(
+    State(state): State<Arc<ApiState>>,
+) -> Json<serde_json::Value> {
+    state.mining_active.store(false, Ordering::Relaxed);
+    Json(serde_json::json!({ "status": "stopped", "message": "Continuous mining stopped" }))
+}
+
+/// Get mining status
+#[derive(Serialize)]
+pub struct MiningStatus {
+    pub active: bool,
+}
+
+async fn get_mining_status(
+    State(state): State<Arc<ApiState>>,
+) -> Json<MiningStatus> {
+    Json(MiningStatus {
+        active: state.mining_active.load(Ordering::Relaxed),
+    })
+}
+
 /// Validate blockchain
 #[derive(Serialize)]
 pub struct ValidateResponse {
@@ -306,18 +379,29 @@ pub fn create_router(
         blockchain,
         metrics,
         network,
+        mining_active: Arc::new(AtomicBool::new(false)),
     });
+
+    // Configure CORS to allow requests from any origin
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers(Any);
 
     Router::new()
         .route("/api/stats", get(get_stats))
         .route("/api/balance", post(get_balance))
         .route("/api/transaction", post(create_transaction))
         .route("/api/mine", post(mine_block))
+        .route("/api/mine/start", post(start_continuous_mining))
+        .route("/api/mine/stop", post(stop_continuous_mining))
+        .route("/api/mine/status", get(get_mining_status))
         .route("/api/validate", get(validate_chain))
         .route("/api/peers", get(get_peers))
         .route("/api/metrics", get(get_metrics))
         .route("/api/block/:height", get(get_block))
         .route("/api/mempool", get(get_mempool))
+        .layer(cors)
         .with_state(state)
 }
 
@@ -331,8 +415,8 @@ pub async fn start_server(
     let app = create_router(blockchain, metrics, network);
     let addr = format!("0.0.0.0:{}", port);
     
-    tracing::info!("🚀 QUANTA API server starting on {}", addr);
-    tracing::info!("📡 Endpoints:");
+    tracing::info!("QUANTA API server starting on {}", addr);
+    tracing::info!("Endpoints:");
     tracing::info!("   GET  /api/stats - Get blockchain statistics");
     tracing::info!("   POST /api/balance - Get address balance");
     tracing::info!("   POST /api/transaction - Create transaction");

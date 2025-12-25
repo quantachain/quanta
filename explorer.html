@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>QUANTA Blockchain Dashboard</title>
+    <style>
+        body { text-align: center; }
+        input, button, pre { margin: 5px; }
+    </style>
+</head>
+<body>
+    <h1>QUANTA - Quantum-Resistant Blockchain Dashboard</h1>
+    <p>Falcon-512 Signatures | Real-time Monitoring</p>
+    
+    <h2>Blockchain Stats</h2>
+    <p>Chain Length: <strong><span id="chain-length">-</span></strong></p>
+    <p>Difficulty: <strong><span id="difficulty">-</span></strong></p>
+    <p>Total Transactions: <strong><span id="total-txs">-</span></strong></p>
+    <p>Mining Reward: <strong><span id="mining-reward">-</span></strong></p>
+    <p>
+        <input type="checkbox" id="auto-refresh" checked>
+        <label for="auto-refresh">Auto-refresh (5s)</label>
+    </p>
+    <button onclick="loadStats()">Refresh Stats</button>
+    <button onclick="validateChain()">Validate Chain</button>
+    <hr>
+    
+    <h2>Mine Block</h2>
+    <p>Miner Address: <input type="text" id="miner-address" size="50" value="2416136398caf277667578cdecc495e1040e1e5d"></p>
+    <button onclick="mineBlock()">Mine Single Block</button>
+    <button onclick="startContinuousMining()">Start Continuous Mining</button>
+    <button onclick="stopContinuousMining()">Stop Continuous Mining</button>
+    <p><strong>Mining Status:</strong> <span id="mining-status">Inactive</span></p>
+    <pre id="mine-result"></pre>
+    <hr>
+    
+    <h2>Check Balance</h2>
+    <p>Address: <input type="text" id="balance-address" size="50" value="2416136398caf277667578cdecc495e1040e1e5d"></p>
+    <button onclick="checkBalance()">Check Balance</button>
+    <pre id="balance-result"></pre>
+    <hr>
+    
+    <h2>Block Explorer</h2>
+    <p>Block Height: <input type="number" id="block-height" min="0"></p>
+    <button onclick="loadBlock()">View Block</button>
+    <button onclick="loadAllBlocks()">Load All Blocks</button>
+    <pre id="block-result"></pre>
+    <div id="block-list"></div>
+    <hr>
+    
+    <h2>Mempool</h2>
+    <button onclick="loadMempool()">Refresh Mempool</button>
+    <pre id="mempool-result"></pre>
+    <hr>
+    
+    <h2>Network Peers</h2>
+    <button onclick="loadPeers()">Refresh Peers</button>
+    <pre id="peers-result"></pre>
+    
+    <script>
+        const API_BASE = 'http://localhost:3000/api';
+        let autoRefreshInterval;
+        
+        function loadStats() {
+            fetch(`${API_BASE}/stats`)
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('chain-length').textContent = data.chain_length;
+                    document.getElementById('difficulty').textContent = data.current_difficulty;
+                    document.getElementById('total-txs').textContent = data.total_transactions;
+                    document.getElementById('mining-reward').textContent = data.mining_reward + ' QUA';
+                })
+                .catch(err => document.getElementById('chain-length').textContent = 'Error: ' + err.message);
+            
+            checkMiningStatus();
+        }
+        
+        function checkMiningStatus() {
+            fetch(`${API_BASE}/mine/status`)
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('mining-status').textContent = 
+                        data.active ? 'ACTIVE (Mining...)' : 'Inactive';
+                })
+                .catch(err => {});
+        }
+        
+        function mineBlock() {
+            const address = document.getElementById('miner-address').value;
+            if (!address) { 
+                document.getElementById('mine-result').textContent = 'Error: Enter miner address'; 
+                return; 
+            }
+            
+            document.getElementById('mine-result').textContent = 'Mining...';
+            
+            fetch(`${API_BASE}/mine`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ miner_address: address })
+            })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('mine-result').textContent = data.success ? 
+                    `SUCCESS! Block ${data.block_index} mined` : 
+                    `ERROR: ${data.error}`;
+                loadStats();
+                loadAllBlocks();
+            })
+            .catch(err => document.getElementById('mine-result').textContent = 'Error: ' + err.message);
+        }
+        
+        function startContinuousMining() {
+            const address = document.getElementById('miner-address').value;
+            if (!address) { 
+                document.getElementById('mine-result').textContent = 'Error: Enter miner address'; 
+                return; 
+            }
+            
+            fetch(`${API_BASE}/mine/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ miner_address: address })
+            })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('mine-result').textContent = data.message;
+                checkMiningStatus();
+            })
+            .catch(err => document.getElementById('mine-result').textContent = 'Error: ' + err.message);
+        }
+        
+        function stopContinuousMining() {
+            fetch(`${API_BASE}/mine/stop`, {
+                method: 'POST'
+            })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('mine-result').textContent = data.message;
+                checkMiningStatus();
+            })
+            .catch(err => document.getElementById('mine-result').textContent = 'Error: ' + err.message);
+        }
+        
+        function checkBalance() {
+            const address = document.getElementById('balance-address').value;
+            if (!address) { 
+                document.getElementById('balance-result').textContent = 'Error: Enter address'; 
+                return; 
+            }
+            
+            fetch(`${API_BASE}/balance`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ address: address })
+            })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('balance-result').textContent = 
+                    `Balance: ${data.balance} QUA\nAddress: ${data.address}`;
+            })
+            .catch(err => document.getElementById('balance-result').textContent = 'Error: ' + err.message);
+        }
+        
+        function loadBlock() {
+            const height = document.getElementById('block-height').value;
+            if (height === '') { 
+                document.getElementById('block-result').textContent = 'Error: Enter block height'; 
+                return; 
+            }
+            
+            fetch(`${API_BASE}/block/${height}`)
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('block-result').textContent = JSON.stringify(data, null, 2);
+                })
+                .catch(err => document.getElementById('block-result').textContent = 'Error: ' + err.message);
+        }
+        
+        function loadAllBlocks() {
+            document.getElementById('block-list').innerHTML = 'Loading blocks...';
+            
+            fetch(`${API_BASE}/stats`)
+                .then(r => r.json())
+                .then(stats => {
+                    const chainLength = stats.chain_length;
+                    let html = '<h3>All Blocks:</h3>';
+                    
+                    const promises = [];
+                    for (let i = chainLength - 1; i >= 0; i--) {
+                        promises.push(
+                            fetch(`${API_BASE}/block/${i}`)
+                                .then(r => r.json())
+                                .then(block => ({i, block}))
+                        );
+                    }
+                    
+                    return Promise.all(promises);
+                })
+                .then(results => {
+                    let html = '<h3>All Blocks:</h3>';
+                    results.forEach(({i, block}) => {
+                        const date = new Date(block.timestamp * 1000).toLocaleString();
+                        html += `<p><strong>Block #${block.index}</strong> - ${block.transactions.length} txs - ${date}<br>`;
+                        html += `Hash: ${block.hash.substring(0, 64)}...</p>`;
+                    });
+                    document.getElementById('block-list').innerHTML = html;
+                })
+                .catch(err => document.getElementById('block-list').innerHTML = 'Error: ' + err.message);
+        }
+        
+        function loadMempool() {
+            fetch(`${API_BASE}/mempool`)
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('mempool-result').textContent = JSON.stringify(data, null, 2);
+                })
+                .catch(err => document.getElementById('mempool-result').textContent = 'Error: ' + err.message);
+        }
+        
+        function loadPeers() {
+            fetch(`${API_BASE}/peers`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.peer_count === 0) {
+                        document.getElementById('peers-result').textContent = 'No peers connected (single-node mode)';
+                    } else {
+                        document.getElementById('peers-result').textContent = 
+                            `Connected Peers: ${data.peer_count}\n${data.peers.join('\n')}`;
+                    }
+                })
+                .catch(err => document.getElementById('peers-result').textContent = 'Error: ' + err.message);
+        }
+        
+        function validateChain() {
+            fetch(`${API_BASE}/validate`)
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('mine-result').textContent = 
+                        data.is_valid ? 'Blockchain is VALID!' : 'Blockchain validation FAILED!';
+                })
+                .catch(err => document.getElementById('mine-result').textContent = 'Error: ' + err.message);
+        }
+        
+        function toggleAutoRefresh() {
+            const checkbox = document.getElementById('auto-refresh');
+            if (checkbox.checked) {
+                loadStats();
+                autoRefreshInterval = setInterval(loadStats, 5000);
+            } else {
+                if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+            }
+        }
+        
+        document.getElementById('auto-refresh').addEventListener('change', toggleAutoRefresh);
+        loadStats();
+        loadAllBlocks();
+        toggleAutoRefresh();
+    </script>
+</body>
+</html>

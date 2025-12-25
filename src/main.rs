@@ -174,12 +174,12 @@ async fn main() {
                     if let Err(e) = network_clone.sync_blockchain().await {
                         tracing::error!("Sync error: {}", e);
                     }
-                });
+                });  
                 
-                println!("🌐 P2P Network started on port {}", network_port);
+                println!("P2P Network started on port {}", network_port);
                 Some(network)
             } else {
-                println!("⚠️  Running in single-node mode (P2P disabled)");
+                println!("Running in single-node mode (P2P disabled)");
                 None
             };
             
@@ -212,29 +212,29 @@ async fn main() {
         Commands::NewWallet { file } => {
             let wallet = QuantumWallet::new();
             
-            println!("\n🔐 Enter password to encrypt wallet:");
+            println!("\nEnter password to encrypt wallet:");
             let password = rpassword::read_password().expect("Failed to read password");
             
-            println!("🔐 Confirm password:");
+            println!("Confirm password:");
             let password_confirm = rpassword::read_password().expect("Failed to read password");
             
             if password != password_confirm {
-                eprintln!("❌ Passwords don't match!");
+                eprintln!("Passwords don't match!");
                 return;
             }
             
             wallet.save_quantum_safe(&file, &password).expect("Failed to save wallet");
-            println!("✅ Wallet created and encrypted successfully!");
+            println!("Wallet created and encrypted successfully!");
         }
 
         Commands::Wallet { file } => {
-            println!("🔐 Enter wallet password:");
+            println!("Enter wallet password:");
             let password = rpassword::read_password().expect("Failed to read password");
             
             let wallet = match QuantumWallet::load_quantum_safe(&file, &password) {
                 Ok(w) => w,
                 Err(e) => {
-                    eprintln!("❌ Failed to load wallet: {}", e);
+                    eprintln!("Failed to load wallet: {}", e);
                     return;
                 }
             };
@@ -248,7 +248,7 @@ async fn main() {
         }
 
         Commands::Mine { wallet: wallet_file, db } => {
-            println!("🔐 Enter wallet password:");
+            println!("Enter wallet password:");
             let password = rpassword::read_password().expect("Failed to read password");
             
             let wallet = match QuantumWallet::load_quantum_safe(&wallet_file, &password) {
@@ -262,20 +262,20 @@ async fn main() {
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
             
-            println!("⛏️  Mining new block...");
+            println!("Mining new block...");
             let mine_result = blockchain.write().await.mine_pending_transactions(wallet.address.clone());
             match mine_result {
                 Ok(_) => {
-                    println!("✅ Block mined successfully!");
+                    println!("Block mined successfully!");
                     let balance = blockchain.read().await.get_balance(&wallet.address);
-                    println!("💰 New balance: {:.6} QUA", balance);
+                    println!("New balance: {:.6} QUA", balance);
                 }
-                Err(e) => eprintln!("❌ Mining failed: {}", e),
+                Err(e) => eprintln!("Mining failed: {}", e),
             }
         }
 
         Commands::Send { wallet: wallet_file, to, amount, db } => {
-            println!("🔐 Enter wallet password:");
+            println!("Enter wallet password:");
             let password = rpassword::read_password().expect("Failed to read password");
             
             let wallet = match QuantumWallet::load_quantum_safe(&wallet_file, &password) {
@@ -303,8 +303,8 @@ async fn main() {
             
             let add_result = blockchain.write().await.add_transaction(tx);
             match add_result {
-                Ok(_) => println!("✅ Transaction added to mempool"),
-                Err(e) => eprintln!("❌ Transaction failed: {}", e),
+                Ok(_) => println!("Transaction added to mempool"),
+                Err(e) => eprintln!("Transaction failed: {}", e),
             }
         }
 
@@ -323,11 +323,11 @@ async fn main() {
             println!("║ Total Supply: {:.2} QUA                                 ║", stats.total_supply);
             println!("║ Pending Transactions: {}                                   ║", stats.pending_transactions);
             println!("╠═══════════════════════════════════════════════════════════════╣");
-            println!("║ 🛡️  Quantum Resistance: ACTIVE                                ║");
+            println!("║ Quantum Resistance: ACTIVE                                  ║");
             println!("║ Signature Algorithm: Falcon-512 (NIST PQC)                   ║");
             println!("║ Hash Algorithm: SHA3-256                                      ║");
-            println!("║ 🔐 Wallet Encryption: Kyber-1024 + ChaCha20-Poly1305         ║");
-            println!("║ 💾 Persistent Storage: Sled Database                          ║");
+            println!("║ Wallet Encryption: Kyber-1024 + ChaCha20-Poly1305            ║");
+            println!("║ Persistent Storage: Sled Database                            ║");
             println!("╚═══════════════════════════════════════════════════════════════╝");
         }
 
@@ -335,20 +335,20 @@ async fn main() {
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
             
-            println!("🔍 Validating blockchain...");
+            println!("Validating blockchain...");
             
             if blockchain.read().await.is_valid() {
-                println!("✅ Blockchain is VALID");
+                println!("Blockchain is VALID");
                 println!("   All blocks verified");
                 println!("   All Falcon signatures verified");
                 println!("   Chain integrity maintained");
             } else {
-                println!("❌ Blockchain is INVALID");
+                println!("Blockchain is INVALID");
             }
         }
 
         Commands::Demo { db } => {
-            println!("🎬 Running Production Demo...\n");
+            println!("Running Production Demo...\n");
             run_demo(&db).await;
         }
     }
