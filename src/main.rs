@@ -279,10 +279,13 @@ async fn run_demo(db_path: &str) {
     let wallet2 = SecureWallet::new();
     let wallet3 = SecureWallet::new();
     
-    let password = "demo123";
-    wallet1.save_encrypted("demo_wallet1.qua", password).unwrap();
-    wallet2.save_encrypted("demo_wallet2.qua", password).unwrap();
-    wallet3.save_encrypted("demo_wallet3.qua", password).unwrap();
+    // WARNING: Insecure password for demo ONLY! Never use in production!
+    const DEMO_PASSWORD: &str = "INSECURE_DEMO_PASSWORD_DO_NOT_USE_IN_PRODUCTION";
+    println!("⚠️  Demo wallets use INSECURE password - FOR TESTING ONLY!");
+    
+    wallet1.save_encrypted("demo_wallet1.qua", DEMO_PASSWORD).unwrap();
+    wallet2.save_encrypted("demo_wallet2.qua", DEMO_PASSWORD).unwrap();
+    wallet3.save_encrypted("demo_wallet3.qua", DEMO_PASSWORD).unwrap();
     
     println!("\n⛏️  Mining genesis rewards...");
     blockchain.mine_pending_transactions(wallet1.address.clone()).unwrap();
@@ -355,7 +358,8 @@ async fn run_demo(db_path: &str) {
     
     println!("\n🎉 Production demo complete!");
     println!("💾 Blockchain persisted to: {}", db_path);
-    println!("🔐 Wallets encrypted with password: demo123");
+    println!("⚠️  Demo wallets password: INSECURE_DEMO_PASSWORD_DO_NOT_USE_IN_PRODUCTION");
+    println!("⚠️  WARNING: Demo password is PUBLIC - delete wallets after testing!");
     println!("\n📡 To start API server:");
     println!("   cargo run --release -- start --db {} --port 3000", db_path);
 }

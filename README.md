@@ -213,7 +213,7 @@ cargo run --release -- demo --db ./demo_blockchain
 ```
 
 This creates:
-- 3 encrypted wallets (password: `demo123`)
+- 3 encrypted wallets (⚠️ insecure demo password - see output)
 - Mines initial blocks
 - Creates sample transactions
 - Validates signatures
