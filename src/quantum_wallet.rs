@@ -1,5 +1,5 @@
 use pqcrypto_kyber::kyber1024::*;
-use pqcrypto_traits::kem::{PublicKey, SecretKey, Ciphertext, SharedSecret};
+use pqcrypto_traits::kem::{PublicKey, Ciphertext, SharedSecret};
 use chacha20poly1305::{
     aead::{Aead, KeyInit, OsRng},
     ChaCha20Poly1305, Nonce,
@@ -136,9 +136,9 @@ impl QuantumWallet {
         let quantum_wallet: QuantumSafeWallet = serde_json::from_str(&json)?;
         
         // Reconstruct Kyber objects
-        let kyber_pk = PublicKey::from_bytes(&quantum_wallet.kyber_public_key)
+        let kyber_pk = pqcrypto_kyber::kyber1024::PublicKey::from_bytes(&quantum_wallet.kyber_public_key)
             .map_err(|_| WalletError::Encryption)?;
-        let kyber_ct = Ciphertext::from_bytes(&quantum_wallet.kyber_ciphertext)
+        let kyber_ct = pqcrypto_kyber::kyber1024::Ciphertext::from_bytes(&quantum_wallet.kyber_ciphertext)
             .map_err(|_| WalletError::Encryption)?;
         
         // Derive Kyber secret key from password (same process as encryption)

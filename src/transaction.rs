@@ -3,7 +3,7 @@ use crate::crypto::{verify_signature, sha3_hash};
 use std::collections::HashMap;
 
 /// Transaction structure with Falcon signature
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Transaction {
     pub sender: String,           // Sender address (40 hex chars)
     pub recipient: String,        // Recipient address

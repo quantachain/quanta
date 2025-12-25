@@ -1,17 +1,22 @@
 use axum::{
-    extract::{State, Json},
+    extract::{State, Json, Path},
     routing::{get, post},
     Router, http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use crate::blockchain::{Blockchain, BlockchainStats};
 use crate::transaction::Transaction;
-use crate::secure_wallet::SecureWallet;
+use crate::quantum_wallet::QuantumWallet;
+use crate::mempool::NodeMetrics;
+use crate::block::Block;
 
 /// API state
 pub struct ApiState {
-    pub blockchain: Arc<Blockchain>,
+    pub blockchain: Arc<RwLock<Blockchain>>,
+    pub metrics: Option<Arc<crate::mempool::MetricsCollector>>,
+    pub network: Option<Arc<crate::p2p::Network>>,
 }
 
 /// Request to create a transaction
@@ -35,7 +40,8 @@ pub struct TransactionResponse {
 async fn get_stats(
     State(state): State<Arc<ApiState>>,
 ) -> Json<BlockchainStats> {
-    Json(state.blockchain.get_stats())
+    let blockchain = state.blockchain.read().await;
+    Json(blockchain.get_stats())
 }
 
 /// Get balance for an address
@@ -54,7 +60,8 @@ async fn get_balance(
     State(state): State<Arc<ApiState>>,
     Json(req): Json<BalanceRequest>,
 ) -> Json<BalanceResponse> {
-    let balance = state.blockchain.get_balance(&req.address);
+    let blockchain = state.blockchain.read().await;
+    let balance = blockchain.get_balance(&req.address);
     Json(BalanceResponse {
         address: req.address,
         balance,
@@ -66,8 +73,8 @@ async fn create_transaction(
     State(state): State<Arc<ApiState>>,
     Json(req): Json<CreateTransactionRequest>,
 ) -> (StatusCode, Json<TransactionResponse>) {
-    // Load wallet
-    let wallet = match SecureWallet::load_encrypted(&req.wallet_file, &req.wallet_password) {
+    // Load quantum-safe wallet
+    let wallet = match QuantumWallet::load_quantum_safe(&req.wallet_file, &req.wallet_password) {
         Ok(w) => w,
         Err(e) => {
             return (
@@ -98,9 +105,17 @@ async fn create_transaction(
     signed_tx.public_key = wallet.keypair.public_key.clone();
 
     // Submit to blockchain
-    match state.blockchain.add_transaction(signed_tx.clone()) {
+    let blockchain = state.blockchain.write().await;
+    match blockchain.add_transaction(signed_tx.clone()) {
         Ok(_) => {
             let tx_hash = signed_tx.hash();
+            
+            // Broadcast to network if available
+            drop(blockchain);
+            if let Some(ref network) = state.network {
+                network.broadcast_transaction(signed_tx).await;
+            }
+            
             (
                 StatusCode::OK,
                 Json(TransactionResponse {
@@ -140,9 +155,22 @@ async fn mine_block(
     State(state): State<Arc<ApiState>>,
     Json(req): Json<MineRequest>,
 ) -> (StatusCode, Json<MineResponse>) {
-    match state.blockchain.mine_pending_transactions(req.miner_address) {
+    let blockchain = state.blockchain.write().await;
+    match blockchain.mine_pending_transactions(req.miner_address) {
         Ok(_) => {
-            let stats = state.blockchain.get_stats();
+            let stats = blockchain.get_stats();
+            let block = blockchain.get_chain().last().cloned();
+            drop(blockchain);
+            
+            // Get the mined block
+            if let Some(block) = block {
+                
+                // Broadcast to network if available
+                if let Some(ref network) = state.network {
+                    network.broadcast_block(block).await;
+                }
+            }
+            
             (
                 StatusCode::OK,
                 Json(MineResponse {
@@ -174,14 +202,111 @@ pub struct ValidateResponse {
 async fn validate_chain(
     State(state): State<Arc<ApiState>>,
 ) -> Json<ValidateResponse> {
+    let blockchain = state.blockchain.read().await;
     Json(ValidateResponse {
-        is_valid: state.blockchain.is_valid(),
+        is_valid: blockchain.is_valid(),
+    })
+}
+
+/// Get network peers
+#[derive(Serialize)]
+pub struct PeersResponse {
+    pub peer_count: usize,
+    pub peers: Vec<PeerInfoResponse>,
+}
+
+#[derive(Serialize)]
+pub struct PeerInfoResponse {
+    pub address: String,
+    pub node_id: String,
+    pub height: u64,
+    pub connected_for: i64,
+}
+
+async fn get_peers(
+    State(state): State<Arc<ApiState>>,
+) -> Json<PeersResponse> {
+    if let Some(ref network) = state.network {
+        let peers_info = network.get_peers_info().await;
+        let peers: Vec<PeerInfoResponse> = peers_info
+            .into_iter()
+            .map(|p| PeerInfoResponse {
+                address: p.address.to_string(),
+                node_id: p.node_id,
+                height: p.height,
+                connected_for: chrono::Utc::now().timestamp() - p.connected_at,
+            })
+            .collect();
+        
+        Json(PeersResponse {
+            peer_count: peers.len(),
+            peers,
+        })
+    } else {
+        Json(PeersResponse {
+            peer_count: 0,
+            peers: Vec::new(),
+        })
+    }
+}
+
+/// Get node metrics
+async fn get_metrics(
+    State(state): State<Arc<ApiState>>,
+) -> Json<NodeMetrics> {
+    if let Some(ref metrics) = state.metrics {
+        Json(metrics.get_metrics().await)
+    } else {
+        Json(NodeMetrics::default())
+    }
+}
+
+/// Get specific block by height
+async fn get_block(
+    State(state): State<Arc<ApiState>>,
+    Path(height): Path<u64>,
+) -> Result<Json<Block>, StatusCode> {
+    let blockchain = state.blockchain.read().await;
+    let block = blockchain.get_chain().get(height as usize).cloned();
+    drop(blockchain);
+    
+    if let Some(block) = block {
+        Ok(Json(block))
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
+}
+
+/// Get mempool transactions
+#[derive(Serialize)]
+pub struct MempoolResponse {
+    pub transaction_count: usize,
+    pub transactions: Vec<Transaction>,
+}
+
+async fn get_mempool(
+    State(state): State<Arc<ApiState>>,
+) -> Json<MempoolResponse> {
+    let blockchain = state.blockchain.read().await;
+    let transactions = blockchain.get_pending_transactions().clone();
+    
+    Json(MempoolResponse {
+        transaction_count: transactions.len(),
+        transactions,
     })
 }
 
 /// Create the API router
-pub fn create_router(blockchain: Arc<Blockchain>) -> Router {
-    let state = Arc::new(ApiState { blockchain });
+pub fn create_router(
+    blockchain: Arc<RwLock<Blockchain>>,
+    metrics: Option<Arc<crate::mempool::MetricsCollector>>,
+    network: Option<Arc<crate::p2p::Network>>,
+) -> Router {
+    let state = Arc::new(ApiState { 
+        blockchain,
+        metrics,
+        network,
+    });
 
     Router::new()
         .route("/api/stats", get(get_stats))
@@ -189,12 +314,21 @@ pub fn create_router(blockchain: Arc<Blockchain>) -> Router {
         .route("/api/transaction", post(create_transaction))
         .route("/api/mine", post(mine_block))
         .route("/api/validate", get(validate_chain))
+        .route("/api/peers", get(get_peers))
+        .route("/api/metrics", get(get_metrics))
+        .route("/api/block/:height", get(get_block))
+        .route("/api/mempool", get(get_mempool))
         .with_state(state)
 }
 
 /// Start the API server
-pub async fn start_server(blockchain: Arc<Blockchain>, port: u16) {
-    let app = create_router(blockchain);
+pub async fn start_server(
+    blockchain: Arc<RwLock<Blockchain>>,
+    port: u16,
+    metrics: Option<Arc<crate::mempool::MetricsCollector>>,
+    network: Option<Arc<crate::p2p::Network>>,
+) {
+    let app = create_router(blockchain, metrics, network);
     let addr = format!("0.0.0.0:{}", port);
     
     tracing::info!("🚀 QUANTA API server starting on {}", addr);
@@ -204,6 +338,10 @@ pub async fn start_server(blockchain: Arc<Blockchain>, port: u16) {
     tracing::info!("   POST /api/transaction - Create transaction");
     tracing::info!("   POST /api/mine - Mine a block");
     tracing::info!("   GET  /api/validate - Validate blockchain");
+    tracing::info!("   GET  /api/peers - Get connected peers");
+    tracing::info!("   GET  /api/metrics - Get node metrics");
+    tracing::info!("   GET  /api/block/:height - Get specific block");
+    tracing::info!("   GET  /api/mempool - Get pending transactions");
     
     let listener = tokio::net::TcpListener::bind(&addr)
         .await

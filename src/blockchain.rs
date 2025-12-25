@@ -275,6 +275,90 @@ impl Blockchain {
     pub fn get_balance(&self, address: &str) -> f64 {
         self.utxo_set.read().get_balance(address)
     }
+
+    /// Get the blockchain (for network sync)
+    pub fn get_chain(&self) -> parking_lot::RwLockReadGuard<Vec<Block>> {
+        self.chain.read()
+    }
+
+    /// Get mutable blockchain (for adding blocks from network)
+    pub fn get_chain_mut(&self) -> parking_lot::RwLockWriteGuard<Vec<Block>> {
+        self.chain.write()
+    }
+
+    /// Get pending transactions
+    pub fn get_pending_transactions(&self) -> parking_lot::RwLockReadGuard<Vec<Transaction>> {
+        self.pending_transactions.read()
+    }
+
+    /// Get mutable pending transactions
+    pub fn get_pending_transactions_mut(&self) -> parking_lot::RwLockWriteGuard<Vec<Transaction>> {
+        self.pending_transactions.write()
+    }
+
+    /// Get UTXO set
+    pub fn get_utxo_set_mut(&self) -> parking_lot::RwLockWriteGuard<UTXOSet> {
+        self.utxo_set.write()
+    }
+
+    /// Add a block received from the network
+    pub fn add_network_block(&self, block: Block) -> Result<(), BlockchainError> {
+        let latest = self.get_latest_block();
+        
+        // Validate block
+        if !block.is_valid(Some(&latest)) {
+            return Err(BlockchainError::InvalidBlock);
+        }
+
+        // Check if we already have this block
+        let chain = self.chain.read();
+        if chain.iter().any(|b| b.hash == block.hash) {
+            return Ok(()); // Already have it
+        }
+        drop(chain);
+
+        // Add to chain
+        let mut chain = self.chain.write();
+        chain.push(block.clone());
+        drop(chain);
+
+        // Save to storage
+        self.storage.save_block(&block)?;
+        self.storage.set_chain_height(self.get_latest_block().index + 1)?;
+
+        // Update UTXO set
+        let mut utxo_set = self.utxo_set.write();
+        for tx in &block.transactions {
+            if !tx.is_coinbase() {
+                let _ = utxo_set.spend_utxos(&tx.sender, tx.amount + tx.fee);
+            }
+            utxo_set.add_utxo(tx);
+        }
+        drop(utxo_set);
+
+        // Remove mined transactions from pending
+        let mut pending = self.pending_transactions.write();
+        pending.retain(|tx| !block.transactions.contains(tx));
+
+        Ok(())
+    }
+
+    /// Check if a block exists in the chain
+    pub fn has_block(&self, hash: &str) -> bool {
+        let chain = self.chain.read();
+        chain.iter().any(|b| b.hash == hash)
+    }
+
+    /// Get block by height
+    pub fn get_block_by_height(&self, height: u64) -> Option<Block> {
+        let chain = self.chain.read();
+        chain.get(height as usize).cloned()
+    }
+
+    /// Get current chain height
+    pub fn get_height(&self) -> u64 {
+        self.chain.read().len() as u64
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

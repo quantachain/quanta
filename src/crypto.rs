@@ -1,10 +1,11 @@
 use pqcrypto_falcon::falcon512::*;
 use pqcrypto_traits::sign::{PublicKey, SecretKey, SignedMessage};
 use sha3::{Digest, Sha3_256};
+use serde::{Serialize, Deserialize};
 
 /// Falcon-512 wrapper for quantum-resistant signatures
 /// Public key: ~897 bytes, Private key: ~1281 bytes, Signature: ~666 bytes
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct FalconKeypair {
     pub public_key: Vec<u8>,
     pub secret_key: Vec<u8>,
