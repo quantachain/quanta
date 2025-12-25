@@ -1,0 +1,36 @@
+# Rust build artifacts
+/target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# QUANTA blockchain data
+quanta_data/
+quanta_demo/
+*_blockchain/
+*.db
+*.sled/
+
+# Wallet files (NEVER COMMIT PRIVATE KEYS!)
+*.qua
+*.json
+!package.json
+!Cargo.json
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Environment
+.env
+.env.local

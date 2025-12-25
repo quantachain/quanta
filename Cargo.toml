@@ -1,0 +1,55 @@
+[package]
+name = "quanta"
+version = "1.0.0"
+edition = "2021"
+description = "QUANTA - Quantum-resistant blockchain with Falcon signatures"
+
+[dependencies]
+# Post-Quantum Cryptography - Falcon signatures
+pqcrypto-falcon = "0.3"
+pqcrypto-traits = "0.3"
+
+# SHA3 hashing (quantum-resistant)
+sha3 = "0.10"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Database persistence
+sled = "0.34"
+
+# Post-Quantum Encryption for wallets (Kyber KEM)
+pqcrypto-kyber = "0.8"
+chacha20poly1305 = "0.10"
+argon2 = "0.5"
+
+# Networking
+tokio = { version = "1.35", features = ["full"] }
+axum = "0.7"
+tower = "0.4"
+
+# Thread safety
+parking_lot = "0.12"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+hex = "0.4"
+chrono = "0.4"
+rand = "0.8"
+thiserror = "1.0"
+
+# CLI
+clap = { version = "4.4", features = ["derive"] }
+rpassword = "7.3"
+
+# For tests
+[dev-dependencies]
+tempfile = "3.8"
+
+[profile.release]
+opt-level = 3
+lto = true
