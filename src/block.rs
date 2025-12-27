@@ -1,6 +1,7 @@
 use serde::{Serialize, Deserialize};
 use crate::transaction::Transaction;
 use crate::crypto::double_sha3;
+use crate::merkle::MerkleTree;
 use chrono::Utc;
 
 /// Block structure
@@ -13,6 +14,7 @@ pub struct Block {
     pub nonce: u64,
     pub hash: String,
     pub difficulty: u32,
+    pub merkle_root: String,
 }
 
 impl Block {
@@ -24,6 +26,11 @@ impl Block {
         difficulty: u32,
     ) -> Self {
         let timestamp = Utc::now().timestamp();
+        
+        // Calculate Merkle root
+        let merkle_tree = MerkleTree::from_transactions(&transactions);
+        let merkle_root = merkle_tree.root_hash().unwrap_or_else(|| "0".repeat(64));
+        
         let mut block = Self {
             index,
             timestamp,
@@ -32,6 +39,7 @@ impl Block {
             nonce: 0,
             hash: String::new(),
             difficulty,
+            merkle_root,
         };
         block.hash = block.calculate_hash();
         block
@@ -47,6 +55,7 @@ impl Block {
             nonce: 0,
             hash: String::new(),
             difficulty: 4,
+            merkle_root: "0".repeat(64),
         };
         genesis.hash = genesis.calculate_hash();
         genesis
@@ -62,13 +71,14 @@ impl Block {
             .join(",");
 
         let data = format!(
-            "{}:{}:{}:{}:{}:{}",
+            "{}:{}:{}:{}:{}:{}:{}",
             self.index,
             self.timestamp,
             transactions_str,
             self.previous_hash,
             self.nonce,
-            self.difficulty
+            self.difficulty,
+            self.merkle_root
         );
 
         double_sha3(data.as_bytes())

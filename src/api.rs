@@ -466,6 +466,7 @@ pub async fn start_server(
     tracing::info!("   GET  /api/metrics - Get node metrics");
     tracing::info!("   GET  /api/block/:height - Get specific block");
     tracing::info!("   GET  /api/mempool - Get pending transactions");
+    tracing::info!("   POST /api/merkle/proof - Get Merkle proof for transaction");
     
     let listener = tokio::net::TcpListener::bind(&addr)
         .await

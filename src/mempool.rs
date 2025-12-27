@@ -9,8 +9,8 @@ use tokio::sync::RwLock;
 pub struct Mempool {
     // Transactions indexed by hash
     transactions: HashMap<String, Transaction>,
-    // Transactions sorted by timestamp (simple priority)
-    by_timestamp: BTreeMap<i64, Vec<String>>,
+    // Transactions sorted by fee (descending) for priority
+    by_fee: BTreeMap<String, Vec<String>>, // fee_as_string -> [tx_hashes]
     // Max size limit
     max_size: usize,
 }
@@ -20,7 +20,7 @@ impl Mempool {
     pub fn new(max_size: usize) -> Self {
         Self {
             transactions: HashMap::new(),
-            by_timestamp: BTreeMap::new(),
+            by_fee: BTreeMap::new(),
             max_size,
         }
     }
@@ -28,7 +28,8 @@ impl Mempool {
     /// Add a transaction to the mempool
     pub fn add(&mut self, tx: Transaction) -> Result<(), String> {
         if self.transactions.len() >= self.max_size {
-            return Err("Mempool is full".to_string());
+            // Evict lowest fee transaction
+            self.evict_lowest_fee();
         }
 
         let tx_hash = self.calculate_tx_hash(&tx);
@@ -38,40 +39,37 @@ impl Mempool {
             return Err("Transaction already in mempool".to_string());
         }
 
-        // Add to timestamp index
-        let timestamp = chrono::Utc::now().timestamp();
-        self.by_timestamp
-            .entry(timestamp)
+        // Add to fee index (using negative fee for descending order)
+        let fee_key = format!("{:020}", (tx.fee * 1000000.0) as i64); // Convert to microunits
+        self.by_fee
+            .entry(fee_key)
             .or_insert_with(Vec::new)
             .push(tx_hash.clone());
 
         // Add to main storage
         self.transactions.insert(tx_hash, tx);
-
         Ok(())
     }
-
-    /// Remove a transaction from mempool
-    pub fn remove(&mut self, tx_hash: &str) {
-        if let Some(tx) = self.transactions.remove(tx_hash) {
-            // Remove from timestamp index
-            for (_, hashes) in self.by_timestamp.iter_mut() {
-                hashes.retain(|h| h != tx_hash);
+    
+    /// Evict lowest fee transaction when mempool is full
+    fn evict_lowest_fee(&mut self) {
+        if let Some((_, tx_hashes)) = self.by_fee.iter_mut().next() {
+            if let Some(hash) = tx_hashes.pop() {
+                self.transactions.remove(&hash);
+                tracing::debug!("Evicted low-fee transaction: {}", hash);
             }
-            // Clean up empty timestamp entries
-            self.by_timestamp.retain(|_, v| !v.is_empty());
         }
     }
-
-    /// Get best transactions for mining (ordered by timestamp, oldest first)
-    pub fn get_best_transactions(&self, max_count: usize) -> Vec<Transaction> {
+    
+    /// Get transactions ordered by fee (highest first)
+    pub fn get_by_fee(&self, limit: usize) -> Vec<Transaction> {
         let mut result = Vec::new();
         
-        for (_, hashes) in self.by_timestamp.iter() {
+        for (_, hashes) in self.by_fee.iter().rev() {
             for hash in hashes {
                 if let Some(tx) = self.transactions.get(hash) {
                     result.push(tx.clone());
-                    if result.len() >= max_count {
+                    if result.len() >= limit {
                         return result;
                     }
                 }
@@ -79,6 +77,23 @@ impl Mempool {
         }
         
         result
+    }
+
+    /// Remove a transaction from mempool
+    pub fn remove(&mut self, tx_hash: &str) {
+        if let Some(_tx) = self.transactions.remove(tx_hash) {
+            // Remove from fee index
+            for (_, hashes) in self.by_fee.iter_mut() {
+                hashes.retain(|h| h != tx_hash);
+            }
+            // Clean up empty fee entries
+            self.by_fee.retain(|_, v| !v.is_empty());
+        }
+    }
+
+    /// Get best transactions for mining (ordered by fee, highest first)
+    pub fn get_best_transactions(&self, max_count: usize) -> Vec<Transaction> {
+        self.get_by_fee(max_count)
     }
 
     /// Get all transactions
@@ -107,7 +122,7 @@ impl Mempool {
     /// Clear all transactions
     pub fn clear(&mut self) {
         self.transactions.clear();
-        self.by_timestamp.clear();
+        self.by_fee.clear();
     }
 
     /// Calculate transaction hash (simple implementation)
@@ -218,13 +233,14 @@ mod tests {
     fn test_mempool_operations() {
         let mut mempool = Mempool::new(100);
         
-        let keypair = FalconKeypair::generate();
         let tx = Transaction {
             sender: "alice".to_string(),
             recipient: "bob".to_string(),
             amount: 10.0,
+            timestamp: 123456789,
             signature: vec![],
-            public_key: keypair.public_key,
+            public_key: vec![],
+            fee: 0.001,
         };
         
         // Add transaction
@@ -235,7 +251,7 @@ mod tests {
         assert!(mempool.add(tx.clone()).is_err());
         
         // Get transactions
-        let txs = mempool.get_best_transactions(10);
+        let txs = mempool.get_by_fee(10);
         assert_eq!(txs.len(), 1);
         
         // Remove transaction

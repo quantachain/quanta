@@ -1,6 +1,6 @@
-use sled::{Db, IVec};
+use sled::Db;
 use crate::block::Block;
-use crate::transaction::{Transaction, UTXOSet};
+use crate::transaction::UTXOSet;
 use std::path::Path;
 use thiserror::Error;
 

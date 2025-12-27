@@ -11,6 +11,11 @@ Quantum-resistant blockchain using Falcon-512 and Kyber-1024.
 - REST API
 - Persistent storage
 - Encrypted wallets
+- **Merkle trees for SPV support**
+- **HD wallets (BIP39 compatible)**
+- **Prometheus metrics export**
+- **TOML configuration files**
+- **Comprehensive test suite**
 - **Production-ready security features**
 
 ## Security Features
@@ -39,6 +44,26 @@ Quantum-resistant blockchain using Falcon-512 and Kyber-1024.
 
 ```bash
 cargo build --release
+cargo test  # Run test suite
+```
+
+## Configuration
+
+Create a `quanta.toml` file for node configuration:
+
+```toml
+[node]
+api_port = 3000
+network_port = 8333
+db_path = "./quanta_data"
+
+[security]
+max_mempool_size = 5000
+min_transaction_fee = 0.0001
+
+[metrics]
+enabled = true
+port = 9090
 ```
 
 ## Quick Start
@@ -75,11 +100,41 @@ curl -X POST http://localhost:3000/api/mine -H "Content-Type: application/json" 
 ## CLI
 
 ```bash
-quanta start [OPTIONS]
-quanta new-wallet --file FILE
-quanta mine --wallet FILE
-quanta send --wallet FILE --to ADDRESS --amount AMOUNT
-quanta stats
+quanta start [OPTIONS]               # Start node
+quanta new-wallet --file FILE        # Create quantum wallet
+quanta new-hd-wallet --file FILE     # Create HD wallet (24-word mnemonic)
+quanta mine --wallet FILE            # Mine blocks
+quanta send --wallet FILE --to ADDR --amount AMOUNT
+quanta stats                         # Show statistics
+quanta validate                      # Validate blockchain
+```
+
+## Advanced Features
+
+### Merkle Trees
+- Efficient transaction verification
+- SPV (Simplified Payment Verification) support
+- Light client ready
+- Proof generation and verification
+
+### HD Wallets
+- BIP39 mnemonic (24 words)
+- Multiple accounts from one seed
+- Deterministic key derivation
+- Easy backup and restore
+
+### Monitoring
+- Prometheus metrics export
+- Real-time blockchain metrics
+- Network statistics
+- Transaction throughput tracking
+- Compatible with Grafana dashboards
+
+### Testing
+```bash
+cargo test                    # Run all tests
+cargo test blockchain_tests   # Blockchain tests only
+cargo test merkle_tests       # Merkle tree tests
 ```
 
 ## Security

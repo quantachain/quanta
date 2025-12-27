@@ -7,12 +7,21 @@ mod storage;
 mod api;
 mod p2p;
 mod mempool;
+mod config;
+mod merkle;
+mod prometheus_metrics;
+mod hd_wallet;
+mod multisig;
+
+#[cfg(test)]
+mod tests;
 
 use blockchain::Blockchain;
 use quantum_wallet::QuantumWallet;
 use storage::BlockchainStorage;
 use p2p::{Network, NetworkConfig};
 use mempool::MetricsCollector;
+use config::QuantaConfig;
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
@@ -31,17 +40,21 @@ struct Cli {
 enum Commands {
     /// Start the blockchain node with REST API and P2P networking
     Start {
-        /// API server port
-        #[arg(short, long, default_value = "3000")]
-        port: u16,
+        /// Configuration file path
+        #[arg(short = 'c', long)]
+        config: Option<String>,
         
-        /// P2P network port
-        #[arg(short = 'n', long, default_value = "8333")]
-        network_port: u16,
+        /// API server port (overrides config)
+        #[arg(short, long)]
+        port: Option<u16>,
         
-        /// Database path
-        #[arg(short, long, default_value = "./quanta_data")]
-        db: String,
+        /// P2P network port (overrides config)
+        #[arg(short = 'n', long)]
+        network_port: Option<u16>,
+        
+        /// Database path (overrides config)
+        #[arg(short, long)]
+        db: Option<String>,
         
         /// Bootstrap peer addresses (comma-separated host:port)
         #[arg(short = 'b', long)]
@@ -56,6 +69,24 @@ enum Commands {
     NewWallet {
         /// Wallet file name
         #[arg(short, long, default_value = "wallet.qua")]
+        file: String,
+    },
+    
+    /// Create a new HD wallet with 24-word mnemonic
+    NewHdWallet {
+        /// Wallet file name
+        #[arg(short, long, default_value = "hd_wallet.json")]
+        file: String,
+        
+        /// Number of accounts to generate
+        #[arg(short, long, default_value = "3")]
+        accounts: u32,
+    },
+    
+    /// Show HD wallet information
+    HdWallet {
+        /// Wallet file name
+        #[arg(short, long, default_value = "hd_wallet.json")]
         file: String,
     },
     
@@ -131,33 +162,52 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Start { port, network_port, db, bootstrap, no_network } => {
-            let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
+        Commands::Start { config, port, network_port, db, bootstrap, no_network } => {
+            // Load configuration
+            let cfg = QuantaConfig::load_with_overrides(
+                config,
+                port,
+                network_port,
+                db,
+                bootstrap.clone(),
+                no_network
+            ).expect("Failed to load configuration");
+            
+            tracing::info!("Starting QUANTA node with configuration:");
+            tracing::info!("  API Port: {}", cfg.node.api_port);
+            tracing::info!("  Network Port: {}", cfg.node.network_port);
+            tracing::info!("  Database: {}", cfg.node.db_path);
+            
+            let storage = Arc::new(BlockchainStorage::new(&cfg.node.db_path).expect("Failed to open database"));
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
             
             let metrics = Arc::new(MetricsCollector::new());
             
-            let network = if !no_network {
+            // Start Prometheus metrics server if enabled
+            if cfg.metrics.enabled {
+                let metrics_port = cfg.metrics.port;
+                tokio::spawn(async move {
+                    prometheus_metrics::start_metrics_server(metrics_port).await;
+                });
+            }
+            
+            let network = if !cfg.node.no_network {
                 // Parse bootstrap nodes
-                let bootstrap_nodes = if let Some(bootstrap_str) = bootstrap {
-                    bootstrap_str
-                        .split(',')
-                        .filter_map(|s| s.trim().parse().ok())
-                        .collect()
-                } else {
-                    Vec::new()
-                };
+                let bootstrap_nodes: Vec<std::net::SocketAddr> = cfg.network.bootstrap_nodes
+                    .iter()
+                    .filter_map(|s| s.parse().ok())
+                    .collect();
                 
-                let listen_addr = format!("0.0.0.0:{}", network_port).parse().unwrap();
+                let listen_addr = format!("0.0.0.0:{}", cfg.node.network_port).parse().unwrap();
                 
-                let config = NetworkConfig {
+                let network_config = NetworkConfig {
                     listen_addr,
-                    max_peers: 125,
+                    max_peers: cfg.network.max_peers,
                     node_id: uuid::Uuid::new_v4().to_string(),
                     bootstrap_nodes,
                 };
                 
-                let network = Arc::new(Network::new(config, Arc::clone(&blockchain)));
+                let network = Arc::new(Network::new(network_config, Arc::clone(&blockchain)));
                 
                 // Start P2P network
                 let network_clone = Arc::clone(&network);
@@ -176,7 +226,7 @@ async fn main() {
                     }
                 });  
                 
-                println!("P2P Network started on port {}", network_port);
+                println!("P2P Network started on port {}", cfg.node.network_port);
                 Some(network)
             } else {
                 println!("Running in single-node mode (P2P disabled)");
@@ -223,6 +273,7 @@ async fn main() {
                 let blockchain_clone = Arc::clone(&blockchain);
                 let metrics_clone = Some(metrics.clone());
                 let network_clone = network.clone();
+                let port = cfg.node.api_port;
                 tokio::spawn(async move {
                     api::start_server(blockchain_clone, port, metrics_clone, network_clone).await;
                 })
@@ -263,6 +314,48 @@ async fn main() {
             
             wallet.save_quantum_safe(&file, &password).expect("Failed to save wallet");
             println!("Wallet created and encrypted successfully!");
+        }
+
+        Commands::NewHdWallet { file, accounts } => {
+            use hd_wallet::HDWallet;
+            
+            let mut wallet = HDWallet::new();
+            
+            // Generate requested number of accounts
+            for i in 0..accounts {
+                wallet.generate_account(Some(format!("Account {}", i)));
+            }
+            
+            wallet.display_info();
+            
+            println!("\nEnter password to encrypt wallet:");
+            let password = rpassword::read_password().expect("Failed to read password");
+            
+            println!("Confirm password:");
+            let password_confirm = rpassword::read_password().expect("Failed to read password");
+            
+            if password != password_confirm {
+                eprintln!("Passwords don't match!");
+                return;
+            }
+            
+            // Save encrypted wallet
+            let encrypted = wallet.export_encrypted(&password).expect("Failed to encrypt wallet");
+            std::fs::write(&file, encrypted).expect("Failed to save wallet");
+            
+            println!("\n✅ HD Wallet created and encrypted successfully!");
+            println!("📁 Saved to: {}", file);
+            println!("\n⚠️  CRITICAL: Write down your 24-word mnemonic phrase!");
+            println!("   This is the ONLY way to recover your wallet.");
+        }
+
+        Commands::HdWallet { file } => {
+            println!("Enter wallet password:");
+            let _password = rpassword::read_password().expect("Failed to read password");
+            
+            // For now, we'll need to implement proper loading
+            println!("HD wallet info display - implementation needed for encrypted load");
+            println!("Wallet file: {}", file);
         }
 
         Commands::Wallet { file } => {

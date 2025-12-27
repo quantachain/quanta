@@ -1,0 +1,57 @@
+# QUANTA Node Configuration
+
+[node]
+# API server port
+api_port = 3000
+
+# P2P network port
+network_port = 8333
+
+# Database path
+db_path = "./quanta_data"
+
+# Disable P2P networking (single node mode)
+no_network = false
+
+[network]
+# Maximum number of peers
+max_peers = 125
+
+# Bootstrap peer addresses (comma-separated host:port)
+bootstrap_nodes = []
+
+[security]
+# Maximum pending transactions in mempool
+max_mempool_size = 5000
+
+# Maximum transactions per block
+max_block_transactions = 2000
+
+# Maximum block size in bytes
+max_block_size_bytes = 1048576
+
+# Minimum transaction fee (anti-spam)
+min_transaction_fee = 0.0001
+
+# Transaction expiry time in seconds (replay protection)
+transaction_expiry_seconds = 86400
+
+[mining]
+# Initial mining reward
+initial_reward = 50.0
+
+# Blocks between reward halvings
+halving_interval = 210
+
+# Target block time in seconds
+target_block_time = 10
+
+# Difficulty adjustment interval (in blocks)
+difficulty_adjustment_interval = 10
+
+[metrics]
+# Enable Prometheus metrics export
+enabled = true
+
+# Metrics export port
+port = 9090

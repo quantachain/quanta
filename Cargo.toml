@@ -34,6 +34,10 @@ futures = "0.3"
 async-trait = "0.1"
 uuid = { version = "1.6", features = ["v4"] }
 
+# WebSocket
+axum-extra = { version = "0.9", features = ["typed-header"] }
+tokio-tungstenite = "0.21"
+
 # Thread safety
 parking_lot = "0.12"
 
@@ -51,9 +55,27 @@ thiserror = "1.0"
 clap = { version = "4.4", features = ["derive"] }
 rpassword = "7.3"
 
+# Configuration
+config = "0.14"
+toml = "0.8"
+
+# Metrics
+prometheus = "0.13"
+lazy_static = "1.4"
+
+# TLS/Security
+tokio-rustls = "0.25"
+rustls = "0.22"
+rustls-pemfile = "2.0"
+
+# HD Wallet (BIP32/39)
+bip39 = "2.0"
+hmac = "0.12"
+
 # For tests
 [dev-dependencies]
 tempfile = "3.8"
+tokio-test = "0.4"
 
 [profile.release]
 opt-level = 3

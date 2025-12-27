@@ -1,7 +1,7 @@
 use crate::block::Block;
 use crate::blockchain::Blockchain;
 use crate::p2p::peer::{Peer, PeerManager};
-use crate::p2p::protocol::{P2PMessage, MessageHandler, PROTOCOL_VERSION};
+use crate::p2p::protocol::{P2PMessage, PROTOCOL_VERSION};
 use crate::transaction::Transaction;
 use std::net::SocketAddr;
 use std::sync::Arc;

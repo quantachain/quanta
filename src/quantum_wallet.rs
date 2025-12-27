@@ -83,11 +83,11 @@ impl QuantumWallet {
         // Derive deterministic seed from password
         let salt = SaltString::generate(&mut OsRng);
         let argon2 = Argon2::default();
-        let password_hash = argon2.hash_password(password.as_bytes(), &salt)
+        let _password_hash = argon2.hash_password(password.as_bytes(), &salt)
             .map_err(|_| WalletError::Encryption)?;
         
         // Generate Kyber-1024 keypair
-        let (kyber_pk, kyber_sk) = keypair();
+        let (kyber_pk, _kyber_sk) = keypair();
         
         // Encapsulate to get shared secret
         let (shared_secret, kyber_ciphertext) = encapsulate(&kyber_pk);
@@ -136,9 +136,9 @@ impl QuantumWallet {
         let quantum_wallet: QuantumSafeWallet = serde_json::from_str(&json)?;
         
         // Reconstruct Kyber objects
-        let kyber_pk = pqcrypto_kyber::kyber1024::PublicKey::from_bytes(&quantum_wallet.kyber_public_key)
+        let _kyber_pk = pqcrypto_kyber::kyber1024::PublicKey::from_bytes(&quantum_wallet.kyber_public_key)
             .map_err(|_| WalletError::Encryption)?;
-        let kyber_ct = pqcrypto_kyber::kyber1024::Ciphertext::from_bytes(&quantum_wallet.kyber_ciphertext)
+        let _kyber_ct = pqcrypto_kyber::kyber1024::Ciphertext::from_bytes(&quantum_wallet.kyber_ciphertext)
             .map_err(|_| WalletError::Encryption)?;
         
         // Derive Kyber secret key from password (same process as encryption)
