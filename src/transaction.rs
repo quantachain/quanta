@@ -2,6 +2,21 @@ use serde::{Serialize, Deserialize};
 use crate::crypto::{verify_signature, sha3_hash};
 use std::collections::HashMap;
 
+/// Transaction types
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub enum TransactionType {
+    /// Regular token transfer
+    Transfer,
+    /// Deploy a smart contract
+    DeployContract { code: Vec<u8> },
+    /// Call a smart contract
+    CallContract { 
+        contract: String,
+        function: String,
+        args: Vec<u8>,
+    },
+}
+
 /// Transaction structure with Falcon signature
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Transaction {
@@ -12,6 +27,7 @@ pub struct Transaction {
     pub signature: Vec<u8>,       // Falcon signature (~666 bytes)
     pub public_key: Vec<u8>,      // Falcon public key (~897 bytes)
     pub fee: f64,                 // Transaction fee (0.001 QUA)
+    pub tx_type: TransactionType, // Transaction type
 }
 
 impl Transaction {
@@ -25,6 +41,52 @@ impl Transaction {
             signature: vec![],
             public_key: vec![],
             fee: 0.001, // Fixed fee
+            tx_type: TransactionType::Transfer,
+        }
+    }
+
+    /// Create a contract deployment transaction
+    pub fn new_deploy_contract(
+        sender: String, 
+        code: Vec<u8>, 
+        timestamp: i64,
+        fee: f64,
+    ) -> Self {
+        Self {
+            sender,
+            recipient: "0x0000000000000000000000000000000000000000".to_string(),
+            amount: 0.0,
+            timestamp,
+            signature: vec![],
+            public_key: vec![],
+            fee,
+            tx_type: TransactionType::DeployContract { code },
+        }
+    }
+
+    /// Create a contract call transaction
+    pub fn new_call_contract(
+        sender: String,
+        contract: String,
+        function: String,
+        args: Vec<u8>,
+        amount: f64,
+        timestamp: i64,
+        fee: f64,
+    ) -> Self {
+        Self {
+            sender,
+            recipient: contract.clone(),
+            amount,
+            timestamp,
+            signature: vec![],
+            public_key: vec![],
+            fee,
+            tx_type: TransactionType::CallContract {
+                contract,
+                function,
+                args,
+            },
         }
     }
 

@@ -34,6 +34,10 @@ futures = "0.3"
 async-trait = "0.1"
 uuid = { version = "1.6", features = ["v4"] }
 
+# WASM runtime for smart contracts
+wasmer = "4.2"
+wasmer-compiler-cranelift = "4.2"
+
 # WebSocket
 axum-extra = { version = "0.9", features = ["typed-header"] }
 tokio-tungstenite = "0.21"
@@ -45,11 +49,13 @@ parking_lot = "0.12"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Error handling
+thiserror = "1.0"
+
 # Utilities
 hex = "0.4"
 chrono = "0.4"
 rand = "0.8"
-thiserror = "1.0"
 
 # CLI
 clap = { version = "4.4", features = ["derive"] }

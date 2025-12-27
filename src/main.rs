@@ -12,6 +12,8 @@ mod merkle;
 mod prometheus_metrics;
 mod hd_wallet;
 mod multisig;
+mod contract;
+mod contract_executor;
 
 #[cfg(test)]
 mod tests;

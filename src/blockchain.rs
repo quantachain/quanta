@@ -72,6 +72,7 @@ impl Blockchain {
                 signature: vec![],
                 public_key: vec![],
                 fee: 0.0,
+                tx_type: crate::transaction::TransactionType::Transfer,
             };
             utxo_set.add_utxo(&genesis_tx);
             
@@ -193,6 +194,7 @@ impl Blockchain {
             signature: vec![],
             public_key: vec![],
             fee: 0.0,
+            tx_type: crate::transaction::TransactionType::Transfer,
         };
 
         let mut all_transactions = vec![coinbase_tx.clone()];
