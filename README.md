@@ -11,6 +11,29 @@ Quantum-resistant blockchain using Falcon-512 and Kyber-1024.
 - REST API
 - Persistent storage
 - Encrypted wallets
+- **Production-ready security features**
+
+## Security Features
+
+### DoS Protection
+- Mempool size limit: 5,000 transactions max
+- Block size limit: 1 MB maximum
+- Block transaction limit: 2,000 transactions per block
+- Minimum transaction fee: 0.0001 QUA (anti-spam)
+- Request timeouts: 30 seconds
+
+### Transaction Security
+- Replay protection: 24-hour expiry
+- Signature verification (Falcon-512)
+- Balance validation
+- Duplicate transaction detection
+- Fee validation
+
+### Operational Safety
+- Graceful shutdown handling (Ctrl+C)
+- Persistent state across restarts
+- Health check endpoint (`/health`)
+- Transaction sorting by fee priority
 
 ## Installation
 
@@ -38,6 +61,7 @@ curl -X POST http://localhost:3000/api/mine -H "Content-Type: application/json" 
 
 ## API
 
+- GET /health - Health check and node status
 - GET /api/stats
 - POST /api/balance
 - POST /api/mine

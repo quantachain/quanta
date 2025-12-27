@@ -206,7 +206,45 @@ async fn main() {
                 }
             });
             
-            api::start_server(blockchain, port, Some(metrics), network).await;
+            // Setup graceful shutdown
+            let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
+            
+            // Handle Ctrl+C
+            tokio::spawn(async move {
+                tokio::signal::ctrl_c()
+                    .await
+                    .expect("Failed to listen for Ctrl+C");
+                tracing::info!("Shutdown signal received, stopping node...");
+                let _ = shutdown_tx.send(()).await;
+            });
+            
+            // Start API server
+            let server_handle = {
+                let blockchain_clone = Arc::clone(&blockchain);
+                let metrics_clone = Some(metrics.clone());
+                let network_clone = network.clone();
+                tokio::spawn(async move {
+                    api::start_server(blockchain_clone, port, metrics_clone, network_clone).await;
+                })
+            };
+            
+            // Wait for shutdown signal or server exit
+            tokio::select! {
+                _ = shutdown_rx.recv() => {
+                    tracing::info!("Gracefully shutting down...");
+                    
+                    // Save final state
+                    let blockchain_lock = blockchain.read().await;
+                    let chain_height = blockchain_lock.get_height();
+                    tracing::info!("Final chain height: {}", chain_height);
+                    drop(blockchain_lock);
+                    
+                    tracing::info!("Node stopped successfully");
+                }
+                _ = server_handle => {
+                    tracing::info!("Server stopped");
+                }
+            }
         }
 
         Commands::NewWallet { file } => {

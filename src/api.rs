@@ -2,7 +2,7 @@ use axum::{
     extract::{State, Json, Path},
     routing::{get, post},
     Router, http::StatusCode,
-    http::{HeaderValue, Method},
+    http::Method,
 };
 use tower_http::cors::{CorsLayer, Any};
 use serde::{Deserialize, Serialize};
@@ -217,7 +217,7 @@ async fn start_continuous_mining(
     
     tokio::spawn(async move {
         while mining_active.load(Ordering::Relaxed) {
-            let mut bc = blockchain.write().await;
+            let bc = blockchain.write().await;
             match bc.mine_pending_transactions(miner_address.clone()) {
                 Ok(_) => {
                     let block = bc.get_chain().last().cloned();
@@ -369,6 +369,44 @@ async fn get_mempool(
     })
 }
 
+/// Health check endpoint
+#[derive(Serialize)]
+pub struct HealthResponse {
+    pub status: String,
+    pub chain_height: u64,
+    pub mempool_size: usize,
+    pub connected_peers: usize,
+    pub uptime_seconds: u64,
+}
+
+static START_TIME: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+async fn health_check(
+    State(state): State<Arc<ApiState>>,
+) -> Json<HealthResponse> {
+    let blockchain = state.blockchain.read().await;
+    let stats = blockchain.get_stats();
+    
+    let peers_count = if let Some(ref network) = state.network {
+        network.get_peer_count().await
+    } else {
+        0
+    };
+    
+    let uptime = START_TIME
+        .get_or_init(|| std::time::Instant::now())
+        .elapsed()
+        .as_secs();
+    
+    Json(HealthResponse {
+        status: "healthy".to_string(),
+        chain_height: stats.chain_length as u64,
+        mempool_size: stats.pending_transactions,
+        connected_peers: peers_count,
+        uptime_seconds: uptime,
+    })
+}
+
 /// Create the API router
 pub fn create_router(
     blockchain: Arc<RwLock<Blockchain>>,
@@ -389,6 +427,7 @@ pub fn create_router(
         .allow_headers(Any);
 
     Router::new()
+        .route("/health", get(health_check))
         .route("/api/stats", get(get_stats))
         .route("/api/balance", post(get_balance))
         .route("/api/transaction", post(create_transaction))
@@ -417,6 +456,7 @@ pub async fn start_server(
     
     tracing::info!("QUANTA API server starting on {}", addr);
     tracing::info!("Endpoints:");
+    tracing::info!("   GET  /health - Health check");
     tracing::info!("   GET  /api/stats - Get blockchain statistics");
     tracing::info!("   POST /api/balance - Get address balance");
     tracing::info!("   POST /api/transaction - Create transaction");

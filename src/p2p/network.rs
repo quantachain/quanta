@@ -481,6 +481,11 @@ impl Network {
     pub async fn peer_count(&self) -> usize {
         self.peer_manager.peer_count().await
     }
+    
+    /// Get peer count (alias for health check)
+    pub async fn get_peer_count(&self) -> usize {
+        self.peer_count().await
+    }
 
     /// Get peer information
     pub async fn get_peers_info(&self) -> Vec<crate::p2p::peer::PeerInfo> {
