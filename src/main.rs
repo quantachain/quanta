@@ -146,6 +146,63 @@ enum Commands {
         #[arg(short, long, default_value = "./quanta_demo")]
         db: String,
     },
+    
+    /// Deploy a smart contract (WASM)
+    DeployContract {
+        /// Path to WASM file
+        #[arg(short, long)]
+        wasm: String,
+        
+        /// Deployer wallet file
+        #[arg(short = 'w', long, default_value = "wallet.qua")]
+        wallet: String,
+        
+        /// Transaction fee
+        #[arg(short, long, default_value_t = 0.1)]
+        fee: f64,
+        
+        /// Database path
+        #[arg(short, long, default_value = "./quanta_data")]
+        db: String,
+    },
+    
+    /// Call a smart contract function
+    CallContract {
+        /// Contract address
+        #[arg(short, long)]
+        contract: String,
+        
+        /// Function name
+        #[arg(short, long)]
+        function: String,
+        
+        /// Function arguments (JSON format)
+        #[arg(short, long, default_value = "{}")]
+        args: String,
+        
+        /// Amount to send (QUA)
+        #[arg(short = 'm', long, default_value_t = 0.0)]
+        amount: f64,
+        
+        /// Caller wallet file
+        #[arg(short = 'w', long, default_value = "wallet.qua")]
+        wallet: String,
+        
+        /// Transaction fee
+        #[arg(short, long, default_value_t = 0.01)]
+        fee: f64,
+        
+        /// Database path
+        #[arg(short, long, default_value = "./quanta_data")]
+        db: String,
+    },
+    
+    /// List deployed contracts
+    ListContracts {
+        /// Database path
+        #[arg(short, long, default_value = "./quanta_data")]
+        db: String,
+    },
 }
 
 #[tokio::main]
@@ -484,6 +541,18 @@ async fn main() {
             println!("Running Production Demo...\n");
             run_demo(&db).await;
         }
+        
+        Commands::DeployContract { wasm, wallet, fee, db } => {
+            handle_deploy_contract(wasm, wallet, fee, db).await;
+        }
+        
+        Commands::CallContract { contract, function, args, amount, wallet, fee, db } => {
+            handle_call_contract(contract, function, args, amount, wallet, fee, db).await;
+        }
+        
+        Commands::ListContracts { db } => {
+            handle_list_contracts(db).await;
+        }
     }
 }
 
@@ -587,4 +656,143 @@ async fn run_demo(db_path: &str) {
     println!("⚠️  WARNING: Demo password is PUBLIC - delete wallets after testing!");
     println!("\n📡 To start API server:");
     println!("   cargo run --release -- start --db {} --port 3000", db_path);
+}
+
+async fn handle_deploy_contract(wasm: String, wallet: String, fee: f64, db: String) {
+    use std::fs;
+    use std::sync::Arc;
+    use crate::storage::BlockchainStorage;
+    use crate::blockchain::Blockchain;
+    use crate::transaction::Transaction;
+    use chrono::Utc;
+    
+    println!("🚀 Deploying smart contract...");
+    
+    // Read WASM file
+    let code = match fs::read(&wasm) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("❌ Failed to read WASM file: {}", e);
+            return;
+        }
+    };
+    
+    println!("📦 WASM size: {} bytes", code.len());
+    
+    // Load wallet
+    println!("🔓 Enter wallet password:");
+    let password = rpassword::read_password().expect("Failed to read password");
+    
+    let wallet = match quantum_wallet::QuantumWallet::load_quantum_safe(&wallet, &password) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("❌ Failed to load wallet: {}", e);
+            return;
+        }
+    };
+    
+    // Load blockchain
+    let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
+    let blockchain = Blockchain::new(storage).expect("Failed to load blockchain");
+    
+    // Create deploy transaction
+    let mut tx = Transaction::new_deploy_contract(
+        wallet.address.clone(),
+        code,
+        Utc::now().timestamp(),
+        fee,
+    );
+    
+    // Sign transaction
+    let signing_data = tx.get_signing_data();
+    tx.signature = wallet.keypair.sign(&signing_data);
+    tx.public_key = wallet.keypair.public_key.clone();
+    
+    // Add to blockchain
+    match blockchain.add_transaction(tx) {
+        Ok(_) => {
+            println!("✅ Contract deployment transaction added to mempool");
+            println!("⛏️  Transaction will be included in the next mined block");
+            println!("💡 Contract address will be generated upon mining");
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to add transaction: {:?}", e);
+        }
+    }
+}
+
+async fn handle_call_contract(
+    contract: String,
+    function: String,
+    args: String,
+    amount: f64,
+    wallet: String,
+    fee: f64,
+    db: String,
+) {
+    use std::sync::Arc;
+    use crate::storage::BlockchainStorage;
+    use crate::blockchain::Blockchain;
+    use crate::transaction::Transaction;
+    use chrono::Utc;
+    
+    println!("📞 Calling smart contract...");
+    println!("   Contract: {}", contract);
+    println!("   Function: {}", function);
+    println!("   Args: {}", args);
+    
+    // Parse args (for now, just convert to bytes)
+    let args_bytes = args.as_bytes().to_vec();
+    
+    // Load wallet
+    println!("🔓 Enter wallet password:");
+    let password = rpassword::read_password().expect("Failed to read password");
+    
+    let wallet = match quantum_wallet::QuantumWallet::load_quantum_safe(&wallet, &password) {
+        Ok(w) => w,
+        Err(e) => {
+            eprintln!("❌ Failed to load wallet: {}", e);
+            return;
+        }
+    };
+    
+    // Load blockchain
+    let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
+    let blockchain = Blockchain::new(storage).expect("Failed to load blockchain");
+    
+    // Create call transaction
+    let mut tx = Transaction::new_call_contract(
+        wallet.address.clone(),
+        contract.clone(),
+        function.clone(),
+        args_bytes,
+        amount,
+        Utc::now().timestamp(),
+        fee,
+    );
+    
+    // Sign transaction
+    let signing_data = tx.get_signing_data();
+    tx.signature = wallet.keypair.sign(&signing_data);
+    tx.public_key = wallet.keypair.public_key.clone();
+    
+    // Add to blockchain
+    match blockchain.add_transaction(tx) {
+        Ok(_) => {
+            println!("✅ Contract call transaction added to mempool");
+            println!("⛏️  Will be executed when block is mined");
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to add transaction: {:?}", e);
+        }
+    }
+}
+
+async fn handle_list_contracts(db: String) {
+    println!("📜 Listing deployed contracts...\n");
+    
+    // TODO: Implement contract listing from storage
+    // For now, show placeholder
+    println!("Contract listing not yet implemented");
+    println!("Contracts will be stored in: {}/contracts", db);
 }
