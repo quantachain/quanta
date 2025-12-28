@@ -1,9 +1,12 @@
 use crate::block::Block;
-use crate::transaction::{Transaction, UTXOSet};
+use crate::transaction::{Transaction, UTXOSet, TransactionType};
 use crate::storage::{BlockchainStorage, StorageError};
+use crate::contract_executor::{ContractExecutor, MAX_GAS_PER_TX};
+use crate::contract::{Account, ContractInstruction};
 use serde::{Serialize, Deserialize};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -26,6 +29,10 @@ pub enum BlockchainError {
     TransactionExpired,
     #[error("Block too large: {size} bytes")]
     BlockTooLarge { size: usize },
+    #[error("Contract error: {0}")]
+    ContractError(String),
+    #[error("Contract not found: {0}")]
+    ContractNotFound(String),
 }
 
 const TARGET_BLOCK_TIME: u64 = 10; // 10 seconds
@@ -47,6 +54,9 @@ pub struct Blockchain {
     utxo_set: Arc<RwLock<UTXOSet>>,
     difficulty: Arc<RwLock<u32>>,
     storage: Arc<BlockchainStorage>,
+    contract_executor: Arc<RwLock<ContractExecutor>>,
+    // In-memory contract accounts (address -> Account)
+    contract_accounts: Arc<RwLock<HashMap<String, Account>>>,
 }
 
 impl Blockchain {
@@ -92,7 +102,9 @@ impl Blockchain {
             pending_transactions: Arc::new(RwLock::new(Vec::new())),
             utxo_set: Arc::new(RwLock::new(utxo_set)),
             difficulty: Arc::new(RwLock::new(difficulty)),
-            storage,
+            storage: storage.clone(),
+            contract_executor: Arc::new(RwLock::new(ContractExecutor::new())),
+            contract_accounts: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -200,19 +212,52 @@ impl Blockchain {
         let mut all_transactions = vec![coinbase_tx.clone()];
         all_transactions.extend(transactions);
 
-        // Update UTXO set
-        let mut utxo_set = self.utxo_set.write();
+        // Process transactions (including contract transactions)
         for tx in &all_transactions {
             if !tx.is_coinbase() {
-                let total = tx.amount + tx.fee;
-                if !utxo_set.spend_utxos(&tx.sender, total) {
-                    tracing::warn!("Failed to spend UTXOs for {}", tx.sender);
-                    continue;
+                // Process based on transaction type
+                match &tx.tx_type {
+                    TransactionType::Transfer => {
+                        // Regular transfer - handle with UTXO
+                        let mut utxo_set = self.utxo_set.write();
+                        let total = tx.amount + tx.fee;
+                        if !utxo_set.spend_utxos(&tx.sender, total) {
+                            tracing::warn!("Failed to spend UTXOs for {}", tx.sender);
+                            continue;
+                        }
+                        utxo_set.add_utxo(tx);
+                        drop(utxo_set);
+                    }
+                    TransactionType::DeployContract { code } => {
+                        // Deploy contract
+                        if let Err(e) = self.process_deploy_contract(tx, code) {
+                            tracing::error!("Failed to deploy contract: {}", e);
+                            continue;
+                        }
+                        // Deduct fee from deployer
+                        let mut utxo_set = self.utxo_set.write();
+                        let _ = utxo_set.spend_utxos(&tx.sender, tx.fee);
+                        drop(utxo_set);
+                    }
+                    TransactionType::CallContract { contract, function, args } => {
+                        // Execute contract
+                        if let Err(e) = self.process_call_contract(tx, contract, function, args) {
+                            tracing::error!("Failed to call contract: {}", e);
+                            continue;
+                        }
+                        // Deduct fee from caller
+                        let mut utxo_set = self.utxo_set.write();
+                        let _ = utxo_set.spend_utxos(&tx.sender, tx.fee);
+                        drop(utxo_set);
+                    }
                 }
+            } else {
+                // Coinbase transaction
+                let mut utxo_set = self.utxo_set.write();
+                utxo_set.add_utxo(tx);
+                drop(utxo_set);
             }
-            utxo_set.add_utxo(tx);
         }
-        drop(utxo_set);
 
         // Create and mine new block
         let previous_hash = self.get_latest_block().hash.clone();
@@ -413,6 +458,139 @@ impl Blockchain {
     /// Get current chain height
     pub fn get_height(&self) -> u64 {
         self.chain.read().len() as u64
+    }
+    
+    /// Deploy a smart contract
+    pub fn deploy_contract(&self, deployer: &str, code: Vec<u8>) -> Result<String, BlockchainError> {
+        // Generate contract address from deployer + code hash
+        use sha3::{Sha3_256, Digest};
+        let mut hasher = Sha3_256::new();
+        hasher.update(deployer.as_bytes());
+        hasher.update(&code);
+        let hash = hasher.finalize();
+        let address = hex::encode(&hash[..20]); // Use first 20 bytes
+        
+        // Check if contract already exists
+        if self.storage.load_contract(&address)?.is_some() {
+            return Err(BlockchainError::ContractError("Contract already exists".to_string()));
+        }
+        
+        // Save contract code to storage
+        self.storage.save_contract(&address, &code)?;
+        
+        // Create program account
+        let program_account = Account::new_program(
+            address.clone(),
+            code.clone(),
+            deployer.to_string(),
+        );
+        
+        // Store in memory
+        self.contract_accounts.write().insert(address.clone(), program_account);
+        
+        tracing::info!("Contract deployed at {}", address);
+        Ok(address)
+    }
+    
+    /// Call a smart contract function
+    pub fn call_contract(
+        &self,
+        caller: &str,
+        contract_address: &str,
+        function: &str,
+        args: Vec<u8>,
+    ) -> Result<Vec<u8>, BlockchainError> {
+        // Load contract code
+        let code = self.storage.load_contract(contract_address)?
+            .ok_or_else(|| BlockchainError::ContractNotFound(contract_address.to_string()))?;
+        
+        // Get or create caller account
+        let mut accounts = self.contract_accounts.write();
+        let caller_copy = accounts.entry(caller.to_string()).or_insert_with(|| {
+            let balance = (self.utxo_set.read().get_balance(caller) * 1_000_000.0) as u64; // Convert to smallest unit
+            Account::new_user(caller.to_string(), vec![], balance)
+        }).clone();
+        
+        // Get contract account
+        let contract_account = accounts.get(contract_address)
+            .ok_or_else(|| BlockchainError::ContractNotFound(contract_address.to_string()))?
+            .clone();
+        
+        drop(accounts);
+        
+        // Prepare instruction
+        let mut instruction_data = function.as_bytes().to_vec();
+        instruction_data.push(0); // null terminator
+        instruction_data.extend_from_slice(&args);
+        
+        let instruction = ContractInstruction {
+            program_id: contract_address.to_string(),
+            accounts: vec![], // TODO: proper account metadata
+            data: instruction_data,
+        };
+        
+        // Generate quantum entropy from block height
+        use sha3::{Sha3_256, Digest};
+        let mut hasher = Sha3_256::new();
+        hasher.update(self.get_height().to_le_bytes());
+        let entropy_hash = hasher.finalize();
+        let mut quantum_entropy = [0u8; 32];
+        quantum_entropy.copy_from_slice(&entropy_hash[..]);
+        
+        // Execute contract
+        let exec_accounts = vec![caller_copy, contract_account];
+        let result = self.contract_executor.write().execute(
+            &code,
+            &instruction,
+            exec_accounts,
+            self.get_height(),
+            quantum_entropy,
+            MAX_GAS_PER_TX,
+        ).map_err(|e| BlockchainError::ContractError(e.to_string()))?;
+        
+        tracing::info!("Contract {} called by {}: success={}, gas_used={}", 
+            contract_address, caller, result.success, result.gas_used);
+        Ok(result.return_data)
+    }
+    
+    /// Process a contract deployment transaction
+    fn process_deploy_contract(&self, tx: &Transaction, code: &[u8]) -> Result<(), BlockchainError> {
+        // Deployer must have sufficient balance for fees
+        let available = self.utxo_set.read().get_balance(&tx.sender);
+        if available < tx.fee {
+            return Err(BlockchainError::InsufficientBalance {
+                required: tx.fee,
+                available,
+            });
+        }
+        
+        // Deploy the contract
+        let _address = self.deploy_contract(&tx.sender, code.to_vec())?;
+        
+        Ok(())
+    }
+    
+    /// Process a contract call transaction
+    fn process_call_contract(
+        &self,
+        tx: &Transaction,
+        contract: &str,
+        function: &str,
+        args: &[u8],
+    ) -> Result<(), BlockchainError> {
+        // Caller must have sufficient balance for fees
+        let available = self.utxo_set.read().get_balance(&tx.sender);
+        if available < tx.fee {
+            return Err(BlockchainError::InsufficientBalance {
+                required: tx.fee,
+                available,
+            });
+        }
+        
+        // Execute the contract
+        let _result = self.call_contract(&tx.sender, contract, function, args.to_vec())?;
+        
+        Ok(())
     }
 }
 

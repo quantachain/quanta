@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use wasmer::{
     imports, Function, FunctionEnv, FunctionEnvMut, Instance, Module, Store, Value,
 };
-use wasmer_compiler_cranelift::Cranelift;
+use wasmer_compiler_singlepass::Singlepass;
 
 /// Gas costs for operations (in gas units)
 pub mod gas_costs {
@@ -133,7 +133,7 @@ pub struct ContractExecutor {
 
 impl ContractExecutor {
     pub fn new() -> Self {
-        let compiler = Cranelift::default();
+        let compiler = Singlepass::default();
         let store = Store::new(compiler);
         Self { store }
     }

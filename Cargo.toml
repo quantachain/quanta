@@ -3,6 +3,7 @@ name = "quanta"
 version = "1.0.0"
 edition = "2021"
 description = "QUANTA - Quantum-resistant blockchain with Falcon signatures"
+build = "build.rs"
 
 [dependencies]
 # Post-Quantum Cryptography - Falcon signatures
@@ -35,8 +36,8 @@ async-trait = "0.1"
 uuid = { version = "1.6", features = ["v4"] }
 
 # WASM runtime for smart contracts
-wasmer = "4.2"
-wasmer-compiler-cranelift = "4.2"
+wasmer = { version = "4.2", default-features = false, features = ["singlepass", "std"] }
+wasmer-compiler-singlepass = "4.2"
 
 # WebSocket
 axum-extra = { version = "0.9", features = ["typed-header"] }
@@ -77,6 +78,9 @@ rustls-pemfile = "2.0"
 # HD Wallet (BIP32/39)
 bip39 = "2.0"
 hmac = "0.12"
+
+[build-dependencies]
+cc = "1.0"
 
 # For tests
 [dev-dependencies]

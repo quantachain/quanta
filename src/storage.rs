@@ -112,6 +112,61 @@ impl BlockchainStorage {
         tracing::warn!("Database cleared");
         Ok(())
     }
+    
+    /// Save contract code
+    pub fn save_contract(&self, address: &str, code: &[u8]) -> Result<(), StorageError> {
+        let key = format!("contract:{}", address);
+        self.db.insert(key.as_bytes(), code)?;
+        self.db.flush()?;
+        tracing::debug!("Contract {} saved to database", address);
+        Ok(())
+    }
+    
+    /// Load contract code
+    pub fn load_contract(&self, address: &str) -> Result<Option<Vec<u8>>, StorageError> {
+        let key = format!("contract:{}", address);
+        if let Some(value) = self.db.get(key.as_bytes())? {
+            Ok(Some(value.to_vec()))
+        } else {
+            Ok(None)
+        }
+    }
+    
+    /// Save contract account data
+    pub fn save_contract_account(&self, address: &str, data: &[u8]) -> Result<(), StorageError> {
+        let key = format!("contract_account:{}", address);
+        self.db.insert(key.as_bytes(), data)?;
+        self.db.flush()?;
+        Ok(())
+    }
+    
+    /// Load contract account data
+    pub fn load_contract_account(&self, address: &str) -> Result<Option<Vec<u8>>, StorageError> {
+        let key = format!("contract_account:{}", address);
+        if let Some(value) = self.db.get(key.as_bytes())? {
+            Ok(Some(value.to_vec()))
+        } else {
+            Ok(None)
+        }
+    }
+    
+    /// List all deployed contracts
+    pub fn list_contracts(&self) -> Result<Vec<String>, StorageError> {
+        let prefix = b"contract:";
+        let mut contracts = Vec::new();
+        
+        for item in self.db.scan_prefix(prefix) {
+            if let Ok((key, _)) = item {
+                if let Ok(key_str) = String::from_utf8(key.to_vec()) {
+                    if let Some(address) = key_str.strip_prefix("contract:") {
+                        contracts.push(address.to_string());
+                    }
+                }
+            }
+        }
+        
+        Ok(contracts)
+    }
 }
 
 #[cfg(test)]
