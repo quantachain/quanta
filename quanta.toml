@@ -1,4 +1,5 @@
 # QUANTA Node Configuration
+version = 1
 
 [node]
 # API server port
@@ -20,38 +21,25 @@ max_peers = 125
 # Bootstrap peer addresses (comma-separated host:port)
 bootstrap_nodes = []
 
-[security]
-# Maximum pending transactions in mempool
-max_mempool_size = 5000
-
-# Maximum transactions per block
+# ⚠️ CONSENSUS CONFIG - MUST MATCH NETWORK ⚠️
+[consensus]
 max_block_transactions = 2000
+max_block_size_bytes = 1_048_576  # 1 MB
+min_transaction_fee_microunits = 100  # 0.0001 QUA
+transaction_expiry_blocks = 8640  # ~24 hours at 10s blocks
+coinbase_maturity = 100  # Blocks before mining reward is spendable
 
-# Maximum block size in bytes
-max_block_size_bytes = 1048576
-
-# Minimum transaction fee (anti-spam)
-min_transaction_fee = 0.0001
-
-# Transaction expiry time in seconds (replay protection)
-transaction_expiry_seconds = 86400
+# Node-local security preferences
+[security]
+max_mempool_size = 5000
+transaction_expiry_seconds = 86400  # 24 hours
 
 [mining]
-# Initial mining reward
-initial_reward = 50.0
-
-# Blocks between reward halvings
+initial_reward_microunits = 50_000_000  # 50 QUA
 halving_interval = 210
-
-# Target block time in seconds
 target_block_time = 10
-
-# Difficulty adjustment interval (in blocks)
 difficulty_adjustment_interval = 10
 
 [metrics]
-# Enable Prometheus metrics export
 enabled = true
-
-# Metrics export port
 port = 9090

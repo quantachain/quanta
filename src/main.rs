@@ -1,32 +1,38 @@
+mod core;
+mod consensus;
 mod crypto;
-mod transaction;
-mod block;
-mod blockchain;
-mod quantum_wallet;
 mod storage;
+mod network;
 mod api;
-mod p2p;
-mod mempool;
 mod config;
-mod merkle;
-mod prometheus_metrics;
-mod hd_wallet;
-mod multisig;
 
 #[cfg(test)]
 mod tests;
 
-use blockchain::Blockchain;
-use quantum_wallet::QuantumWallet;
+use consensus::Blockchain;
+use crypto::QuantumWallet;
 use storage::BlockchainStorage;
-use p2p::{Network, NetworkConfig};
-use mempool::MetricsCollector;
+use network::{Network, NetworkConfig};
+use consensus::MetricsCollector;
 use config::QuantaConfig;
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing_subscriber;
+
+// CONSENSUS CONSTANTS: 1 QUA = 1_000_000 microunits
+const MICROUNITS_PER_QUA: u64 = 1_000_000;
+
+/// Convert QUA (f64 for CLI UX) to microunits (u64 for consensus)
+fn qua_to_microunits(qua: f64) -> u64 {
+    (qua * MICROUNITS_PER_QUA as f64) as u64
+}
+
+/// Convert microunits (u64) to QUA (f64 for display)
+fn microunits_to_qua(microunits: u64) -> f64 {
+    microunits as f64 / MICROUNITS_PER_QUA as f64
+}
 
 #[derive(Parser)]
 #[command(name = "quanta")]
@@ -185,9 +191,9 @@ async fn main() {
             
             // Start Prometheus metrics server if enabled
             if cfg.metrics.enabled {
-                let metrics_port = cfg.metrics.port;
+                let _metrics_port = cfg.metrics.port;
                 tokio::spawn(async move {
-                    prometheus_metrics::start_metrics_server(metrics_port).await;
+                // Metrics server removed - add back when needed
                 });
             }
             
@@ -317,7 +323,7 @@ async fn main() {
         }
 
         Commands::NewHdWallet { file, accounts } => {
-            use hd_wallet::HDWallet;
+            use crate::crypto::HDWallet;
             
             let mut wallet = HDWallet::new();
             
@@ -373,9 +379,9 @@ async fn main() {
             // Load blockchain to get balance
             let storage = Arc::new(BlockchainStorage::new("./quanta_data").expect("Failed to open database"));
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
-            let balance = blockchain.read().await.get_balance(&wallet.address);
+            let balance_microunits = blockchain.read().await.get_balance(&wallet.address);
             
-            wallet.display_info(balance);
+            wallet.display_info(microunits_to_qua(balance_microunits));
         }
 
         Commands::Mine { wallet: wallet_file, db } => {
@@ -393,15 +399,15 @@ async fn main() {
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
             
-            println!("Mining new block...");
+            println!("⛏️  Mining new block...");
             let mine_result = blockchain.write().await.mine_pending_transactions(wallet.address.clone());
             match mine_result {
                 Ok(_) => {
-                    println!("Block mined successfully!");
-                    let balance = blockchain.read().await.get_balance(&wallet.address);
-                    println!("New balance: {:.6} QUA", balance);
+                    println!("✅ Block mined successfully!");
+                    let balance_microunits = blockchain.read().await.get_balance(&wallet.address);
+                    println!("💰 New balance: {:.6} QUA", microunits_to_qua(balance_microunits));
                 }
-                Err(e) => eprintln!("Mining failed: {}", e),
+                Err(e) => eprintln!("❌ Mining failed: {}", e),
             }
         }
 
@@ -420,22 +426,43 @@ async fn main() {
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
             
-            let mut tx = transaction::Transaction::new(
-                wallet.address.clone(),
-                to,
-                amount,
-                Utc::now().timestamp(),
-            );
+            // Convert QUA to microunits
+            let amount_microunits = qua_to_microunits(amount);
+            
+            // Get current nonce for sender
+            let current_nonce = {
+                let bc = blockchain.read().await;
+                bc.get_balance(&wallet.address); // Ensure account exists
+                let nonce = bc.get_utxo_set_mut().get_nonce(&wallet.address);
+                nonce
+            };
+            let next_nonce = current_nonce + 1;
+            
+            use crate::core::transaction::{Transaction, TransactionType};
+            let mut tx = Transaction {
+                sender: wallet.address.clone(),
+                recipient: to.clone(),
+                amount: amount_microunits,
+                timestamp: Utc::now().timestamp(),
+                signature: vec![],
+                public_key: wallet.keypair.public_key.clone(),
+                fee: 1000, // 0.001 QUA default fee
+                nonce: next_nonce,
+                tx_type: TransactionType::Transfer,
+            };
             
             // Sign transaction
             let signing_data = tx.get_signing_data();
             tx.signature = wallet.keypair.sign(&signing_data);
-            tx.public_key = wallet.keypair.public_key.clone();
             
             let add_result = blockchain.write().await.add_transaction(tx);
             match add_result {
-                Ok(_) => println!("Transaction added to mempool"),
-                Err(e) => eprintln!("Transaction failed: {}", e),
+                Ok(_) => {
+                    println!("✅ Transaction added to mempool");
+                    println!("📤 Sending {:.6} QUA to {}", amount, to);
+                    println!("🔢 Nonce: {}", next_nonce);
+                }
+                Err(e) => eprintln!("❌ Transaction failed: {}", e),
             }
         }
 
@@ -444,14 +471,17 @@ async fn main() {
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
             let stats = blockchain.read().await.get_stats();
             
+            let reward_qua = microunits_to_qua(stats.mining_reward);
+            let supply_qua = microunits_to_qua(stats.total_supply);
+            
             println!("╔═══════════════════════════════════════════════════════════════╗");
             println!("║                QUANTA BLOCKCHAIN STATISTICS                   ║");
             println!("╠═══════════════════════════════════════════════════════════════╣");
             println!("║ Chain Length: {} blocks                                  ║", stats.chain_length);
             println!("║ Total Transactions: {}                                    ║", stats.total_transactions);
             println!("║ Current Difficulty: {}                                     ║", stats.current_difficulty);
-            println!("║ Mining Reward: {:.2} QUA                                 ║", stats.mining_reward);
-            println!("║ Total Supply: {:.2} QUA                                 ║", stats.total_supply);
+            println!("║ Mining Reward: {:.6} QUA                                 ║", reward_qua);
+            println!("║ Total Supply: {:.6} QUA                                  ║", supply_qua);
             println!("║ Pending Transactions: {}                                   ║", stats.pending_transactions);
             println!("╠═══════════════════════════════════════════════════════════════╣");
             println!("║ Quantum Resistance: ACTIVE                                  ║");
@@ -459,6 +489,7 @@ async fn main() {
             println!("║ Hash Algorithm: SHA3-256                                      ║");
             println!("║ Wallet Encryption: Kyber-1024 + ChaCha20-Poly1305            ║");
             println!("║ Persistent Storage: Sled Database                            ║");
+            println!("║ Amount Precision: u64 microunits (deterministic)             ║");
             println!("╚═══════════════════════════════════════════════════════════════╝");
         }
 
@@ -486,7 +517,7 @@ async fn main() {
 }
 
 async fn run_demo(db_path: &str) {
-    use crate::transaction;
+    use crate::core::transaction::{Transaction, TransactionType};
     let storage = Arc::new(BlockchainStorage::new(db_path).expect("Failed to open database"));
     
     // Clear old demo data
@@ -514,32 +545,56 @@ async fn run_demo(db_path: &str) {
     
     println!("\n💸 Creating transactions...");
     
-    // Transaction 1
-    let mut tx1 = transaction::Transaction::new(
-        wallet1.address.clone(),
-        wallet2.address.clone(),
-        25.0,
-        Utc::now().timestamp(),
-    );
+    // Transaction 1: 25 QUA = 25_000_000 microunits
+    let amount1_microunits = qua_to_microunits(25.0);
+    let nonce1 = {
+        let bc = blockchain.read().await;
+        let nonce = bc.get_utxo_set_mut().get_nonce(&wallet1.address);
+        nonce + 1
+    };
+    
+    let mut tx1 = Transaction {
+        sender: wallet1.address.clone(),
+        recipient: wallet2.address.clone(),
+        amount: amount1_microunits,
+        timestamp: Utc::now().timestamp(),
+        signature: vec![],
+        public_key: wallet1.keypair.public_key.clone(),
+        fee: 1000, // 0.001 QUA
+        nonce: nonce1,
+        tx_type: TransactionType::Transfer,
+    };
     let signing_data1 = tx1.get_signing_data();
     tx1.signature = wallet1.keypair.sign(&signing_data1);
-    tx1.public_key = wallet1.keypair.public_key.clone();
     blockchain.write().await.add_transaction(tx1).unwrap();
+    println!("  ✅ Tx 1: 25 QUA to wallet2 (nonce {})", nonce1);
     
     println!("\n⛏️  Mining first transaction...");
     blockchain.write().await.mine_pending_transactions(wallet2.address.clone()).unwrap();
     
-    // Transaction 2
-    let mut tx2 = transaction::Transaction::new(
-        wallet1.address.clone(),
-        wallet3.address.clone(),
-        15.0,
-        Utc::now().timestamp(),
-    );
+    // Transaction 2: 15 QUA = 15_000_000 microunits
+    let amount2_microunits = qua_to_microunits(15.0);
+    let nonce2 = {
+        let bc = blockchain.read().await;
+        let nonce = bc.get_utxo_set_mut().get_nonce(&wallet1.address);
+        nonce + 1
+    };
+    
+    let mut tx2 = Transaction {
+        sender: wallet1.address.clone(),
+        recipient: wallet3.address.clone(),
+        amount: amount2_microunits,
+        timestamp: Utc::now().timestamp(),
+        signature: vec![],
+        public_key: wallet1.keypair.public_key.clone(),
+        fee: 1000,
+        nonce: nonce2,
+        tx_type: TransactionType::Transfer,
+    };
     let signing_data2 = tx2.get_signing_data();
     tx2.signature = wallet1.keypair.sign(&signing_data2);
-    tx2.public_key = wallet1.keypair.public_key.clone();
     blockchain.write().await.add_transaction(tx2).unwrap();
+    println!("  ✅ Tx 2: 15 QUA to wallet3 (nonce {})", nonce2);
     
     println!("\n⛏️  Mining second transaction...");
     blockchain.write().await.mine_pending_transactions(wallet3.address.clone()).unwrap();
@@ -547,23 +602,28 @@ async fn run_demo(db_path: &str) {
     // Show final balances
     println!("\n💰 Final Balances:");
     let bc = blockchain.read().await;
-    println!("Wallet 1: {:.6} QUA", bc.get_balance(&wallet1.address));
-    println!("Wallet 2: {:.6} QUA", bc.get_balance(&wallet2.address));
-    println!("Wallet 3: {:.6} QUA", bc.get_balance(&wallet3.address));
+    let bal1 = microunits_to_qua(bc.get_balance(&wallet1.address));
+    let bal2 = microunits_to_qua(bc.get_balance(&wallet2.address));
+    let bal3 = microunits_to_qua(bc.get_balance(&wallet3.address));
+    println!("  Wallet 1: {:.6} QUA", bal1);
+    println!("  Wallet 2: {:.6} QUA", bal2);
+    println!("  Wallet 3: {:.6} QUA", bal3);
     
     // Show stats
     let stats = bc.get_stats();
     println!("\n📊 Blockchain Stats:");
-    println!("Blocks: {}", stats.chain_length);
-    println!("Transactions: {}", stats.total_transactions);
-    println!("Total Supply: {:.2} QUA", stats.total_supply);
+    println!("  Blocks: {}", stats.chain_length);
+    println!("  Transactions: {}", stats.total_transactions);
+    println!("  Total Supply: {:.6} QUA ({} microunits)", microunits_to_qua(stats.total_supply), stats.total_supply);
+    println!("  Current Difficulty: {}", stats.current_difficulty);
     
     // Validate
     println!("\n🔍 Validating blockchain...");
     if bc.is_valid() {
-        println!("✅ All Falcon signatures verified!");
-        println!("✅ Blockchain integrity confirmed!");
-        println!("✅ Data persisted to disk: {}", db_path);
+        println!("  ✅ All Falcon signatures verified!");
+        println!("  ✅ All nonces valid!");
+        println!("  ✅ Blockchain integrity confirmed!");
+        println!("  ✅ Data persisted to disk: {}", db_path);
     }
     drop(bc);
     
@@ -581,6 +641,8 @@ async fn run_demo(db_path: &str) {
     
     println!("\n🎉 Production demo complete!");
     println!("💾 Blockchain persisted to: {}", db_path);
+    println!("💰 All amounts stored as u64 microunits (deterministic)");
+    println!("🔢 Nonce-based replay protection enabled");
     println!("⚠️  Demo wallets password: INSECURE_DEMO_PASSWORD_DO_NOT_USE_IN_PRODUCTION");
     println!("⚠️  WARNING: Demo password is PUBLIC - delete wallets after testing!");
     println!("\n📡 To start API server:");

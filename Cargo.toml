@@ -48,6 +48,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Utilities
 hex = "0.4"
 chrono = "0.4"
+zeroize = { version = "1.7", features = ["derive"] }
 rand = "0.8"
 thiserror = "1.0"
 
@@ -58,10 +59,6 @@ rpassword = "7.3"
 # Configuration
 config = "0.14"
 toml = "0.8"
-
-# Metrics
-prometheus = "0.13"
-lazy_static = "1.4"
 
 # TLS/Security
 tokio-rustls = "0.25"

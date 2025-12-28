@@ -1,7 +1,7 @@
-use crate::p2p::protocol::{P2PMessage, serialize_message, deserialize_message};
+use crate::network::protocol::{P2PMessage, serialize_message, deserialize_message};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::{timeout, Duration};
@@ -21,7 +21,8 @@ pub struct PeerInfo {
 /// Represents a connection to a peer in the network
 pub struct Peer {
     info: Arc<RwLock<PeerInfo>>,
-    stream: Arc<RwLock<TcpStream>>,
+    read_half: Arc<RwLock<ReadHalf<TcpStream>>>,
+    write_half: Arc<RwLock<WriteHalf<TcpStream>>>,
     shutdown_tx: mpsc::Sender<()>,
 }
 
@@ -42,9 +43,13 @@ impl Peer {
             last_seen: chrono::Utc::now().timestamp(),
         };
 
+        // CRITICAL: Split stream to avoid read/write lock contention
+        let (read_half, write_half) = tokio::io::split(stream);
+
         Ok(Self {
             info: Arc::new(RwLock::new(info)),
-            stream: Arc::new(RwLock::new(stream)),
+            read_half: Arc::new(RwLock::new(read_half)),
+            write_half: Arc::new(RwLock::new(write_half)),
             shutdown_tx,
         })
     }
@@ -54,20 +59,20 @@ impl Peer {
         let data = serialize_message(&msg)?;
         let len = data.len() as u32;
         
-        let mut stream = self.stream.write().await;
+        let mut write = self.write_half.write().await;
         
         // Write length prefix (4 bytes) then message data
-        stream
+        write
             .write_all(&len.to_be_bytes())
             .await
             .map_err(|e| format!("Failed to write message length: {}", e))?;
         
-        stream
+        write
             .write_all(&data)
             .await
             .map_err(|e| format!("Failed to write message data: {}", e))?;
         
-        stream
+        write
             .flush()
             .await
             .map_err(|e| format!("Failed to flush stream: {}", e))?;
@@ -96,11 +101,11 @@ impl Peer {
 
     /// Internal message receiving logic
     async fn receive_message_internal(&self) -> Result<P2PMessage, String> {
-        let mut stream = self.stream.write().await;
+        let mut read = self.read_half.write().await;
         
         // Read length prefix (4 bytes)
         let mut len_bytes = [0u8; 4];
-        stream
+        read
             .read_exact(&mut len_bytes)
             .await
             .map_err(|e| format!("Failed to read message length: {}", e))?;
@@ -113,7 +118,7 @@ impl Peer {
         
         // Read message data
         let mut data = vec![0u8; len];
-        stream
+        read
             .read_exact(&mut data)
             .await
             .map_err(|e| format!("Failed to read message data: {}", e))?;
@@ -240,28 +245,38 @@ impl PeerManager {
         self.peers.read().await.len()
     }
 
-    /// Broadcast message to all peers
+    /// Broadcast message to all peers (PARALLELIZED)
     pub async fn broadcast(&self, msg: P2PMessage) {
-        let peers = self.peers.read().await;
-        for peer in peers.iter() {
-            if let Err(e) = peer.send_message(msg.clone()).await {
-                warn!("Failed to send message to peer: {}", e);
-            }
+        let peers = self.peers.read().await.clone();
+        
+        // Spawn concurrent sends - don't let one slow peer block everyone
+        for peer in peers {
+            let msg_clone = msg.clone();
+            tokio::spawn(async move {
+                if let Err(e) = peer.send_message(msg_clone).await {
+                    warn!("Failed to send message to peer: {}", e);
+                }
+            });
         }
     }
 
     /// Clean up dead peers
     pub async fn cleanup_dead_peers(&self) {
-        let mut peers = self.peers.write().await;
+        let peers = self.peers.read().await;
+        let mut alive_peers = Vec::new();
+        
+        for peer in peers.iter() {
+            if peer.is_alive().await {
+                alive_peers.push(Arc::clone(peer));
+            }
+        }
+        
         let initial_count = peers.len();
+        drop(peers);
         
-        peers.retain(|peer| {
-            let is_alive = peer.is_alive();
-            futures::executor::block_on(is_alive)
-        });
-        
-        let removed = initial_count - peers.len();
+        let removed = initial_count - alive_peers.len();
         if removed > 0 {
+            *self.peers.write().await = alive_peers;
             info!("Cleaned up {} dead peers", removed);
         }
     }

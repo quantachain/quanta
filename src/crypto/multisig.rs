@@ -1,5 +1,5 @@
-use crate::transaction::Transaction;
-use crate::crypto::verify_signature;
+use crate::core::transaction::Transaction;
+use crate::crypto::signatures::verify_signature;
 use serde::{Deserialize, Serialize};
 
 /// Multi-signature transaction requiring M-of-N signatures
@@ -138,14 +138,14 @@ impl MultiSigType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transaction::Transaction;
+    use crate::core::transaction::Transaction;
     
     #[test]
     fn test_multisig_creation() {
         let tx = Transaction::new(
             "sender".to_string(),
             "recipient".to_string(),
-            10.0,
+            10_000_000, // 10 QUA in microunits
             123456789,
         );
         
@@ -166,7 +166,7 @@ mod tests {
         let tx = Transaction::new(
             "sender".to_string(),
             "recipient".to_string(),
-            10.0,
+            10_000_000, // 10 QUA in microunits
             123456789,
         );
         

@@ -1,8 +1,8 @@
-use crate::block::Block;
-use crate::blockchain::Blockchain;
-use crate::p2p::peer::{Peer, PeerManager};
-use crate::p2p::protocol::{P2PMessage, PROTOCOL_VERSION};
-use crate::transaction::Transaction;
+use crate::core::block::Block;
+use crate::consensus::blockchain::Blockchain;
+use crate::network::peer::{Peer, PeerManager};
+use crate::network::protocol::{P2PMessage, PROTOCOL_VERSION};
+use crate::core::transaction::Transaction;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
@@ -115,17 +115,46 @@ impl Network {
             match listener.accept().await {
                 Ok((stream, addr)) => {
                     info!("Incoming connection from {}", addr);
-                    let network = Arc::new(Self {
-                        config: self.config.clone(),
-                        blockchain: Arc::clone(&self.blockchain),
-                        peer_manager: Arc::clone(&self.peer_manager),
-                        message_tx: self.message_tx.clone(),
-                        message_rx: Arc::clone(&self.message_rx),
-                    });
+                    
+                    // Inline connection handling to avoid Network cloning
+                    let message_tx = self.message_tx.clone();
+                    let peer_manager = Arc::clone(&self.peer_manager);
+                    let blockchain = Arc::clone(&self.blockchain);
+                    let node_id = self.config.node_id.clone();
                     
                     tokio::spawn(async move {
-                        if let Err(e) = network.handle_incoming_connection(stream, addr).await {
-                            warn!("Failed to handle incoming connection from {}: {}", addr, e);
+                        match Peer::new(stream, addr).await {
+                            Ok(peer) => {
+                                let peer = Arc::new(peer);
+                                
+                                // Perform handshake
+                                let height = blockchain.read().await.get_chain().len() as u64;
+                                if let Ok(_) = peer.handshake(PROTOCOL_VERSION, height, node_id).await {
+                                    // Add peer
+                                    if peer_manager.add_peer(Arc::clone(&peer)).await.is_ok() {
+                                        // Start receiving
+                                        let addr = peer.address().await;
+                                        loop {
+                                            match peer.receive_message().await {
+                                                Ok(msg) => {
+                                                    if let Err(e) = message_tx.send((addr, msg)) {
+                                                        error!("Failed to queue message: {}", e);
+                                                        break;
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    warn!("Error receiving from {}: {}", addr, e);
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        peer_manager.remove_peer(addr).await;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Failed to create peer for {}: {}", addr, e);
+                            }
                         }
                     });
                 }
@@ -150,17 +179,28 @@ impl Network {
         // Add to peer manager
         self.peer_manager.add_peer(Arc::clone(&peer)).await?;
         
-        // Start receiving messages from this peer
-        let network = Arc::new(Self {
-            config: self.config.clone(),
-            blockchain: Arc::clone(&self.blockchain),
-            peer_manager: Arc::clone(&self.peer_manager),
-            message_tx: self.message_tx.clone(),
-            message_rx: Arc::clone(&self.message_rx),
-        });
+        // Start receiving messages from this peer (pass self reference via closure)
+        let message_tx = self.message_tx.clone();
+        let peer_manager = Arc::clone(&self.peer_manager);
         
         tokio::spawn(async move {
-            network.receive_from_peer(peer).await;
+            let addr = peer.address().await;
+            loop {
+                match peer.receive_message().await {
+                    Ok(msg) => {
+                        debug!("Received message from {}: {:?}", addr, msg);
+                        if let Err(e) = message_tx.send((addr, msg)) {
+                            error!("Failed to queue message: {}", e);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Error receiving from {}: {}", addr, e);
+                        break;
+                    }
+                }
+            }
+            peer_manager.remove_peer(addr).await;
         });
         
         Ok(())
@@ -186,17 +226,28 @@ impl Network {
         // Add to peer manager
         self.peer_manager.add_peer(Arc::clone(&peer)).await?;
         
-        // Start receiving messages
-        let network = Arc::new(Self {
-            config: self.config.clone(),
-            blockchain: Arc::clone(&self.blockchain),
-            peer_manager: Arc::clone(&self.peer_manager),
-            message_tx: self.message_tx.clone(),
-            message_rx: Arc::clone(&self.message_rx),
-        });
+        // Start receiving messages (inline to avoid cloning Network)
+        let message_tx = self.message_tx.clone();
+        let peer_manager = Arc::clone(&self.peer_manager);
         
         tokio::spawn(async move {
-            network.receive_from_peer(peer).await;
+            let addr = peer.address().await;
+            loop {
+                match peer.receive_message().await {
+                    Ok(msg) => {
+                        debug!("Received message from {}: {:?}", addr, msg);
+                        if let Err(e) = message_tx.send((addr, msg)) {
+                            error!("Failed to queue message: {}", e);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Error receiving from {}: {}", addr, e);
+                        break;
+                    }
+                }
+            }
+            peer_manager.remove_peer(addr).await;
         });
         
         info!("Connected to peer {}", addr);
@@ -227,14 +278,17 @@ impl Network {
         self.peer_manager.remove_peer(addr).await;
     }
 
-    /// Process incoming messages
-    async fn process_messages(&self) {
+    /// Process incoming messages (PARALLELIZED - spawn handler per message)
+    async fn process_messages(self: Arc<Self>) {
         let mut rx = self.message_rx.write().await;
         
         while let Some((addr, msg)) = rx.recv().await {
-            if let Err(e) = self.handle_message(addr, msg).await {
-                error!("Error handling message from {}: {}", addr, e);
-            }
+            let network = Arc::clone(&self);
+            tokio::spawn(async move {
+                if let Err(e) = network.handle_message(addr, msg).await {
+                    error!("Error handling message from {}: {}", addr, e);
+                }
+            });
         }
     }
 
@@ -284,6 +338,16 @@ impl Network {
     async fn handle_new_transaction(&self, tx: Transaction) -> Result<(), String> {
         let blockchain = self.blockchain.write().await;
         
+        // Check for duplicates (replay attack prevention)
+        let tx_hash = tx.hash();
+        let pending_txs: Vec<String> = {
+            let pending = blockchain.get_pending_transactions();
+            pending.iter().map(|t| t.hash()).collect()
+        };
+        if pending_txs.iter().any(|h| *h == tx_hash) {
+            return Ok(()); // Already have this tx
+        }
+        
         // Add to pending transactions
         if blockchain.add_transaction(tx.clone()).is_ok() {
             info!("Added new transaction to mempool");
@@ -296,43 +360,46 @@ impl Network {
         Ok(())
     }
 
-    /// Handle new block
+    /// Handle new block (WITH HARDENED VALIDATION)
     async fn handle_new_block(&self, block: Block) -> Result<(), String> {
         let blockchain = self.blockchain.write().await;
         
-        // Validate and add block
-        let latest = blockchain.get_latest_block();
-        if block.is_valid(Some(&latest)) {
-            // Check if we already have this block
-            if blockchain.get_chain().iter().any(|b| b.hash == block.hash) {
-                return Ok(());
-            }
-            
-            // Add block to chain
-            blockchain.get_chain_mut().push(block.clone());
-            
-            // Clear mined transactions from pending
-            let block_txs = block.transactions.clone();
-            blockchain.get_pending_transactions_mut().retain(|t| !block_txs.contains(t));
-            
-            // Update UTXO set
-            for tx in &block.transactions {
-                if !tx.is_coinbase() {
-                    let _ = blockchain.get_utxo_set_mut().spend_utxos(&tx.sender, tx.amount + tx.fee);
-                }
-                blockchain.get_utxo_set_mut().add_utxo(tx);
-            }
-            
-            info!("Added new block {} at height {}", block.hash[..8].to_string(), block.index);
-            
-            // Broadcast to other peers
-            drop(blockchain);
-            self.broadcast_block(block).await;
-        } else {
-            return Err("Invalid block".to_string());
+        // Check if we already have this block
+        if blockchain.get_chain().iter().any(|b| b.hash == block.hash) {
+            return Ok(());
         }
         
-        Ok(())
+        // Validate against current chain
+        let latest = blockchain.get_latest_block();
+        
+        // CRITICAL: Verify block linkage
+        if block.index != latest.index + 1 {
+            return Err(format!("Invalid block index: expected {}, got {}", latest.index + 1, block.index));
+        }
+        
+        if block.previous_hash != latest.hash {
+            return Err("Invalid previous hash".to_string());
+        }
+        
+        // Cryptographic validation
+        if !block.is_valid(Some(&latest)) {
+            return Err("Block failed validation".to_string());
+        }
+        
+        // Add block to chain (use add_network_block for full validation)
+        drop(blockchain);
+        let bc = self.blockchain.write().await;
+        match bc.add_network_block(block.clone()) {
+            Ok(_) => {
+                info!("Added new block {} at height {}", &block.hash[..8], block.index);
+                
+                // Broadcast to other peers
+                drop(bc);
+                self.broadcast_block(block).await;
+                Ok(())
+            }
+            Err(e) => Err(format!("Failed to add block: {}", e)),
+        }
     }
 
     /// Handle get blocks request
@@ -460,17 +527,35 @@ impl Network {
             let peer_count = self.peer_manager.peer_count().await;
             if peer_count < 3 && !self.config.bootstrap_nodes.is_empty() {
                 // Try reconnecting to bootstrap nodes
-                for addr in &self.config.bootstrap_nodes {
-                    let network = Arc::new(Self {
-                        config: self.config.clone(),
-                        blockchain: Arc::clone(&self.blockchain),
-                        peer_manager: Arc::clone(&self.peer_manager),
-                        message_tx: self.message_tx.clone(),
-                        message_rx: Arc::clone(&self.message_rx),
-                    });
-                    let addr = *addr;
+                for &bootstrap_addr in &self.config.bootstrap_nodes {
+                    let message_tx = self.message_tx.clone();
+                    let peer_manager = Arc::clone(&self.peer_manager);
+                    let blockchain = Arc::clone(&self.blockchain);
+                    let node_id = self.config.node_id.clone();
+                    
                     tokio::spawn(async move {
-                        let _ = network.connect_to_peer(addr).await;
+                        if let Ok(stream) = TcpStream::connect(bootstrap_addr).await {
+                            if let Ok(peer) = Peer::new(stream, bootstrap_addr).await {
+                                let peer = Arc::new(peer);
+                                let height = blockchain.read().await.get_chain().len() as u64;
+                                if peer.handshake(PROTOCOL_VERSION, height, node_id).await.is_ok() {
+                                    if peer_manager.add_peer(Arc::clone(&peer)).await.is_ok() {
+                                        let addr = peer.address().await;
+                                        loop {
+                                            match peer.receive_message().await {
+                                                Ok(msg) => {
+                                                    if message_tx.send((addr, msg)).is_err() {
+                                                        break;
+                                                    }
+                                                }
+                                                Err(_) => break,
+                                            }
+                                        }
+                                        peer_manager.remove_peer(addr).await;
+                                    }
+                                }
+                            }
+                        }
                     });
                 }
             }
@@ -488,7 +573,7 @@ impl Network {
     }
 
     /// Get peer information
-    pub async fn get_peers_info(&self) -> Vec<crate::p2p::peer::PeerInfo> {
+    pub async fn get_peers_info(&self) -> Vec<crate::network::peer::PeerInfo> {
         let peers = self.peer_manager.get_peers().await;
         let mut info = Vec::new();
         

@@ -1,8 +1,8 @@
 #[cfg(test)]
 mod blockchain_tests {
-    use crate::blockchain::*;
+    use crate::consensus::blockchain::*;
     use crate::storage::BlockchainStorage;
-    use crate::transaction::Transaction;
+    use crate::core::transaction::Transaction;
     use std::sync::Arc;
     use tempfile::TempDir;
 
@@ -72,7 +72,7 @@ mod blockchain_tests {
 
 #[cfg(test)]
 mod transaction_tests {
-    use crate::transaction::*;
+    use crate::core::transaction::*;
 
     #[test]
     fn test_transaction_creation() {
@@ -114,8 +114,8 @@ mod transaction_tests {
     }
 
     #[test]
-    fn test_utxo_set() {
-        let mut utxo_set = UTXOSet::new();
+    fn test_account_state_basic() {
+        let mut utxo_set = AccountState::new();
         
         let tx = Transaction::new(
             "sender".to_string(),
@@ -130,8 +130,8 @@ mod transaction_tests {
     }
 
     #[test]
-    fn test_utxo_spending() {
-        let mut utxo_set = UTXOSet::new();
+    fn test_account_state_spending() {
+        let mut utxo_set = AccountState::new();
         
         let tx = Transaction::new(
             "COINBASE".to_string(),
@@ -151,8 +151,8 @@ mod transaction_tests {
 
 #[cfg(test)]
 mod block_tests {
-    use crate::block::Block;
-    use crate::transaction::Transaction;
+    use crate::core::block::Block;
+    use crate::core::transaction::Transaction;
 
     #[test]
     fn test_genesis_block() {
@@ -202,7 +202,7 @@ mod block_tests {
 
 #[cfg(test)]
 mod merkle_tests {
-    use crate::merkle::*;
+    use crate::core::merkle::*;
 
     #[test]
     fn test_merkle_tree_from_hashes() {
@@ -256,7 +256,7 @@ mod merkle_tests {
 
 #[cfg(test)]
 mod crypto_tests {
-    use crate::crypto::*;
+    use crate::crypto::signatures::*;
 
     #[test]
     fn test_sha3_hash() {

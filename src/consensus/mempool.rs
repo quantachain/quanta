@@ -1,4 +1,4 @@
-use crate::transaction::Transaction;
+use crate::core::transaction::Transaction;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -9,8 +9,10 @@ use tokio::sync::RwLock;
 pub struct Mempool {
     // Transactions indexed by hash
     transactions: HashMap<String, Transaction>,
-    // Transactions sorted by fee (descending) for priority
-    by_fee: BTreeMap<String, Vec<String>>, // fee_as_string -> [tx_hashes]
+    // Transactions sorted by fee (descending) using integer microunits
+    by_fee: BTreeMap<u64, Vec<String>>, // fee_microunits -> [tx_hashes] (reversed iteration for desc order)
+    // Index: tx_hash -> fee_microunits for O(1) removal
+    hash_to_fee: HashMap<String, u64>,
     // Max size limit
     max_size: usize,
 }
@@ -21,6 +23,7 @@ impl Mempool {
         Self {
             transactions: HashMap::new(),
             by_fee: BTreeMap::new(),
+            hash_to_fee: HashMap::new(),
             max_size,
         }
     }
@@ -32,19 +35,25 @@ impl Mempool {
             self.evict_lowest_fee();
         }
 
-        let tx_hash = self.calculate_tx_hash(&tx);
+        // Use Transaction's own hash method (includes ALL fields)
+        let tx_hash = tx.hash();
         
         // Check if already exists
         if self.transactions.contains_key(&tx_hash) {
             return Err("Transaction already in mempool".to_string());
         }
 
-        // Add to fee index (using negative fee for descending order)
-        let fee_key = format!("{:020}", (tx.fee * 1000000.0) as i64); // Convert to microunits
+        // Fee is already u64 microunits - no conversion needed
+        let fee_microunits = tx.fee;
+        
+        // Add to fee index
         self.by_fee
-            .entry(fee_key)
+            .entry(fee_microunits)
             .or_insert_with(Vec::new)
             .push(tx_hash.clone());
+        
+        // Add to hash->fee index for O(1) removal
+        self.hash_to_fee.insert(tx_hash.clone(), fee_microunits);
 
         // Add to main storage
         self.transactions.insert(tx_hash, tx);
@@ -53,10 +62,18 @@ impl Mempool {
     
     /// Evict lowest fee transaction when mempool is full
     fn evict_lowest_fee(&mut self) {
-        if let Some((_, tx_hashes)) = self.by_fee.iter_mut().next() {
-            if let Some(hash) = tx_hashes.pop() {
-                self.transactions.remove(&hash);
-                tracing::debug!("Evicted low-fee transaction: {}", hash);
+        // Get lowest fee entry (first in BTreeMap)
+        if let Some((&fee_microunits, _)) = self.by_fee.iter().next() {
+            if let Some(tx_hashes) = self.by_fee.get_mut(&fee_microunits) {
+                if let Some(hash) = tx_hashes.pop() {
+                    self.transactions.remove(&hash);
+                    self.hash_to_fee.remove(&hash);
+                    tracing::debug!("Evicted low-fee transaction: {}", hash);
+                }
+                // Clean up empty bucket
+                if tx_hashes.is_empty() {
+                    self.by_fee.remove(&fee_microunits);
+                }
             }
         }
     }
@@ -79,15 +96,19 @@ impl Mempool {
         result
     }
 
-    /// Remove a transaction from mempool
+    /// Remove a transaction from mempool (O(1) via index)
     pub fn remove(&mut self, tx_hash: &str) {
         if let Some(_tx) = self.transactions.remove(tx_hash) {
-            // Remove from fee index
-            for (_, hashes) in self.by_fee.iter_mut() {
-                hashes.retain(|h| h != tx_hash);
+            // Use index to find fee bucket in O(1)
+            if let Some(fee_microunits) = self.hash_to_fee.remove(tx_hash) {
+                if let Some(hashes) = self.by_fee.get_mut(&fee_microunits) {
+                    hashes.retain(|h| h != tx_hash);
+                    // Clean up empty bucket
+                    if hashes.is_empty() {
+                        self.by_fee.remove(&fee_microunits);
+                    }
+                }
             }
-            // Clean up empty fee entries
-            self.by_fee.retain(|_, v| !v.is_empty());
         }
     }
 
@@ -104,7 +125,7 @@ impl Mempool {
     /// Remove transactions that are in a mined block
     pub fn remove_mined(&mut self, block_txs: &[Transaction]) {
         for tx in block_txs {
-            let tx_hash = self.calculate_tx_hash(tx);
+            let tx_hash = tx.hash(); // Use Transaction's proper hash
             self.remove(&tx_hash);
         }
     }
@@ -123,14 +144,7 @@ impl Mempool {
     pub fn clear(&mut self) {
         self.transactions.clear();
         self.by_fee.clear();
-    }
-
-    /// Calculate transaction hash (simple implementation)
-    fn calculate_tx_hash(&self, tx: &Transaction) -> String {
-        use sha3::{Digest, Sha3_256};
-        let data = format!("{}{}{}", tx.sender, tx.recipient, tx.amount);
-        let hash = Sha3_256::digest(data.as_bytes());
-        hex::encode(hash)
+        self.hash_to_fee.clear();
     }
 
     /// Check if transaction exists
@@ -227,7 +241,7 @@ impl MetricsCollector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crypto::FalconKeypair;
+    use crate::core::transaction::TransactionType;
 
     #[test]
     fn test_mempool_operations() {
@@ -241,6 +255,8 @@ mod tests {
             signature: vec![],
             public_key: vec![],
             fee: 0.001,
+            nonce: 1,
+            tx_type: TransactionType::Transfer,
         };
         
         // Add transaction
@@ -255,7 +271,7 @@ mod tests {
         assert_eq!(txs.len(), 1);
         
         // Remove transaction
-        let tx_hash = mempool.calculate_tx_hash(&tx);
+        let tx_hash = tx.hash();
         mempool.remove(&tx_hash);
         assert_eq!(mempool.len(), 0);
     }

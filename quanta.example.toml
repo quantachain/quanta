@@ -1,0 +1,45 @@
+# Quanta Blockchain Node Configuration
+# Copy this to quanta.toml and customize as needed
+#
+# Environment variable overrides are supported:
+# QUANTA_NODE__API_PORT=4000
+# QUANTA_CONSENSUS__MIN_TRANSACTION_FEE_MICROUNITS=200
+
+version = 1
+
+[node]
+api_port = 3000
+network_port = 8333
+db_path = "./quanta_data"
+no_network = false
+
+[network]
+max_peers = 125
+# Bootstrap nodes for initial peer discovery
+# bootstrap_nodes = ["127.0.0.1:8333", "node2.example.com:8333"]
+bootstrap_nodes = []
+
+# ⚠️ CONSENSUS CONFIG - MUST MATCH NETWORK ⚠️
+# These values are consensus-critical and MUST be identical across all nodes
+# Changing these will fork you off the network
+[consensus]
+max_block_transactions = 2000
+max_block_size_bytes = 1_048_576  # 1 MB
+min_transaction_fee_microunits = 100  # 0.0001 QUA (prevents spam)
+transaction_expiry_blocks = 8640  # ~24 hours at 10s blocks
+coinbase_maturity = 100  # Blocks before mining reward is spendable
+
+# Node-local security preferences (can differ between nodes)
+[security]
+max_mempool_size = 5000
+transaction_expiry_seconds = 86400  # 24 hours
+
+[mining]
+initial_reward_microunits = 50_000_000  # 50 QUA in microunits
+halving_interval = 210  # Reward halves every 210 blocks
+target_block_time = 10  # 10 seconds
+difficulty_adjustment_interval = 10  # Adjust every 10 blocks
+
+[metrics]
+enabled = true
+port = 9090

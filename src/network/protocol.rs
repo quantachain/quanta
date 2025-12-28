@@ -1,5 +1,5 @@
-use crate::block::Block;
-use crate::transaction::Transaction;
+use crate::core::block::Block;
+use crate::core::transaction::Transaction;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
