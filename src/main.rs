@@ -14,6 +14,7 @@ mod hd_wallet;
 mod multisig;
 mod contract;
 mod contract_executor;
+mod probestack; // Stub for wasmer_vm on Linux
 
 #[cfg(test)]
 mod tests;
