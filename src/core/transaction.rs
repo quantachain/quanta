@@ -218,7 +218,7 @@ impl AccountState {
     /// Credit account from transaction (add balance)
     /// For coinbase: locked until maturity height
     /// For regular: immediately spendable
-    pub fn add_utxo(&mut self, tx: &Transaction, current_height: u64, coinbase_maturity: u64) {
+    pub fn credit_account(&mut self, tx: &Transaction, current_height: u64, coinbase_maturity: u64) {
         if tx.amount == 0 {
             return; // Skip zero-amount txs (like contract calls)
         }
@@ -243,7 +243,7 @@ impl AccountState {
 
     /// Debit account (spend balance + fee)
     /// Returns true if successful, false if insufficient funds
-    pub fn spend_utxos(&mut self, address: &str, total_amount: u64) -> bool {
+    pub fn debit_account(&mut self, address: &str, total_amount: u64) -> bool {
         if let Some(account) = self.accounts.get_mut(address) {
             if account.balance >= total_amount {
                 account.balance -= total_amount;

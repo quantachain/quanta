@@ -5,7 +5,7 @@ Quantum-resistant blockchain using Falcon-512 and Kyber-1024.
 ## Features
 
 - Post-quantum cryptography
-- UTXO transactions
+- Account-based transactions (Ethereum-style)
 - Proof-of-work mining
 - P2P networking
 - REST API

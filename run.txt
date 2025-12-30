@@ -2,6 +2,8 @@ cd /mnt/d/tempp/qua; cargo run --release --bin genesis_hash
 
 cd /mnt/d/tempp/qua; cargo run --release --quiet --bin quanta -- help
 
+ ./target/release/quanta start
+
 Genesis Block Details:
   Timestamp: 1735689600 (2025-01-01 00:00:00 UTC)
   Index: 0

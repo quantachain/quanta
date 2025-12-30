@@ -58,7 +58,7 @@ const GENESIS_HASH: &str = "a10e7034c9d4a25ee7b59b8b6e7239fa5ebc739ab080f818be9b
 pub struct Blockchain {
     chain: Arc<RwLock<Vec<Block>>>,
     pending_transactions: Arc<RwLock<Vec<Transaction>>>,
-    utxo_set: Arc<RwLock<AccountState>>,
+    account_state: Arc<RwLock<AccountState>>,
     pending_nonces: Arc<DashMap<String, u64>>, // ATOMIC: Track highest pending nonce (fixes race condition)
     storage: Arc<BlockchainStorage>,
     orphaned_blocks: Arc<RwLock<Vec<Block>>>, // Store competing chain blocks for fork resolution
@@ -69,9 +69,9 @@ impl Blockchain {
     pub fn new(storage: Arc<BlockchainStorage>) -> Result<Self, BlockchainError> {
         // Try to load existing chain
         let chain = storage.load_chain()?;
-        let utxo_set = storage.load_account_state()?.unwrap_or_else(AccountState::new);
+        let account_state = storage.load_account_state()?.unwrap_or_else(AccountState::new);
         
-        let (chain, utxo_set, _difficulty) = if chain.is_empty() {
+        let (chain, account_state, _difficulty) = if chain.is_empty() {
             // Create genesis block
             tracing::info!("Creating new blockchain with genesis block");
             let genesis = Block::genesis();
@@ -82,7 +82,7 @@ impl Blockchain {
                     GENESIS_HASH, genesis.hash);
             }
             
-            let mut utxo_set = AccountState::new();
+            let mut account_state = AccountState::new();
             
             // Genesis distribution
             let genesis_address = "0x0000000000000000000000000000000000000000";
@@ -97,14 +97,14 @@ impl Blockchain {
                 nonce: 0,
                 tx_type: crate::core::transaction::TransactionType::Transfer,
             };
-            utxo_set.add_utxo(&genesis_tx, 0, COINBASE_MATURITY);
+            account_state.credit_account(&genesis_tx, 0, COINBASE_MATURITY);
             
             storage.save_block(&genesis)?;
             storage.set_chain_height(1)?;
-            storage.save_account_state(&utxo_set)?;
+            storage.save_account_state(&account_state)?;
             
             tracing::info!("✅ Genesis block verified: {}", GENESIS_HASH);
-            (vec![genesis], utxo_set, 4)
+            (vec![genesis], account_state, 4)
         } else {
             tracing::info!("Loaded existing blockchain with {} blocks", chain.len());
             
@@ -115,13 +115,13 @@ impl Blockchain {
             }
             
             let difficulty = chain.last().map(|b| b.difficulty).unwrap_or(4);
-            (chain, utxo_set, difficulty)
+            (chain, account_state, difficulty)
         };
 
         Ok(Self {
             chain: Arc::new(RwLock::new(chain)),
             pending_transactions: Arc::new(RwLock::new(Vec::new())),
-            utxo_set: Arc::new(RwLock::new(utxo_set)),
+            account_state: Arc::new(RwLock::new(account_state)),
             pending_nonces: Arc::new(DashMap::new()), // Concurrent HashMap - no lock needed
             storage,
             orphaned_blocks: Arc::new(RwLock::new(Vec::new())),
@@ -167,7 +167,7 @@ impl Blockchain {
         }
         
         // Validate nonce (account-based model) - ATOMIC OPERATION (no race condition)
-        let chain_nonce = self.utxo_set.read().get_nonce(&transaction.sender);
+        let chain_nonce = self.account_state.read().get_nonce(&transaction.sender);
         
         // CRITICAL FIX: Atomic check-and-increment using DashMap
         // This prevents two parallel txs from using the same nonce
@@ -195,7 +195,7 @@ impl Blockchain {
 
         // Check sender has sufficient balance (amount + fee)
         let total_required = transaction.amount.saturating_add(transaction.fee);
-        let available = self.utxo_set.read().get_balance(&transaction.sender);
+        let available = self.account_state.read().get_balance(&transaction.sender);
         
         if available < total_required {
             return Err(BlockchainError::InsufficientBalance {
@@ -262,7 +262,7 @@ impl Blockchain {
         all_transactions.extend(transactions);
 
         // CRITICAL: Clone state for transactional update
-        let mut new_state = self.utxo_set.read().clone();
+        let mut new_state = self.account_state.read().clone();
         
         // Unlock any mature coinbase rewards at current height
         let current_height = self.chain.read().len() as u64;
@@ -272,12 +272,12 @@ impl Blockchain {
         for tx in &all_transactions {
             if !tx.is_coinbase() {
                 let total = tx.amount.saturating_add(tx.fee);
-                if !new_state.spend_utxos(&tx.sender, total) {
+                if !new_state.debit_account(&tx.sender, total) {
                     tracing::warn!("Failed to spend for {} - skipping tx", tx.sender);
                     continue;
                 }
             }
-            new_state.add_utxo(tx, current_height, COINBASE_MATURITY);
+            new_state.credit_account(tx, current_height, COINBASE_MATURITY);
         }
 
         // Create and mine new block
@@ -299,7 +299,7 @@ impl Blockchain {
         self.storage.save_account_state(&new_state)?;
 
         // COMMIT: Update in-memory state (atomicity)
-        *self.utxo_set.write() = new_state;
+        *self.account_state.write() = new_state;
         self.chain.write().push(new_block.clone());
         
         // Remove only mined transactions from mempool
@@ -499,7 +499,7 @@ impl Blockchain {
 
     /// Get balance for an address (u64 microunits)
     pub fn get_balance(&self, address: &str) -> u64 {
-        self.utxo_set.read().get_balance(address)
+        self.account_state.read().get_balance(address)
     }
 
     /// Get the blockchain (for network sync)
@@ -523,8 +523,8 @@ impl Blockchain {
     }
 
     /// Get account state (mutable)
-    pub fn get_utxo_set_mut(&self) -> parking_lot::RwLockWriteGuard<AccountState> {
-        self.utxo_set.write()
+    pub fn get_account_state_mut(&self) -> parking_lot::RwLockWriteGuard<AccountState> {
+        self.account_state.write()
     }
 
     /// Add a block received from the network (WITH FULL VALIDATION AND FORK RESOLUTION)
@@ -582,7 +582,7 @@ impl Blockchain {
         
         // Consensus rules validation
         self.validate_block_consensus(&block, &latest)?;
-        let mut new_state = self.utxo_set.read().clone();
+        let mut new_state = self.account_state.read().clone();
         
         // Unlock any mature coinbase rewards
         new_state.unlock_mature_coinbase(block.index);
@@ -591,12 +591,12 @@ impl Blockchain {
         for tx in &block.transactions {
             if !tx.is_coinbase() {
                 let total = tx.amount.saturating_add(tx.fee);
-                if !new_state.spend_utxos(&tx.sender, total) {
+                if !new_state.debit_account(&tx.sender, total) {
                     tracing::warn!("Network block has invalid tx: insufficient balance");
                     return Err(BlockchainError::InvalidBlock);
                 }
             }
-            new_state.add_utxo(tx, block.index, COINBASE_MATURITY);
+            new_state.credit_account(tx, block.index, COINBASE_MATURITY);
         }
 
         // 6. COMMIT: Add to chain
@@ -608,7 +608,7 @@ impl Blockchain {
         self.storage.save_account_state(&new_state)?;
         
         // 8. COMMIT: Update state
-        *self.utxo_set.write() = new_state;
+        *self.account_state.write() = new_state;
 
         // 9. Remove mined transactions from pending
         let mut pending = self.pending_transactions.write();

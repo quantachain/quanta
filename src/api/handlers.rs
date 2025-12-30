@@ -104,7 +104,7 @@ async fn create_transaction(
 
     // Get current nonce
     let blockchain = state.blockchain.read().await;
-    let current_nonce = blockchain.get_utxo_set_mut().get_nonce(&wallet.address);
+    let current_nonce = blockchain.get_account_state_mut().get_nonce(&wallet.address);
     let next_nonce = current_nonce + 1;
     drop(blockchain);
 

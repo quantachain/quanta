@@ -433,7 +433,7 @@ async fn main() {
             let current_nonce = {
                 let bc = blockchain.read().await;
                 bc.get_balance(&wallet.address); // Ensure account exists
-                let nonce = bc.get_utxo_set_mut().get_nonce(&wallet.address);
+                let nonce = bc.get_account_state_mut().get_nonce(&wallet.address);
                 nonce
             };
             let next_nonce = current_nonce + 1;
@@ -549,7 +549,7 @@ async fn run_demo(db_path: &str) {
     let amount1_microunits = qua_to_microunits(25.0);
     let nonce1 = {
         let bc = blockchain.read().await;
-        let nonce = bc.get_utxo_set_mut().get_nonce(&wallet1.address);
+        let nonce = bc.get_account_state_mut().get_nonce(&wallet1.address);
         nonce + 1
     };
     
@@ -576,7 +576,7 @@ async fn run_demo(db_path: &str) {
     let amount2_microunits = qua_to_microunits(15.0);
     let nonce2 = {
         let bc = blockchain.read().await;
-        let nonce = bc.get_utxo_set_mut().get_nonce(&wallet1.address);
+        let nonce = bc.get_account_state_mut().get_nonce(&wallet1.address);
         nonce + 1
     };
     
