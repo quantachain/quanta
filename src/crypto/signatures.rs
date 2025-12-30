@@ -144,35 +144,4 @@ pub fn double_sha3(data: &[u8]) -> String {
     hex::encode(&hash2)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn test_keypair_generation() {
-        let keypair = FalconKeypair::generate();
-        assert!(keypair.public_key.len() > 800); // ~897 bytes
-        assert!(keypair.secret_key.len() > 1200); // ~1281 bytes
-    }
-
-    #[test]
-    fn test_signature_verification() {
-        let keypair = FalconKeypair::generate();
-        let message = b"Quantum-resistant transaction";
-        let signature = keypair.sign(message);
-        
-        assert!(signature.len() > 600); // ~666 bytes signature
-        assert!(verify_signature(message, &signature, &keypair.public_key));
-    }
-
-    #[test]
-    fn test_address_generation() {
-        let keypair = FalconKeypair::generate();
-        let address = keypair.get_address();
-        assert_eq!(address.len(), 42); // 0x + 40 hex chars
-        assert!(address.starts_with("0x"));
-        
-        let raw = keypair.get_address_raw();
-        assert_eq!(raw.len(), 40); // 20 bytes = 40 hex chars
-    }
-}

@@ -654,8 +654,3 @@ pub struct BlockchainStats {
     pub pending_transactions: usize,
 }
 
-#[cfg(test)]
-mod tests {
-    // Tests need to be updated to work with new storage-based initialization
-    // TODO: Add proper integration tests
-}

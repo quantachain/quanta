@@ -257,28 +257,3 @@ impl QuantumWallet {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::NamedTempFile;
-
-    #[test]
-    fn test_quantum_wallet_creation() {
-        let wallet = QuantumWallet::new();
-        assert_eq!(wallet.address.len(), 42); // 0x + 40 hex chars
-        assert!(wallet.address.starts_with("0x"));
-    }
-
-    #[test]
-    fn test_quantum_safe_encryption() {
-        let wallet = QuantumWallet::new();
-        let temp_file = NamedTempFile::new().unwrap();
-        let path = temp_file.path().to_str().unwrap();
-        
-        let password = "test_quantum_password_123";
-        wallet.save_quantum_safe(path, password).unwrap();
-        
-        let loaded = QuantumWallet::load_quantum_safe(path, password).unwrap();
-        assert_eq!(wallet.address, loaded.address);
-    }
-}

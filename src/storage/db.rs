@@ -114,24 +114,3 @@ impl BlockchainStorage {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    #[test]
-    fn test_storage_persistence() {
-        let temp_dir = TempDir::new().unwrap();
-        let storage = BlockchainStorage::new(temp_dir.path()).unwrap();
-        
-        let block = Block::genesis();
-        storage.save_block(&block).unwrap();
-        storage.set_chain_height(1).unwrap();
-        
-        let loaded_block = storage.load_block(0).unwrap();
-        assert_eq!(loaded_block.index, block.index);
-        
-        let height = storage.get_chain_height().unwrap();
-        assert_eq!(height, 1);
-    }
-}

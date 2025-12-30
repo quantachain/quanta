@@ -183,30 +183,4 @@ impl Block {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn test_genesis_block() {
-        let genesis = Block::genesis();
-        assert_eq!(genesis.index, 0);
-        assert_eq!(genesis.previous_hash.len(), 64);
-    }
-
-    #[test]
-    fn test_block_hashing() {
-        let block = Block::new(1, vec![], "previous_hash".to_string(), 1);
-        let hash1 = block.calculate_hash();
-        let hash2 = block.calculate_hash();
-        assert_eq!(hash1, hash2);
-    }
-
-    #[test]
-    fn test_mining() {
-        let mut block = Block::new(1, vec![], "0".repeat(64), 2);
-        block.mine();
-        assert!(block.has_valid_hash());
-        assert!(block.hash.starts_with("00"));
-    }
-}

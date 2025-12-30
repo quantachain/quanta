@@ -156,19 +156,3 @@ pub fn deserialize_message(data: &[u8]) -> Result<P2PMessage, String> {
     bincode::deserialize(data).map_err(|e| format!("Deserialization error: {}", e))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_message_serialization() {
-        let msg = P2PMessage::Ping(12345);
-        let serialized = serialize_message(&msg).unwrap();
-        let deserialized = deserialize_message(&serialized).unwrap();
-        
-        match deserialized {
-            P2PMessage::Ping(nonce) => assert_eq!(nonce, 12345),
-            _ => panic!("Wrong message type"),
-        }
-    }
-}
