@@ -68,6 +68,8 @@ rustls-pemfile = "2.0"
 # HD Wallet (BIP32/39)
 bip39 = "2.0"
 hmac = "0.12"
+dashmap = "6.1.0"
+tower_governor = "0.8.0"
 
 # For tests
 [dev-dependencies]

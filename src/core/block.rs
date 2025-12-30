@@ -47,9 +47,12 @@ impl Block {
 
     /// Create the genesis block (first block in chain)
     pub fn genesis() -> Self {
+        // CONSENSUS-CRITICAL: Genesis block parameters
+        // Timestamp: January 1, 2025 00:00:00 UTC (Quanta Launch)
+        // All nodes must use identical genesis parameters
         let mut genesis = Self {
             index: 0,
-            timestamp: 1640000000, // Fixed timestamp
+            timestamp: 1735689600, // 2025-01-01 00:00:00 UTC
             transactions: vec![],
             previous_hash: "0".repeat(64),
             nonce: 0,

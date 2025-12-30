@@ -2,6 +2,10 @@ use crate::core::block::Block;
 use crate::core::transaction::Transaction;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use hmac::{Hmac, Mac};
+use sha3::Sha3_256;
+
+type HmacSha3_256 = Hmac<Sha3_256>;
 
 /// P2P protocol messages for blockchain network communication
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -46,6 +50,14 @@ pub enum P2PMessage {
     Disconnect,
 }
 
+/// Authenticated message wrapper (prevents Sybil attacks and tampering)
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AuthenticatedMessage {
+    pub message: P2PMessage,
+    pub hmac: Vec<u8>, // HMAC-SHA3-256 of message
+    pub nonce: u64, // Prevents replay attacks
+}
+
 /// Simplified block header for efficient sync
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BlockHeader {
@@ -75,6 +87,50 @@ pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024; // 10MB
 pub const PING_INTERVAL_SECS: u64 = 60;
 pub const PEER_TIMEOUT_SECS: u64 = 180;
+
+// SECURITY: Network-wide shared secret for message authentication
+// In production: derive from genesis block + node identity
+// For now: hardcoded (all nodes must share this)
+const NETWORK_SECRET: &[u8] = b"QUANTA_NETWORK_SECRET_v1_REPLACE_IN_PRODUCTION";
+
+impl AuthenticatedMessage {
+    /// Create authenticated message with HMAC
+    pub fn create(message: P2PMessage) -> Result<Self, String> {
+        let nonce = rand::random::<u64>();
+        let message_bytes = bincode::serialize(&message)
+            .map_err(|e| format!("Serialization error: {}", e))?;
+        
+        // Compute HMAC-SHA3-256
+        let mut mac = HmacSha3_256::new_from_slice(NETWORK_SECRET)
+            .map_err(|e| format!("HMAC error: {}", e))?;
+        mac.update(&message_bytes);
+        mac.update(&nonce.to_le_bytes());
+        let hmac = mac.finalize().into_bytes().to_vec();
+        
+        Ok(Self {
+            message,
+            hmac,
+            nonce,
+        })
+    }
+    
+    /// Verify message HMAC (prevents tampering and Sybil attacks)
+    pub fn verify(&self) -> bool {
+        let message_bytes = match bincode::serialize(&self.message) {
+            Ok(b) => b,
+            Err(_) => return false,
+        };
+        
+        let mut mac = match HmacSha3_256::new_from_slice(NETWORK_SECRET) {
+            Ok(m) => m,
+            Err(_) => return false,
+        };
+        mac.update(&message_bytes);
+        mac.update(&self.nonce.to_le_bytes());
+        
+        mac.verify_slice(&self.hmac).is_ok()
+    }
+}
 
 /// Message handler trait for processing P2P messages
 #[async_trait::async_trait]

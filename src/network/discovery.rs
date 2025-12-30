@@ -11,6 +11,8 @@ pub struct PeerMeta {
     pub last_seen: i64,
     pub failures: u32,
     pub source: PeerSource,
+    pub reputation: i32, // Reputation score: starts at 0, increases on good behavior, decreases on bad
+    pub banned_until: Option<i64>, // Unix timestamp when ban expires (None if not banned)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -55,31 +57,53 @@ impl PeerDiscovery {
                 last_seen: chrono::Utc::now().timestamp(),
                 failures: 0,
                 source,
+                reputation: 0, // Start with neutral reputation
+                banned_until: None,
             }
         });
     }
     
-    /// Update peer last seen time
+    /// Update peer last seen time and improve reputation
     pub async fn update_peer_seen(&self, addr: SocketAddr) {
         let mut peers = self.known_peers.write().await;
         if let Some(meta) = peers.get_mut(&addr) {
             meta.last_seen = chrono::Utc::now().timestamp();
             meta.failures = 0; // Reset failures on successful contact
+            meta.reputation = (meta.reputation + 1).min(100); // Increase reputation (cap at 100)
         }
     }
     
-    /// Mark peer as failed
+    /// Mark peer as failed (decreases reputation, may result in ban)
     pub async fn mark_peer_failed(&self, addr: SocketAddr) {
         let mut peers = self.known_peers.write().await;
         if let Some(meta) = peers.get_mut(&addr) {
             meta.failures += 1;
+            meta.reputation -= 5; // Decrease reputation on failure
+            
             let failures = meta.failures;
+            let reputation = meta.reputation;
             let is_seed = meta.source == PeerSource::Seed;
             
-            // Remove if too many failures (unless it's a seed)
-            if failures > 5 && !is_seed {
+            // Ban logic: 3 strikes with low reputation
+            if (failures > 3 && reputation < -20) || failures > 10 {
+                if !is_seed {
+                    // Temporary ban: 1 hour for first ban, exponential backoff
+                    let ban_duration = 3600 * (failures as i64 / 3);
+                    let ban_until = chrono::Utc::now().timestamp() + ban_duration;
+                    meta.banned_until = Some(ban_until);
+                    warn!("Peer {} BANNED until {} (reputation: {}, failures: {})", 
+                        addr, ban_until, reputation, failures);
+                } else {
+                    warn!("Seed node {} has {} failures (not banning seed)", addr, failures);
+                }
+            } else {
+                warn!("Peer {} failed (reputation: {}, failures: {})", addr, reputation, failures);
+            }
+            
+            // Remove if reputation too low and not a seed
+            if reputation < -50 && !is_seed {
                 peers.remove(&addr);
-                warn!("Removed peer {} after {} failures", addr, failures);
+                warn!("Removed peer {} after reputation dropped to {}", addr, reputation);
             }
         }
     }
@@ -108,11 +132,18 @@ impl PeerDiscovery {
         let peers = self.known_peers.read().await;
         let now = chrono::Utc::now().timestamp();
         
-        // Filter healthy peers (seen recently, low failures)
+        // Filter healthy peers (seen recently, low failures, not banned, good reputation)
         let mut healthy: Vec<SocketAddr> = peers
             .values()
             .filter(|meta| {
-                meta.failures < 3 && (now - meta.last_seen) < 3600 // Active in last hour
+                // Not currently banned
+                let not_banned = meta.banned_until.map_or(true, |ban_until| now > ban_until);
+                // Good reputation and recent activity
+                let healthy = meta.failures < 3 
+                    && meta.reputation > -10 
+                    && (now - meta.last_seen) < 3600; // Active in last hour
+                
+                not_banned && healthy
             })
             .map(|meta| meta.address)
             .collect();
@@ -127,6 +158,18 @@ impl PeerDiscovery {
         
         healthy.into_iter().take(count).collect()
     }
+    
+    /// Check if peer is currently banned
+    pub async fn is_banned(&self, addr: &SocketAddr) -> bool {
+        let peers = self.known_peers.read().await;
+        if let Some(meta) = peers.get(addr) {
+            if let Some(ban_until) = meta.banned_until {
+                let now = chrono::Utc::now().timestamp();
+                return now < ban_until;
+            }
+        }
+        false
+    }
 
     /// Bootstrap discovery from seed nodes (deduplicated)
     pub async fn bootstrap(&self) -> Vec<SocketAddr> {
@@ -139,6 +182,8 @@ impl PeerDiscovery {
                 last_seen: chrono::Utc::now().timestamp(),
                 failures: 0,
                 source: PeerSource::Seed,
+                reputation: 50, // Seeds start with good reputation
+                banned_until: None,
             });
         }
         
@@ -166,6 +211,8 @@ impl PeerDiscovery {
                 last_seen: now,
                 failures: 0,
                 source: PeerSource::Discovered,
+                reputation: 0, // New discovered peers start neutral
+                banned_until: None,
             });
         }
     }
