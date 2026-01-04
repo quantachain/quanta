@@ -21,7 +21,7 @@ max_peers = 125
 # Bootstrap peer addresses (comma-separated host:port)
 bootstrap_nodes = []
 
-# ⚠️ CONSENSUS CONFIG - MUST MATCH NETWORK ⚠️
+#  CONSENSUS CONFIG - MUST MATCH NETWORK 
 [consensus]
 max_block_transactions = 2000
 max_block_size_bytes = 1_048_576  # 1 MB
@@ -33,6 +33,14 @@ coinbase_maturity = 100  # Blocks before mining reward is spendable
 [security]
 max_mempool_size = 5000
 transaction_expiry_seconds = 86400  # 24 hours
+
+#  PRODUCTION SECURITY (enable before testnet launch)
+enable_rate_limiting = true         # Prevent API abuse
+rate_limit_per_minute = 60          # Max 60 requests/min per IP
+enable_peer_banning = true          # Auto-ban malicious peers
+require_tls = false                 # Set true for public RPC nodes
+
+#  FOR PUBLIC NODES: Set require_tls = true and configure TLS certificates
 
 [mining]
 initial_reward_microunits = 50_000_000  # 50 QUA

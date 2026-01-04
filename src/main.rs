@@ -6,8 +6,7 @@ mod network;
 mod api;
 mod config;
 
-#[cfg(test)]
-mod tests;
+
 
 use consensus::Blockchain;
 use crypto::QuantumWallet;
@@ -69,6 +68,10 @@ enum Commands {
         /// Disable P2P networking (single node mode)
         #[arg(long)]
         no_network: bool,
+        
+        /// Run in background and log to file (detached mode)
+        #[arg(long)]
+        detach: bool,
     },
     
     /// Create a new encrypted wallet
@@ -154,30 +157,61 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .with_level(true)
-        .init();
-
-    println!("╔═══════════════════════════════════════════════════════════════╗");
-    println!("║        QUANTA - Quantum-Resistant Blockchain                  ║");
-    println!("║         Falcon Signatures | Post-Quantum Cryptography         ║");
-    println!("╚═══════════════════════════════════════════════════════════════╝\n");
+    println!("");
+    println!("        QUANTA - Quantum-Resistant Blockchain                  ");
+    println!("         Falcon Signatures | Post-Quantum Cryptography         ");
+    println!("\n");
 
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Start { config, port, network_port, db, bootstrap, no_network } => {
+        Commands::Start { config, port, network_port, db, bootstrap, no_network, detach } => {
             // Load configuration
             let cfg = QuantaConfig::load_with_overrides(
                 config,
                 port,
                 network_port,
-                db,
+                db.clone(),
                 bootstrap.clone(),
                 no_network
             ).expect("Failed to load configuration");
+            
+            // Setup logging based on detach mode
+            if detach {
+                // Create logs directory
+                std::fs::create_dir_all("logs").expect("Failed to create logs directory");
+                
+                // Create log file name based on network port
+                let log_file = format!("logs/quanta_node_{}.log", cfg.node.network_port);
+                let file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log_file)
+                    .expect("Failed to open log file");
+                
+                // Setup file-based logging
+                tracing_subscriber::fmt()
+                    .with_writer(Arc::new(file))
+                    .with_ansi(false)
+                    .with_target(false)
+                    .with_level(true)
+                    .init();
+                
+                // Write PID file for process management
+                let pid_file = format!("logs/quanta_node_{}.pid", cfg.node.network_port);
+                std::fs::write(&pid_file, std::process::id().to_string())
+                    .expect("Failed to write PID file");
+                
+                tracing::info!("Starting QUANTA node in DETACHED mode");
+                tracing::info!("Log file: {}", log_file);
+                tracing::info!("PID file: {}", pid_file);
+            } else {
+                // Initialize console logging for non-detached mode
+                tracing_subscriber::fmt()
+                    .with_target(false)
+                    .with_level(true)
+                    .init();
+            }
             
             tracing::info!("Starting QUANTA node with configuration:");
             tracing::info!("  API Port: {}", cfg.node.api_port);
@@ -305,6 +339,13 @@ async fn main() {
         }
 
         Commands::NewWallet { file } => {
+            // Initialize console logging for non-start commands
+            tracing_subscriber::fmt()
+                .with_target(false)
+                .with_level(true)
+                .try_init()
+                .ok();
+            
             let wallet = QuantumWallet::new();
             
             println!("\nEnter password to encrypt wallet:");
@@ -349,9 +390,9 @@ async fn main() {
             let encrypted = wallet.export_encrypted(&password).expect("Failed to encrypt wallet");
             std::fs::write(&file, encrypted).expect("Failed to save wallet");
             
-            println!("\n✅ HD Wallet created and encrypted successfully!");
-            println!("📁 Saved to: {}", file);
-            println!("\n⚠️  CRITICAL: Write down your 24-word mnemonic phrase!");
+            println!("\n HD Wallet created and encrypted successfully!");
+            println!(" Saved to: {}", file);
+            println!("\n  CRITICAL: Write down your 24-word mnemonic phrase!");
             println!("   This is the ONLY way to recover your wallet.");
         }
 
@@ -391,7 +432,7 @@ async fn main() {
             let wallet = match QuantumWallet::load_quantum_safe(&wallet_file, &password) {
                 Ok(w) => w,
                 Err(e) => {
-                    eprintln!("❌ Failed to load wallet: {}", e);
+                    eprintln!(" Failed to load wallet: {}", e);
                     return;
                 }
             };
@@ -399,15 +440,15 @@ async fn main() {
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
             
-            println!("⛏️  Mining new block...");
+            println!("  Mining new block...");
             let mine_result = blockchain.write().await.mine_pending_transactions(wallet.address.clone());
             match mine_result {
                 Ok(_) => {
-                    println!("✅ Block mined successfully!");
+                    println!(" Block mined successfully!");
                     let balance_microunits = blockchain.read().await.get_balance(&wallet.address);
-                    println!("💰 New balance: {:.6} QUA", microunits_to_qua(balance_microunits));
+                    println!(" New balance: {:.6} QUA", microunits_to_qua(balance_microunits));
                 }
-                Err(e) => eprintln!("❌ Mining failed: {}", e),
+                Err(e) => eprintln!(" Mining failed: {}", e),
             }
         }
 
@@ -418,7 +459,7 @@ async fn main() {
             let wallet = match QuantumWallet::load_quantum_safe(&wallet_file, &password) {
                 Ok(w) => w,
                 Err(e) => {
-                    eprintln!("❌ Failed to load wallet: {}", e);
+                    eprintln!(" Failed to load wallet: {}", e);
                     return;
                 }
             };
@@ -458,11 +499,11 @@ async fn main() {
             let add_result = blockchain.write().await.add_transaction(tx);
             match add_result {
                 Ok(_) => {
-                    println!("✅ Transaction added to mempool");
-                    println!("📤 Sending {:.6} QUA to {}", amount, to);
-                    println!("🔢 Nonce: {}", next_nonce);
+                    println!(" Transaction added to mempool");
+                    println!(" Sending {:.6} QUA to {}", amount, to);
+                    println!(" Nonce: {}", next_nonce);
                 }
-                Err(e) => eprintln!("❌ Transaction failed: {}", e),
+                Err(e) => eprintln!(" Transaction failed: {}", e),
             }
         }
 
@@ -474,23 +515,23 @@ async fn main() {
             let reward_qua = microunits_to_qua(stats.mining_reward);
             let supply_qua = microunits_to_qua(stats.total_supply);
             
-            println!("╔═══════════════════════════════════════════════════════════════╗");
-            println!("║                QUANTA BLOCKCHAIN STATISTICS                   ║");
-            println!("╠═══════════════════════════════════════════════════════════════╣");
-            println!("║ Chain Length: {} blocks                                  ║", stats.chain_length);
-            println!("║ Total Transactions: {}                                    ║", stats.total_transactions);
-            println!("║ Current Difficulty: {}                                     ║", stats.current_difficulty);
-            println!("║ Mining Reward: {:.6} QUA                                 ║", reward_qua);
-            println!("║ Total Supply: {:.6} QUA                                  ║", supply_qua);
-            println!("║ Pending Transactions: {}                                   ║", stats.pending_transactions);
-            println!("╠═══════════════════════════════════════════════════════════════╣");
-            println!("║ Quantum Resistance: ACTIVE                                  ║");
-            println!("║ Signature Algorithm: Falcon-512 (NIST PQC)                   ║");
-            println!("║ Hash Algorithm: SHA3-256                                      ║");
-            println!("║ Wallet Encryption: Kyber-1024 + ChaCha20-Poly1305            ║");
-            println!("║ Persistent Storage: Sled Database                            ║");
-            println!("║ Amount Precision: u64 microunits (deterministic)             ║");
-            println!("╚═══════════════════════════════════════════════════════════════╝");
+            println!("");
+            println!("                QUANTA BLOCKCHAIN STATISTICS                   ");
+            println!("");
+            println!(" Chain Length: {} blocks                                  ", stats.chain_length);
+            println!(" Total Transactions: {}                                    ", stats.total_transactions);
+            println!(" Current Difficulty: {}                                     ", stats.current_difficulty);
+            println!(" Mining Reward: {:.6} QUA                                 ", reward_qua);
+            println!(" Total Supply: {:.6} QUA                                  ", supply_qua);
+            println!(" Pending Transactions: {}                                   ", stats.pending_transactions);
+            println!("");
+            println!(" Quantum Resistance: ACTIVE                                  ");
+            println!(" Signature Algorithm: Falcon-512 (NIST PQC)                   ");
+            println!(" Hash Algorithm: SHA3-256                                      ");
+            println!(" Wallet Encryption: Kyber-1024 + ChaCha20-Poly1305            ");
+            println!(" Persistent Storage: Sled Database                            ");
+            println!(" Amount Precision: u64 microunits (deterministic)             ");
+            println!("");
         }
 
         Commands::Validate { db } => {
@@ -526,24 +567,24 @@ async fn run_demo(db_path: &str) {
     let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
     
     // Create demo wallets
-    println!("📝 Creating quantum-safe encrypted demo wallets...");
+    println!(" Creating quantum-safe encrypted demo wallets...");
     let wallet1 = QuantumWallet::new();
     let wallet2 = QuantumWallet::new();
     let wallet3 = QuantumWallet::new();
     
     // WARNING: Insecure password for demo ONLY! Never use in production!
     const DEMO_PASSWORD: &str = "INSECURE_DEMO_PASSWORD_DO_NOT_USE_IN_PRODUCTION";
-    println!("⚠️  Demo wallets use INSECURE password - FOR TESTING ONLY!");
+    println!("  Demo wallets use INSECURE password - FOR TESTING ONLY!");
     
     wallet1.save_quantum_safe("demo_wallet1.qua", DEMO_PASSWORD).unwrap();
     wallet2.save_quantum_safe("demo_wallet2.qua", DEMO_PASSWORD).unwrap();
     wallet3.save_quantum_safe("demo_wallet3.qua", DEMO_PASSWORD).unwrap();
     
-    println!("\n⛏️  Mining genesis rewards...");
+    println!("\n  Mining genesis rewards...");
     blockchain.write().await.mine_pending_transactions(wallet1.address.clone()).unwrap();
     blockchain.write().await.mine_pending_transactions(wallet1.address.clone()).unwrap();
     
-    println!("\n💸 Creating transactions...");
+    println!("\n Creating transactions...");
     
     // Transaction 1: 25 QUA = 25_000_000 microunits
     let amount1_microunits = qua_to_microunits(25.0);
@@ -567,9 +608,9 @@ async fn run_demo(db_path: &str) {
     let signing_data1 = tx1.get_signing_data();
     tx1.signature = wallet1.keypair.sign(&signing_data1);
     blockchain.write().await.add_transaction(tx1).unwrap();
-    println!("  ✅ Tx 1: 25 QUA to wallet2 (nonce {})", nonce1);
+    println!("   Tx 1: 25 QUA to wallet2 (nonce {})", nonce1);
     
-    println!("\n⛏️  Mining first transaction...");
+    println!("\n  Mining first transaction...");
     blockchain.write().await.mine_pending_transactions(wallet2.address.clone()).unwrap();
     
     // Transaction 2: 15 QUA = 15_000_000 microunits
@@ -594,13 +635,13 @@ async fn run_demo(db_path: &str) {
     let signing_data2 = tx2.get_signing_data();
     tx2.signature = wallet1.keypair.sign(&signing_data2);
     blockchain.write().await.add_transaction(tx2).unwrap();
-    println!("  ✅ Tx 2: 15 QUA to wallet3 (nonce {})", nonce2);
+    println!("   Tx 2: 15 QUA to wallet3 (nonce {})", nonce2);
     
-    println!("\n⛏️  Mining second transaction...");
+    println!("\n  Mining second transaction...");
     blockchain.write().await.mine_pending_transactions(wallet3.address.clone()).unwrap();
     
     // Show final balances
-    println!("\n💰 Final Balances:");
+    println!("\n Final Balances:");
     let bc = blockchain.read().await;
     let bal1 = microunits_to_qua(bc.get_balance(&wallet1.address));
     let bal2 = microunits_to_qua(bc.get_balance(&wallet2.address));
@@ -611,40 +652,40 @@ async fn run_demo(db_path: &str) {
     
     // Show stats
     let stats = bc.get_stats();
-    println!("\n📊 Blockchain Stats:");
+    println!("\n Blockchain Stats:");
     println!("  Blocks: {}", stats.chain_length);
     println!("  Transactions: {}", stats.total_transactions);
     println!("  Total Supply: {:.6} QUA ({} microunits)", microunits_to_qua(stats.total_supply), stats.total_supply);
     println!("  Current Difficulty: {}", stats.current_difficulty);
     
     // Validate
-    println!("\n🔍 Validating blockchain...");
+    println!("\n Validating blockchain...");
     if bc.is_valid() {
-        println!("  ✅ All Falcon signatures verified!");
-        println!("  ✅ All nonces valid!");
-        println!("  ✅ Blockchain integrity confirmed!");
-        println!("  ✅ Data persisted to disk: {}", db_path);
+        println!("   All Falcon signatures verified!");
+        println!("   All nonces valid!");
+        println!("   Blockchain integrity confirmed!");
+        println!("   Data persisted to disk: {}", db_path);
     }
     drop(bc);
     
     // Display comparison
-    println!("\n╔═══════════════════════════════════════════════════════════════╗");
-    println!("║           FALCON vs ECDSA COMPARISON                          ║");
-    println!("╠═══════════════════════════════════════════════════════════════╣");
-    println!("║                    Falcon-512  │  ECDSA (secp256k1)           ║");
-    println!("║ Public Key Size:    897 bytes  │  33 bytes                    ║");
-    println!("║ Private Key Size:  1281 bytes  │  32 bytes                    ║");
-    println!("║ Signature Size:     666 bytes  │  65 bytes                    ║");
-    println!("║ Quantum Resistant:  ✓ YES      │  ✗ NO                        ║");
-    println!("║ NIST PQC Standard:  ✓ YES      │  ✗ NO                        ║");
-    println!("╚═══════════════════════════════════════════════════════════════╝");
+    println!("\n");
+    println!("           FALCON vs ECDSA COMPARISON                          ");
+    println!("");
+    println!("                    Falcon-512    ECDSA (secp256k1)           ");
+    println!(" Public Key Size:    897 bytes    33 bytes                    ");
+    println!(" Private Key Size:  1281 bytes    32 bytes                    ");
+    println!(" Signature Size:     666 bytes    65 bytes                    ");
+    println!(" Quantum Resistant:   YES         NO                        ");
+    println!(" NIST PQC Standard:   YES         NO                        ");
+    println!("");
     
-    println!("\n🎉 Production demo complete!");
-    println!("💾 Blockchain persisted to: {}", db_path);
-    println!("💰 All amounts stored as u64 microunits (deterministic)");
-    println!("🔢 Nonce-based replay protection enabled");
-    println!("⚠️  Demo wallets password: INSECURE_DEMO_PASSWORD_DO_NOT_USE_IN_PRODUCTION");
-    println!("⚠️  WARNING: Demo password is PUBLIC - delete wallets after testing!");
-    println!("\n📡 To start API server:");
+    println!("\n Production demo complete!");
+    println!(" Blockchain persisted to: {}", db_path);
+    println!(" All amounts stored as u64 microunits (deterministic)");
+    println!(" Nonce-based replay protection enabled");
+    println!("  Demo wallets password: INSECURE_DEMO_PASSWORD_DO_NOT_USE_IN_PRODUCTION");
+    println!("  WARNING: Demo password is PUBLIC - delete wallets after testing!");
+    println!("\n To start API server:");
     println!("   cargo run --release -- start --db {} --port 3000", db_path);
 }

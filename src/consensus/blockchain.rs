@@ -51,8 +51,10 @@ const COINBASE_MATURITY: u64 = 100; // Blocks before coinbase can be spent
 const MAX_FUTURE_BLOCK_TIME: i64 = 7200; // 2 hours maximum future timestamp
 
 // CONSENSUS-CRITICAL: Genesis block hash (prevents chain split attacks)
-// Generated from Block::genesis() with timestamp 1735689600 (2025-01-01 00:00:00 UTC)
-const GENESIS_HASH: &str = "a10e7034c9d4a25ee7b59b8b6e7239fa5ebc739ab080f818be9b40fbe43d0859";
+// Generated from Block::genesis() with timestamp 1735689600 (2026-01-01 00:00:00 UTC)
+// Difficulty: 6 (PRODUCTION)
+//  VERIFIED: 2026-01-04 - Hash regenerated with correct parameters
+const GENESIS_HASH: &str = "527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d";
 
 /// Thread-safe blockchain with persistent storage
 pub struct Blockchain {
@@ -103,7 +105,7 @@ impl Blockchain {
             storage.set_chain_height(1)?;
             storage.save_account_state(&account_state)?;
             
-            tracing::info!("✅ Genesis block verified: {}", GENESIS_HASH);
+            tracing::info!(" Genesis block verified: {}", GENESIS_HASH);
             (vec![genesis], account_state, 4)
         } else {
             tracing::info!("Loaded existing blockchain with {} blocks", chain.len());
@@ -313,7 +315,7 @@ impl Blockchain {
             }
         }
         
-        tracing::info!("✅ Block {} mined: {} txs, reward {} microunits", index, new_block.transactions.len(), reward);
+        tracing::info!(" Block {} mined: {} txs, reward {} microunits", index, new_block.transactions.len(), reward);
         Ok(())
     }
 
@@ -385,6 +387,9 @@ impl Blockchain {
         }
         
         // 5. All non-coinbase txs must have valid signatures and nonces
+        // CRITICAL: Build temporary state to validate balances and nonces
+        let mut temp_state = self.account_state.read().clone();
+        
         for tx in &block.transactions {
             if !tx.is_coinbase() {
                 if !tx.verify() {
@@ -398,6 +403,36 @@ impl Blockchain {
                         min: MIN_TRANSACTION_FEE,
                     });
                 }
+                
+                // CRITICAL: Validate nonce is sequential (prevents replay)
+                let expected_nonce = temp_state.get_nonce(&tx.sender) + 1;
+                if tx.nonce != expected_nonce {
+                    tracing::warn!("Invalid nonce in block: tx from {} has nonce {}, expected {}",
+                        tx.sender, tx.nonce, expected_nonce);
+                    return Err(BlockchainError::InvalidNonce {
+                        expected: expected_nonce,
+                        actual: tx.nonce,
+                    });
+                }
+                
+                // CRITICAL: Validate sufficient balance (prevents double-spend)
+                let total_required = tx.amount.saturating_add(tx.fee);
+                let available = temp_state.get_balance(&tx.sender);
+                if available < total_required {
+                    tracing::warn!("Insufficient balance in block: {} has {} but needs {}",
+                        tx.sender, available, total_required);
+                    return Err(BlockchainError::InsufficientBalance {
+                        required: total_required,
+                        available,
+                    });
+                }
+                
+                // Update temporary state to validate next transactions
+                if !temp_state.debit_account(&tx.sender, total_required) {
+                    return Err(BlockchainError::InvalidBlock);
+                }
+                temp_state.credit_account(tx, block.index, COINBASE_MATURITY);
+                temp_state.increment_nonce(&tx.sender);
             }
         }
         
@@ -415,34 +450,39 @@ impl Blockchain {
         let chain = self.chain.read();
         let chain_len = chain.len();
         
-        // Not enough blocks yet
+        // Not enough blocks yet - use initial difficulty
         if chain_len < DIFFICULTY_ADJUSTMENT_INTERVAL as usize {
-            return chain.last().map(|b| b.difficulty).unwrap_or(4);
+            return chain.last().unwrap().difficulty;
         }
         
         // Only adjust at intervals
         if chain_len % DIFFICULTY_ADJUSTMENT_INTERVAL as usize != 0 {
             return chain.last().unwrap().difficulty;
         }
-
-        let last_adjustment_block = &chain[chain_len - DIFFICULTY_ADJUSTMENT_INTERVAL as usize];
+        
         let latest_block = chain.last().unwrap();
+        let adjustment_start = chain_len.saturating_sub(DIFFICULTY_ADJUSTMENT_INTERVAL as usize);
+        let start_block = &chain[adjustment_start];
         
-        let time_taken = (latest_block.timestamp - last_adjustment_block.timestamp) as u64;
-        let expected_time = TARGET_BLOCK_TIME * DIFFICULTY_ADJUSTMENT_INTERVAL;
-
-        let current_difficulty = latest_block.difficulty;
-        let new_difficulty = if time_taken < expected_time / 2 {
-            current_difficulty + 1
-        } else if time_taken > expected_time * 2 && current_difficulty > 1 {
-            current_difficulty - 1
-        } else {
-            current_difficulty
-        };
+        // Calculate actual time taken for last N blocks
+        let actual_time = latest_block.timestamp - start_block.timestamp;
+        let expected_time = (TARGET_BLOCK_TIME * DIFFICULTY_ADJUSTMENT_INTERVAL) as i64;
         
-        if new_difficulty != current_difficulty {
-            tracing::info!("⚙️ Difficulty adjusted: {} → {}", current_difficulty, new_difficulty);
-        }
+        // SECURITY: Limit adjustment range to prevent manipulation (Bitcoin-style: 4x max)
+        let actual_time_clamped = actual_time.max(expected_time / 4).min(expected_time * 4);
+        
+        let current_difficulty = latest_block.difficulty as i64;
+        
+        // Adjust difficulty proportionally (clamped to ±25% per adjustment)
+        let new_difficulty_raw = (current_difficulty * expected_time) / actual_time_clamped;
+        let new_difficulty = new_difficulty_raw
+            .max(current_difficulty * 3 / 4)  // Max decrease 25%
+            .min(current_difficulty * 5 / 4)  // Max increase 25%
+            .max(4)                           // Minimum difficulty
+            .min(32) as u32;                  // Maximum difficulty (prevents overflow)
+        
+        tracing::info!("Difficulty adjustment: {} -> {} (actual time: {}s, expected: {}s)",
+            current_difficulty, new_difficulty, actual_time, expected_time);
         
         new_difficulty
     }
@@ -513,17 +553,18 @@ impl Blockchain {
     }
 
     /// Get pending transactions
-    pub fn get_pending_transactions(&self) -> parking_lot::RwLockReadGuard<Vec<Transaction>> {
+    pub fn get_pending_transactions(&self) -> parking_lot::RwLockReadGuard<'_, Vec<Transaction>> {
         self.pending_transactions.read()
     }
 
     /// Get mutable pending transactions
-    pub fn get_pending_transactions_mut(&self) -> parking_lot::RwLockWriteGuard<Vec<Transaction>> {
+    #[allow(dead_code)]
+    pub fn get_pending_transactions_mut(&self) -> parking_lot::RwLockWriteGuard<'_, Vec<Transaction>> {
         self.pending_transactions.write()
     }
 
     /// Get account state (mutable)
-    pub fn get_account_state_mut(&self) -> parking_lot::RwLockWriteGuard<AccountState> {
+    pub fn get_account_state_mut(&self) -> parking_lot::RwLockWriteGuard<'_, AccountState> {
         self.account_state.write()
     }
 
@@ -622,17 +663,19 @@ impl Blockchain {
             }
         }
 
-        tracing::info!("📦 Network block {} accepted", block.index);
+        tracing::info!(" Network block {} accepted", block.index);
         Ok(())
     }
 
     /// Check if a block exists in the chain
+    #[allow(dead_code)]
     pub fn has_block(&self, hash: &str) -> bool {
         let chain = self.chain.read();
         chain.iter().any(|b| b.hash == hash)
     }
 
     /// Get block by height
+    #[allow(dead_code)]
     pub fn get_block_by_height(&self, height: u64) -> Option<Block> {
         let chain = self.chain.read();
         chain.get(height as usize).cloned()

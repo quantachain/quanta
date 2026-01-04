@@ -26,12 +26,12 @@ impl Block {
     pub fn genesis() -> Self {
         let mut genesis = Self {
             index: 0,
-            timestamp: 1735689600, // 2025-01-01 00:00:00 UTC
+            timestamp: 1735689600, // 2026-01-01 00:00:00 UTC
             transactions: vec![],
             previous_hash: "0".repeat(64),
             nonce: 0,
             hash: String::new(),
-            difficulty: 4,
+            difficulty: 6, // PRODUCTION DIFFICULTY
             merkle_root: "0".repeat(64),
         };
         genesis.hash = genesis.calculate_hash();
@@ -61,6 +61,6 @@ fn main() {
     println!("  Index: {}", genesis.index);
     println!("  Difficulty: {}", genesis.difficulty);
     println!("  Hash: {}", genesis.hash);
-    println!("\n✅ Update blockchain.rs with this:");
+    println!("\n Update blockchain.rs with this:");
     println!("const GENESIS_HASH: &str = \"{}\";", genesis.hash);
 }

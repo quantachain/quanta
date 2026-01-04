@@ -42,6 +42,7 @@ impl Transaction {
     }
     
     /// Create deploy contract transaction
+    #[allow(dead_code)]
     pub fn new_deploy_contract(sender: String, code: Vec<u8>, timestamp: i64, nonce: u64) -> Self {
         Self {
             sender,
@@ -57,6 +58,7 @@ impl Transaction {
     }
     
     /// Create call contract transaction
+    #[allow(dead_code)]
     pub fn new_call_contract(
         sender: String,
         contract: String,
@@ -281,6 +283,22 @@ impl AccountState {
     /// Get account nonce
     pub fn get_nonce(&self, address: &str) -> u64 {
         self.accounts.get(address).map(|acc| acc.nonce).unwrap_or(0)
+    }
+    
+    /// Increment nonce for account (CRITICAL for transaction ordering)
+    pub fn increment_nonce(&mut self, address: &str) {
+        if let Some(acc) = self.accounts.get_mut(address) {
+            acc.nonce += 1;
+        } else {
+            // Create account with nonce 1 if doesn't exist
+            self.accounts.insert(address.to_string(), AccountBalance {
+                address: address.to_string(),
+                balance: 0,
+                nonce: 1,
+                locked_balance: 0,
+                unlock_height: 0,
+            });
+        }
     }
     
     /// Verify transaction nonce matches account nonce

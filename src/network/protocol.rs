@@ -88,10 +88,18 @@ pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024; // 10MB
 pub const PING_INTERVAL_SECS: u64 = 60;
 pub const PEER_TIMEOUT_SECS: u64 = 180;
 
-// SECURITY: Network-wide shared secret for message authentication
-// In production: derive from genesis block + node identity
-// For now: hardcoded (all nodes must share this)
-const NETWORK_SECRET: &[u8] = b"QUANTA_NETWORK_SECRET_v1_REPLACE_IN_PRODUCTION";
+//  CRITICAL SECURITY WARNING 
+// NETWORK_SECRET must be CHANGED before testnet launch!
+// 
+// PRODUCTION SETUP:
+// 1. Generate: openssl rand -hex 32
+// 2. Store in environment: QUANTA_NETWORK_SECRET=<your_secret>
+// 3. Read from env or config file (NEVER commit to git)
+// 4. All testnet nodes MUST share the same secret
+// 5. Use different secrets for mainnet vs testnet
+//
+//  TESTNET SECRET (Updated 2026-01-04):
+const NETWORK_SECRET: &[u8] = b"0ca4cea38e2e914d3170feab4990b5a08dbe83153b2766ff60a228271887d0f9";
 
 impl AuthenticatedMessage {
     /// Create authenticated message with HMAC

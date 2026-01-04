@@ -84,7 +84,7 @@ impl Peer {
     /// Receive a message from this peer with timeout
     pub async fn receive_message(&self) -> Result<P2PMessage, String> {
         let result = timeout(
-            Duration::from_secs(30),
+            Duration::from_secs(120),
             self.receive_message_internal()
         ).await;
 

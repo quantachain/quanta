@@ -92,6 +92,7 @@ impl FalconKeypair {
     }
     
     /// Get address without 0x prefix (for backwards compatibility)
+    #[allow(dead_code)]
     pub fn get_address_raw(&self) -> String {
         let mut hasher = Sha3_256::new();
         hasher.update(&self.public_key);
@@ -122,6 +123,7 @@ pub fn verify_signature(message: &[u8], signature: &[u8], public_key: &[u8]) -> 
 }
 
 /// Verify a signature over a hash (PREFERRED for transactions)
+#[allow(dead_code)]
 pub fn verify_hash(hash: &[u8; 32], signature: &[u8], public_key: &[u8]) -> bool {
     verify_signature(hash, signature, public_key)
 }

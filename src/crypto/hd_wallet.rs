@@ -245,29 +245,29 @@ impl HDWallet {
 
     /// Display wallet info
     pub fn display_info(&self) {
-        println!("\n╔════════════════════════════════════════════════════════════╗");
-        println!("║              HD WALLET INFORMATION                         ║");
-        println!("╠════════════════════════════════════════════════════════════╣");
-        println!("║ Mnemonic Phrase (24 words):                                ║");
-        println!("║ {}   ║", self.mnemonic);
+        println!("\n");
+        println!("              HD WALLET INFORMATION                         ");
+        println!("");
+        println!(" Mnemonic Phrase (24 words):                                ");
+        println!(" {}   ", self.mnemonic);
         if !self.passphrase.is_empty() {
-            println!("║ Passphrase: [SET] (plausible deniability enabled)         ║");
+            println!(" Passphrase: [SET] (plausible deniability enabled)         ");
         }
-        println!("╠════════════════════════════════════════════════════════════╣");
-        println!("║ Accounts: {}                                              ║", self.accounts.len());
-        println!("╠════════════════════════════════════════════════════════════╣");
+        println!("");
+        println!(" Accounts: {}                                              ", self.accounts.len());
+        println!("");
         
         for account in &self.accounts {
             let label = account.label.as_deref().unwrap_or("Unnamed");
-            println!("║ {} (#{})                                      ║", label, account.index);
-            println!("║ Address: {}...{}      ║", 
+            println!(" {} (#{})                                      ", label, account.index);
+            println!(" Address: {}...{}      ", 
                 &account.address[..10], 
                 &account.address[account.address.len()-6..]
             );
         }
         
-        println!("╚════════════════════════════════════════════════════════════╝");
-        println!("\n⚠️  IMPORTANT: Keep your mnemonic phrase safe!");
+        println!("");
+        println!("\n  IMPORTANT: Keep your mnemonic phrase safe!");
         println!("   It can restore your entire wallet and all accounts.");
         println!("   Never share it with anyone!\n");
     }

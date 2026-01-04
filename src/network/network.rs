@@ -83,6 +83,19 @@ impl Network {
                 network.maintain_peers().await;
             })
         };
+        
+        // Start heartbeat (ping peers every 10 seconds to keep connections alive)
+        let heartbeat_handle = {
+            let network = Arc::clone(&self);
+            tokio::spawn(async move {
+                let mut interval = interval(Duration::from_secs(10));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    interval.tick().await;
+                    network.send_heartbeats().await;
+                }
+            })
+        };
 
         // Connect to bootstrap nodes
         for addr in &self.config.bootstrap_nodes {
@@ -98,7 +111,7 @@ impl Network {
         info!("Network node started successfully");
         
         // Wait for handles
-        let _ = tokio::join!(listen_handle, processor_handle, maintenance_handle);
+        let _ = tokio::join!(listen_handle, processor_handle, maintenance_handle, heartbeat_handle);
         
         Ok(())
     }
@@ -369,8 +382,11 @@ impl Network {
             return Ok(());
         }
         
-        // Validate against current chain
+        // SECURITY: Reject blocks that are too far ahead (prevents time-warp attacks)
         let latest = blockchain.get_latest_block();
+        if block.index > latest.index + 100 {
+            return Err(format!("Block too far ahead: {} vs our {}", block.index, latest.index));
+        }
         
         // CRITICAL: Verify block linkage
         if block.index != latest.index + 1 {
@@ -508,7 +524,8 @@ impl Network {
 
     /// Maintain peer connections
     async fn maintain_peers(&self) {
-        let mut ticker = interval(Duration::from_secs(30));
+        let mut ticker = interval(Duration::from_secs(10));
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         
         loop {
             ticker.tick().await;
@@ -582,5 +599,19 @@ impl Network {
         }
         
         info
+    }
+    
+    /// Send heartbeat pings to all peers (keeps connections alive during mining)
+    async fn send_heartbeats(&self) {
+        let peers = self.peer_manager.get_peers().await;
+        if !peers.is_empty() {
+            info!("Heartbeat: Pinging {} peers", peers.len());
+        }
+        for peer in peers {
+            let nonce = rand::random();
+            if let Err(e) = peer.send_message(P2PMessage::Ping(nonce)).await {
+                warn!("Heartbeat ping failed: {}", e);
+            }
+        }
     }
 }

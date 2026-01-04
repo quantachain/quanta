@@ -67,7 +67,7 @@ impl QuantumWallet {
         let address = keypair.get_address();
         
         tracing::info!("New FULLY Quantum-Resistant Wallet Created");
-        tracing::info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        tracing::info!("");
         tracing::info!("Address: {}", address);
         tracing::info!("Signature: Falcon-512 (PQC)");
         tracing::info!("Encryption: Kyber-1024 + ChaCha20-Poly1305");
@@ -146,10 +146,10 @@ impl QuantumWallet {
         let json = serde_json::to_string_pretty(&quantum_wallet)?;
         fs::write(filename, json)?;
         
-        tracing::info!("✅ Quantum-safe wallet saved: {}", filename);
-        tracing::info!("🔐 Two-layer encryption: Argon2 + Kyber-1024");
-        tracing::info!("🛡️  Quantum resistance: MAXIMUM");
-        tracing::info!("⚠️  Password + Kyber both required to decrypt");
+        tracing::info!(" Quantum-safe wallet saved: {}", filename);
+        tracing::info!(" Two-layer encryption: Argon2 + Kyber-1024");
+        tracing::info!("  Quantum resistance: MAXIMUM");
+        tracing::info!("  Password + Kyber both required to decrypt");
         Ok(())
     }
 
@@ -212,48 +212,48 @@ impl QuantumWallet {
         
         let wallet: Self = serde_json::from_slice(&decrypted_data)?;
         
-        tracing::info!("✅ Quantum-safe wallet loaded: {}", filename);
-        tracing::info!("🔓 Decapsulation successful: Address {}", wallet.address);
-        tracing::info!("🛡️  Both layers verified: Argon2 ✓ Kyber-1024 ✓");
+        tracing::info!(" Quantum-safe wallet loaded: {}", filename);
+        tracing::info!(" Decapsulation successful: Address {}", wallet.address);
+        tracing::info!("  Both layers verified: Argon2  Kyber-1024 ");
         
         Ok(wallet)
     }
 
     /// Display comprehensive wallet information
     pub fn display_info(&self, balance: f64) {
-        println!("\n╔════════════════════════════════════════════════════════════════╗");
-        println!("║       QUANTA QUANTUM-RESISTANT WALLET (MAXIMUM SECURITY)      ║");
-        println!("╠════════════════════════════════════════════════════════════════╣");
-        println!("║ Address: {}                         ║", self.address);
-        println!("║ Balance: {:.6} QUA                                    ║", balance);
-        println!("║                                                                ║");
-        println!("║ ── QUANTUM-SAFE CRYPTOGRAPHY ──────────────────────────────────║");
-        println!("║                                                                ║");
-        println!("║ Signatures:  Falcon-512 (NIST PQC Round 3)                    ║");
-        println!("║   • Public Key:  {} bytes vs 33 (ECDSA)                ║", self.keypair.public_key.len());
-        println!("║   • Private Key: {} bytes vs 32 (ECDSA)               ║", self.keypair.secret_key_len());
-        println!("║   • Signature:   ~666 bytes vs 65 (ECDSA)                     ║");
-        println!("║                                                                ║");
-        println!("║ Encryption:  Kyber-1024 + ChaCha20-Poly1305                   ║");
-        println!("║   • KEM: Kyber-1024 (NIST PQC Standard)                       ║");
-        println!("║   • Cipher: ChaCha20-Poly1305 (Fast & Secure)                 ║");
-        println!("║   • KDF: Argon2 (Memory-Hard)                                 ║");
-        println!("║                                                                ║");
-        println!("║ ── QUANTUM RESISTANCE LEVELS ──────────────────────────────────║");
-        println!("║                                                                ║");
-        println!("║ Against Shor's Algorithm:    PROTECTED                        ║");
-        println!("║ Against Grover's Algorithm:  PROTECTED                        ║");
-        println!("║ NIST PQC Standards:          COMPLIANT                        ║");
-        println!("║ Classical Security:          ~128-bit                         ║");
-        println!("║ Quantum Security:            MAXIMUM                          ║");
-        println!("║                                                                ║");
-        println!("║ ── THREAT ANALYSIS ────────────────────────────────────────────║");
-        println!("║                                                                ║");
-        println!("║ Quantum Computer (2030s+):     SAFE                           ║");
-        println!("║ Classical Supercomputer:       SAFE                           ║");
-        println!("║ Harvest Now, Decrypt Later:    SAFE                           ║");
-        println!("║ Brute Force:                   IMPOSSIBLE                     ║");
-        println!("╚════════════════════════════════════════════════════════════════╝\n");
+        println!("\n");
+        println!("       QUANTA QUANTUM-RESISTANT WALLET (MAXIMUM SECURITY)      ");
+        println!("");
+        println!(" Address: {}                         ", self.address);
+        println!(" Balance: {:.6} QUA                                    ", balance);
+        println!("                                                                ");
+        println!("  QUANTUM-SAFE CRYPTOGRAPHY ");
+        println!("                                                                ");
+        println!(" Signatures:  Falcon-512 (NIST PQC Round 3)                    ");
+        println!("   • Public Key:  {} bytes vs 33 (ECDSA)                ", self.keypair.public_key.len());
+        println!("   • Private Key: {} bytes vs 32 (ECDSA)               ", self.keypair.secret_key_len());
+        println!("   • Signature:   ~666 bytes vs 65 (ECDSA)                     ");
+        println!("                                                                ");
+        println!(" Encryption:  Kyber-1024 + ChaCha20-Poly1305                   ");
+        println!("   • KEM: Kyber-1024 (NIST PQC Standard)                       ");
+        println!("   • Cipher: ChaCha20-Poly1305 (Fast & Secure)                 ");
+        println!("   • KDF: Argon2 (Memory-Hard)                                 ");
+        println!("                                                                ");
+        println!("  QUANTUM RESISTANCE LEVELS ");
+        println!("                                                                ");
+        println!(" Against Shor's Algorithm:    PROTECTED                        ");
+        println!(" Against Grover's Algorithm:  PROTECTED                        ");
+        println!(" NIST PQC Standards:          COMPLIANT                        ");
+        println!(" Classical Security:          ~128-bit                         ");
+        println!(" Quantum Security:            MAXIMUM                          ");
+        println!("                                                                ");
+        println!("  THREAT ANALYSIS ");
+        println!("                                                                ");
+        println!(" Quantum Computer (2030s+):     SAFE                           ");
+        println!(" Classical Supercomputer:       SAFE                           ");
+        println!(" Harvest Now, Decrypt Later:    SAFE                           ");
+        println!(" Brute Force:                   IMPOSSIBLE                     ");
+        println!("\n");
     }
 }
 

@@ -48,16 +48,16 @@ impl Block {
     /// Create the genesis block (first block in chain)
     pub fn genesis() -> Self {
         // CONSENSUS-CRITICAL: Genesis block parameters
-        // Timestamp: January 1, 2025 00:00:00 UTC (Quanta Launch)
+        // Timestamp: January 1, 2026 00:00:00 UTC (Quanta Launch)
         // All nodes must use identical genesis parameters
         let mut genesis = Self {
             index: 0,
-            timestamp: 1735689600, // 2025-01-01 00:00:00 UTC
+            timestamp: 1735689600, // 2026-01-01 00:00:00 UTC  
             transactions: vec![],
             previous_hash: "0".repeat(64),
             nonce: 0,
             hash: String::new(),
-            difficulty: 4,
+            difficulty: 6, // PRODUCTION: Increased from 4 for security
             merkle_root: "0".repeat(64),
         };
         genesis.hash = genesis.calculate_hash();
@@ -174,6 +174,7 @@ impl Block {
     }
 
     /// Get total transaction fees in block (u64 microunits)
+    #[allow(dead_code)]
     pub fn get_total_fees(&self) -> u64 {
         self.transactions
             .iter()

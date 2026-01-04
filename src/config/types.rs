@@ -42,6 +42,14 @@ pub struct ConsensusConfig {
 pub struct SecurityConfig {
     pub max_mempool_size: usize,
     pub transaction_expiry_seconds: i64,
+    /// Enable rate limiting on API endpoints (PRODUCTION: true)
+    pub enable_rate_limiting: bool,
+    /// Max requests per minute per IP (PRODUCTION: 60)
+    pub rate_limit_per_minute: u32,
+    /// Enable peer banning for malicious behavior
+    pub enable_peer_banning: bool,
+    /// Require TLS for API (PRODUCTION: true)
+    pub require_tls: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +90,10 @@ impl Default for QuantaConfig {
             security: SecurityConfig {
                 max_mempool_size: 5000,
                 transaction_expiry_seconds: 86400,
+                enable_rate_limiting: true,  // PRODUCTION: Always enable
+                rate_limit_per_minute: 60,   // 60 requests/min per IP
+                enable_peer_banning: true,   // Auto-ban malicious peers
+                require_tls: false,          // Set true for public nodes
             },
             mining: MiningConfig {
                 initial_reward_microunits: 50_000_000, // 50 QUA
