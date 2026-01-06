@@ -2,73 +2,139 @@
 
 Quantum-resistant blockchain using Falcon-512 post-quantum signatures and Kyber-1024 encryption.
 
+## Documentation
+
+- **[Whitepaper](WHITEPAPER.md)** - Complete technical specification
+- **[Tokenomics](TOKENOMICS.md)** - Economic model and supply schedule
+- **[Security Audit](SECURITY_AUDIT.md)** - Pre-testnet security assessment
+- **[Contributing](CONTRIBUTING.md)** - Development guidelines
+
+## Why QUANTA?
+
+### The Quantum Threat is Real
+
+Current blockchain systems (Bitcoin, Ethereum, etc.) rely on elliptic curve cryptography (ECDSA/EdDSA) for transaction signatures. These are vulnerable to Shor's algorithm, which can be executed efficiently on sufficiently powerful quantum computers. Conservative estimates suggest such quantum computers could exist within 10-15 years.
+
+### Why Build Now?
+
+- **NIST PQC Standards Finalized (2024)**: Cryptographic primitives are mature and vetted
+- **Migration is Hard**: Upgrading existing chains is significantly more difficult than building correctly from the start  
+- **Future-Proofing**: Infrastructure decisions made today will persist for decades
+- **No False Urgency**: This is insurance, not speculation. QUANTA is secure against classical attacks today and quantum attacks tomorrow.
+
+### What Makes QUANTA Different?
+
+QUANTA is not a research project or academic prototype. It's a production-ready blockchain built with:
+
+1. **Post-Quantum Security**: NIST-standardized Falcon-512 signatures and Kyber-1024 encryption
+2. **Sustainable Economics**: Adaptive tokenomics with perpetual mining incentives
+3. **Operational Excellence**: Production-grade security, monitoring, and tooling
+4. **Fair Launch**: No pre-mine, no ICO - 100% distributed through mining
+
 ## Features
 
-- Post-quantum cryptography (NIST PQC standards)
-- Account-based transactions with nonce protection
-- Adaptive proof-of-work mining with modern tokenomics
-- Full P2P networking with peer discovery
-- REST API and JSON-RPC daemon control
-- Persistent blockchain storage (Sled database)
-- Quantum-safe encrypted wallets
+### Cryptography
+- **Post-Quantum Signatures**: Falcon-512 (NIST Level 1, lattice-based)
+- **Post-Quantum Encryption**: Kyber-1024 (NIST Level 5)
+- **Quantum-Resistant Hashing**: SHA3-256 (Keccak)
+- **Key Derivation**: Argon2id (memory-hard, quantum-safe)
+
+### Consensus & Security
+- Adaptive Proof-of-Work with dynamic difficulty adjustment
+- Account-based model with nonce-based replay protection
+- Transaction expiry (24-hour window)
 - Merkle trees for SPV support
+- Checkpoint system for deep reorganization prevention
+- DoS protection (mempool limits, message size limits, peer banning)
+
+### Economics
+- Fair launch (no pre-mine, no ICO)
+- Adaptive block rewards (100 QUA → 5 QUA floor over 20 years)
+- 70% fee burning (deflationary pressure)
+- 20% development treasury
+- 50% mining reward lock (6-month vesting for anti-dump)
+- Early adopter incentives (first 100k blocks)
+
+### Infrastructure  
+- Full P2P networking with DNS seed discovery
+- REST API and JSON-RPC 2.0 daemon control
+- Persistent blockchain storage (Sled database)
 - HD wallets (BIP39 24-word mnemonic)
 - Prometheus metrics export
 - TOML configuration files
 - Comprehensive test suite
-- Production-ready security features
 
-## Tokenomics
+## Tokenomics Summary
 
-### Adaptive Block Rewards (Solana-inspired)
-- Year 1 base reward: 100 QUA
-- Annual reduction: 15% per year
-- Minimum floor: 5 QUA (reached after ~20 years)
-- Total supply: Asymptotically approaches ~1.5 billion QUA
+For complete economic specification, see [TOKENOMICS.md](TOKENOMICS.md).
 
-### Early Adopter Incentives
+### Supply Schedule
+- **Year 1 Base Reward**: 100 QUA per block
+- **Annual Reduction**: 15% per year (exponential decay)
+- **Reward Floor**: 5 QUA (ensures perpetual mining incentive)
+- **Asymptotic Maximum Supply**: ~1.5 billion QUA (year 15-20)
+- **Block Time**: 10 seconds (~3.15 million blocks per year)
+
+### Incentive Mechanisms
+
+**Early Adopter Bonus**
 - First 100,000 blocks (~11.5 days): 1.5x multiplier
-- Bootstrap phase (first month): Dynamic network usage adjustments
-- Encourages early participation and transaction activity
+- Attracts initial miners without long-term distortion
 
-### Anti-Dump Mechanism
+**Network Usage Multiplier**
+- First 315,360 blocks (~36 days): up to 2x based on transaction fees
+- Rewards genuine economic activity
+- Fee-based calculation prevents spam attacks
+
+**Anti-Dump Mechanism**
 - 50% of mining rewards locked for 6 months (157,680 blocks)
-- Prevents immediate sell pressure
-- Promotes long-term holder alignment
+- Aligns miner incentives with long-term network health
+- Reduces immediate sell pressure during critical launch period
 
 ### Fee Distribution
-- 70% burned (deflationary pressure)
-- 20% to development treasury
-- 10% to block validator (miner)
-- Base fee: 0.001 QUA (prevents spam)
+- **70% Burned**: Permanent supply reduction (deflationary pressure)
+- **20% Treasury**: Development funding, audits, grants
+- **10% Miner**: Additional validator reward beyond block reward
 
-### Network Usage Multiplier
-- During bootstrap phase, rewards scale with network activity
-- Multiplier based on total fees paid (not transaction count)
-- Prevents spam while rewarding genuine usage
-- Up to 2x rewards during high economic activity
+### Long-Term Sustainability
 
-## Security Features
+Unlike Bitcoin's fixed supply model where mining revenue ends, QUANTA maintains perpetual security through:
+- Minimum 5 QUA block reward (never reaches zero)
+- Growing fee market as adoption increases
+- Transition from reward-dominant to fee-dominant security over 20 years
 
-### DoS Protection
-- Mempool size limit: 5,000 transactions max
-- Block size limit: 1 MB maximum
-- Block transaction limit: 2,000 transactions per block
-- Minimum transaction fee: 0.0001 QUA (anti-spam)
-- Request timeouts: 30 seconds
+## Security
 
-### Transaction Security
-- Replay protection: 24-hour expiry
-- Signature verification (Falcon-512)
-- Balance validation
-- Duplicate transaction detection
-- Fee validation
+For complete security analysis, see [WHITEPAPER.md](WHITEPAPER.md) and [SECURITY_AUDIT.md](SECURITY_AUDIT.md).
 
-### Operational Safety
-- Graceful shutdown handling (Ctrl+C)
-- Persistent state across restarts
-- Health check endpoint (`/health`)
-- Transaction sorting by fee priority
+### Cryptographic Security
+- **Classical Security**: SHA3-256 (2^256 operations), Falcon-512 (2^128 operations)
+- **Quantum Security**: Lattice-based signatures (no known quantum attacks), Grover-resistant hashing
+- **Key Protection**: Argon2id prevents brute-force attacks on encrypted wallets
+
+### Network Security
+- DoS protection: 2MB message limit, 5000 transaction mempool cap, peer connection limits
+- Replay protection: Monotonic nonces, 24-hour transaction expiry
+- 51% attack resistance: Checkpoint system, high reward attracts honest miners
+- Timestamp validation: Blocks must be within 2 hours of current time
+
+### Operational Security  
+- Graceful shutdown handling (SIGINT/SIGTERM)
+- Persistent state across restarts (atomic database transactions)
+- Health check endpoints for monitoring
+- Localhost-only RPC binding (no remote exposure)
+
+### Attack Resistance
+- **Double-Spend**: Confirmation depth mitigates (6 blocks recommended)
+- **Transaction Replay**: Nonce-based prevention
+- **Memory Exhaustion**: Orphan block limits (100 max), mempool size caps
+- **Sybil Attack**: Proof-of-work requirement, connection limits
+- **Harvest Now, Decrypt Later**: Kyber-1024 provides 256-bit quantum security
+
+### Explicitly NOT Protected
+- 51% attacks (inherent to PoW, mitigated by checkpoints)
+- Eclipse attacks on network-isolated nodes
+- Physical key extraction from compromised devices
 
 ## Installation
 
@@ -278,18 +344,41 @@ quanta validate                      # Validate blockchain
 - Easy backup and restore
 
 ### Monitoring
-- Prometheus metrics export
+- Prometheus metrics export (port 9090)
 - Real-time blockchain metrics
 - Network statistics
 - Transaction throughput tracking
 - Compatible with Grafana dashboards
 
-## Security
+## Roadmap
 
-- Falcon-512 signatures
-- Kyber-1024 encryption
-- SHA3-256 hashing
-- Argon2 key derivation
+### Phase 1: Foundation (Q1 2026)
+- Testnet launch
+- Core functionality validation
+- Community building
+- Security audits
+
+### Phase 2: Mainnet (Q2 2026)
+- Mainnet genesis
+- Exchange integrations
+- Block explorer
+- Light wallet
+
+### Phase 3: Expansion (Q3-Q4 2026)
+- Smart contract layer (post-quantum VM)
+- Light client protocol (SPV)
+- Hardware wallet support (Ledger/Trezor)
+- Mobile wallets
+
+### Phase 4: Ecosystem (2027+)
+- Developer grants program
+- DApp ecosystem growth
+- Cross-chain bridges
+- Layer 2 solutions
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 
 ## License
 
