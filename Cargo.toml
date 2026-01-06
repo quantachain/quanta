@@ -4,6 +4,14 @@ version = "1.0.0"
 edition = "2021"
 description = "QUANTA - Quantum-resistant blockchain with Falcon signatures"
 
+[lib]
+name = "quanta"
+path = "src/lib.rs"
+
+[[bin]]
+name = "quanta"
+path = "src/main.rs"
+
 [dependencies]
 # Post-Quantum Cryptography - Falcon signatures
 pqcrypto-falcon = "0.3"

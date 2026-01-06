@@ -1,0 +1,119 @@
+# Docker Compose for QUANTA Development and Testing
+
+version: '3.8'
+
+services:
+  # Primary node
+  node1:
+    build: .
+    container_name: quanta-node1
+    ports:
+      - "3000:3000"
+      - "7000:7000"
+    volumes:
+      - node1_data:/home/quanta/data
+      - ./quanta.toml:/home/quanta/quanta.toml:ro
+    environment:
+      - RUST_LOG=info
+    networks:
+      - quanta-network
+    command: ["quanta", "start", "--port", "3000", "--network-port", "7000"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Secondary node (peer)
+  node2:
+    build: .
+    container_name: quanta-node2
+    ports:
+      - "3001:3000"
+      - "7001:7000"
+    volumes:
+      - node2_data:/home/quanta/data
+      - ./quanta.toml:/home/quanta/quanta.toml:ro
+    environment:
+      - RUST_LOG=info
+    networks:
+      - quanta-network
+    command: ["quanta", "start", "--port", "3000", "--network-port", "7000", "--bootstrap", "node1:7000"]
+    depends_on:
+      - node1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Third node (peer)
+  node3:
+    build: .
+    container_name: quanta-node3
+    ports:
+      - "3002:3000"
+      - "7002:7000"
+    volumes:
+      - node3_data:/home/quanta/data
+      - ./quanta.toml:/home/quanta/quanta.toml:ro
+    environment:
+      - RUST_LOG=info
+    networks:
+      - quanta-network
+    command: ["quanta", "start", "--port", "3000", "--network-port", "7000", "--bootstrap", "node1:7000,node2:7000"]
+    depends_on:
+      - node1
+      - node2
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: quanta-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - quanta-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: quanta-grafana
+    ports:
+      - "3030:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - quanta-network
+    depends_on:
+      - prometheus
+
+networks:
+  quanta-network:
+    driver: bridge
+
+volumes:
+  node1_data:
+  node2_data:
+  node3_data:
+  prometheus_data:
+  grafana_data:
