@@ -5,6 +5,7 @@ mod storage;
 mod network;
 mod api;
 mod config;
+mod rpc;
 
 
 
@@ -14,6 +15,7 @@ use storage::BlockchainStorage;
 use network::{Network, NetworkConfig};
 use consensus::MetricsCollector;
 use config::QuantaConfig;
+use rpc::{RpcServer, RpcClient};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
@@ -42,8 +44,9 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[command(rename_all = "snake_case")]
 enum Commands {
-    /// Start the blockchain node with REST API and P2P networking
+    /// Start the blockchain node with REST API, RPC, and P2P networking
     Start {
         /// Configuration file path
         #[arg(short = 'c', long)]
@@ -54,8 +57,12 @@ enum Commands {
         port: Option<u16>,
         
         /// P2P network port (overrides config)
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long = "network-port")]
         network_port: Option<u16>,
+        
+        /// RPC server port (overrides config)
+        #[arg(short = 'r', long = "rpc-port")]
+        rpc_port: Option<u16>,
         
         /// Database path (overrides config)
         #[arg(short, long)]
@@ -66,12 +73,74 @@ enum Commands {
         bootstrap: Option<String>,
         
         /// Disable P2P networking (single node mode)
-        #[arg(long)]
+        #[arg(long = "no-network")]
         no_network: bool,
         
-        /// Run in background and log to file (detached mode)
+        /// Run in background as daemon
         #[arg(long)]
         detach: bool,
+    },
+    
+    /// Check node status (requires running node)
+    Status {
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Check mining status (requires running node)
+    MiningStatus {
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Start mining blocks to a specific address (requires running node)
+    StartMining {
+        /// Address to receive mining rewards
+        address: String,
+        
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Stop mining (requires running node)
+    StopMining {
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Print current blockchain height (requires running node)
+    PrintHeight {
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Get information about a specific block (requires running node)
+    GetBlock {
+        /// Block height
+        height: u64,
+        
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Get list of connected peers (requires running node)
+    Peers {
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Stop the running node gracefully (requires running node)
+    Stop {
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
     },
     
     /// Create a new encrypted wallet
@@ -165,9 +234,9 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Start { config, port, network_port, db, bootstrap, no_network, detach } => {
-            // Load configuration
-            let cfg = QuantaConfig::load_with_overrides(
+        Commands::Start { config, port, network_port, rpc_port, db, bootstrap, no_network, detach } => {
+            // Load configuration with RPC port override
+            let mut cfg = QuantaConfig::load_with_overrides(
                 config,
                 port,
                 network_port,
@@ -176,12 +245,90 @@ async fn main() {
                 no_network
             ).expect("Failed to load configuration");
             
+            // Set RPC port from CLI or default
+            let rpc_port = rpc_port.unwrap_or(7782);
+            
             // Setup logging based on detach mode
             if detach {
-                // Create logs directory
+                // Fork to background on Unix-like systems
+                #[cfg(unix)]
+                {
+                    use std::process::Command;
+                    
+                    // Check if already running as daemon
+                    if std::env::var("QUANTA_DAEMON").is_err() {
+                        println!("Starting QUANTA node in daemon mode...");
+                        
+                        // Create logs directory
+                        std::fs::create_dir_all("logs").expect("Failed to create logs directory");
+                        
+                        // Prepare arguments (include --detach to trigger file logging in child)
+                        let mut args = vec![
+                            "start".to_string(),
+                            "--detach".to_string(),
+                            "--port".to_string(),
+                            cfg.node.api_port.to_string(),
+                            "--network-port".to_string(),
+                            cfg.node.network_port.to_string(),
+                            "--rpc-port".to_string(),
+                            rpc_port.to_string(),
+                            "--db".to_string(),
+                            cfg.node.db_path.clone(),
+                        ];
+                        
+                        if cfg.node.no_network {
+                            args.push("--no-network".to_string());
+                        }
+                        
+                        // Open log file for the child process
+                        let log_file_path = format!("logs/quanta_node_{}.log", cfg.node.network_port);
+                        let log_file = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&log_file_path)
+                            .expect("Failed to open log file");
+                        
+                        // Fork process with proper file descriptors
+                        let child = Command::new(std::env::current_exe().unwrap())
+                            .args(&args)
+                            .env("QUANTA_DAEMON", "1")
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::from(log_file.try_clone().unwrap()))
+                            .stderr(std::process::Stdio::from(log_file))
+                            .spawn()
+                            .expect("Failed to start daemon process");
+                        
+                        let child_pid = child.id();
+                        
+                        // Write PID file
+                        let pid_file = format!("logs/quanta_{}.pid", cfg.node.network_port);
+                        std::fs::write(&pid_file, child_pid.to_string())
+                            .expect("Failed to write PID file");
+                        
+                        println!("✓ QUANTA node started as daemon (PID: {})", child_pid);
+                        println!("  API Port: {}", cfg.node.api_port);
+                        println!("  Network Port: {}", cfg.node.network_port);
+                        println!("  RPC Port: {}", rpc_port);
+                        println!("  Database: {}", cfg.node.db_path);
+                        println!("  Log file: {}", log_file_path);
+                        println!("  PID file: {}", pid_file);
+                        println!("\nWaiting for node to initialize...");
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        println!("\nUse './quanta status --rpc-port {}' to check node status", rpc_port);
+                        println!("Use './quanta stop --rpc-port {}' to stop the node", rpc_port);
+                        
+                        return;
+                    }
+                }
+                
+                #[cfg(not(unix))]
+                {
+                    eprintln!("Warning: Daemon mode is not fully supported on Windows. Running in foreground with file logging.");
+                }
+                
+                // Setup file-based logging for daemon
                 std::fs::create_dir_all("logs").expect("Failed to create logs directory");
                 
-                // Create log file name based on network port
                 let log_file = format!("logs/quanta_node_{}.log", cfg.node.network_port);
                 let file = std::fs::OpenOptions::new()
                     .create(true)
@@ -189,7 +336,6 @@ async fn main() {
                     .open(&log_file)
                     .expect("Failed to open log file");
                 
-                // Setup file-based logging
                 tracing_subscriber::fmt()
                     .with_writer(Arc::new(file))
                     .with_ansi(false)
@@ -197,12 +343,12 @@ async fn main() {
                     .with_level(true)
                     .init();
                 
-                // Write PID file for process management
-                let pid_file = format!("logs/quanta_node_{}.pid", cfg.node.network_port);
+                // Write PID file
+                let pid_file = format!("logs/quanta_{}.pid", cfg.node.network_port);
                 std::fs::write(&pid_file, std::process::id().to_string())
                     .expect("Failed to write PID file");
                 
-                tracing::info!("Starting QUANTA node in DETACHED mode");
+                tracing::info!("Starting QUANTA node in DAEMON mode");
                 tracing::info!("Log file: {}", log_file);
                 tracing::info!("PID file: {}", pid_file);
             } else {
@@ -216,6 +362,7 @@ async fn main() {
             tracing::info!("Starting QUANTA node with configuration:");
             tracing::info!("  API Port: {}", cfg.node.api_port);
             tracing::info!("  Network Port: {}", cfg.node.network_port);
+            tracing::info!("  RPC Port: {}", rpc_port);
             tracing::info!("  Database: {}", cfg.node.db_path);
             
             let storage = Arc::new(BlockchainStorage::new(&cfg.node.db_path).expect("Failed to open database"));
@@ -308,6 +455,24 @@ async fn main() {
                 let _ = shutdown_tx.send(()).await;
             });
             
+            // Start RPC server
+            let rpc_server = RpcServer::new(
+                Arc::clone(&blockchain),
+                network.clone(),
+                cfg.node.api_port,
+                cfg.node.network_port,
+                rpc_port,
+            );
+            
+            let rpc_handle = {
+                let rpc_port_clone = rpc_port;
+                tokio::spawn(async move {
+                    if let Err(e) = rpc_server.start(rpc_port_clone).await {
+                        tracing::error!("RPC server error: {}", e);
+                    }
+                })
+            };
+            
             // Start API server
             let server_handle = {
                 let blockchain_clone = Arc::clone(&blockchain);
@@ -334,6 +499,196 @@ async fn main() {
                 }
                 _ = server_handle => {
                     tracing::info!("Server stopped");
+                }
+                _ = rpc_handle => {
+                    tracing::info!("RPC server stopped");
+                }
+            }
+        }
+        
+        Commands::Status { rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            match client.get_node_status().await {
+                Ok(status) => {
+                    println!("\n╔══════════════════════════════════════════════════════════╗");
+                    println!("║            QUANTA NODE STATUS                            ║");
+                    println!("╠══════════════════════════════════════════════════════════╣");
+                    println!("║  Status:         {}                              ║", if status.running { "RUNNING ✓" } else { "STOPPED" });
+                    println!("║  Version:        {}                                     ║", status.version);
+                    println!("║  Uptime:         {} seconds                             ║", status.uptime_seconds);
+                    println!("║                                                          ║");
+                    println!("║  Chain Height:   {} blocks                              ║", status.chain_height);
+                    println!("║  Mempool:        {} pending transactions                ║", status.mempool_size);
+                    println!("║  Peers:          {} connected                           ║", status.peer_count);
+                    println!("║                                                          ║");
+                    println!("║  API Port:       {}                                     ║", status.api_port);
+                    println!("║  Network Port:   {}                                     ║", status.network_port);
+                    println!("║  RPC Port:       {}                                     ║", status.rpc_port);
+                    println!("╚══════════════════════════════════════════════════════════╝\n");
+                }
+                Err(e) => {
+                    eprintln!("✗ Failed to connect to node RPC server on port {}", rpc_port);
+                    eprintln!("  Error: {}", e);
+                    eprintln!("\n  Is the node running? Start it with:");
+                    eprintln!("  ./quanta start --detach --rpc-port {}", rpc_port);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::MiningStatus { rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            match client.get_mining_status().await {
+                Ok(status) => {
+                    println!("\n╔══════════════════════════════════════════════════════════╗");
+                    println!("║            QUANTA MINING STATUS                          ║");
+                    println!("╠══════════════════════════════════════════════════════════╣");
+                    println!("║  Mining Active:  {}                              ║", if status.is_mining { "YES ✓" } else { "NO" });
+                    if let Some(ref addr) = status.mining_address {
+                        println!("║  Mining To:      {}...║", &addr[..32]);
+                    }
+                    println!("║  Blocks Mined:   {}                                      ║", status.blocks_mined);
+                    println!("║  Difficulty:     {}                                      ║", status.difficulty);
+                    println!("║  Block Reward:   {} microunits ({:.6} QUA)         ║", 
+                        status.mining_reward, 
+                        status.mining_reward as f64 / 1_000_000.0
+                    );
+                    if let Some(last_time) = status.last_block_time {
+                        use chrono::{DateTime, Utc as ChronoUtc};
+                        let dt = DateTime::<ChronoUtc>::from_timestamp(last_time, 0)
+                            .unwrap_or_else(|| ChronoUtc::now());
+                        println!("║  Last Block:     {}                        ║", dt.format("%Y-%m-%d %H:%M:%S UTC"));
+                    }
+                    println!("╚══════════════════════════════════════════════════════════╝\n");
+                }
+                Err(e) => {
+                    eprintln!("✗ Failed to get mining status: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::GetBlock { height, rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            match client.get_block(height).await {
+                Ok(block) => {
+                    use chrono::{DateTime, Utc as ChronoUtc};
+                    let dt = DateTime::<ChronoUtc>::from_timestamp(block.timestamp, 0)
+                        .unwrap_or_else(|| ChronoUtc::now());
+                    
+                    println!("\n╔══════════════════════════════════════════════════════════╗");
+                    println!("║            BLOCK INFORMATION                             ║");
+                    println!("╠══════════════════════════════════════════════════════════╣");
+                    println!("║  Height:         {}                                      ║", block.height);
+                    println!("║  Hash:           {}...║", &block.hash[..24]);
+                    println!("║  Timestamp:      {}                        ║", dt.format("%Y-%m-%d %H:%M:%S UTC"));
+                    println!("║  Transactions:   {}                                      ║", block.transactions);
+                    println!("║  Difficulty:     {}                                      ║", block.difficulty);
+                    println!("╚══════════════════════════════════════════════════════════╝\n");
+                }
+                Err(e) => {
+                    eprintln!("✗ Failed to get block: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::Peers { rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            match client.get_peers().await {
+                Ok(peers) => {
+                    println!("\n╔══════════════════════════════════════════════════════════╗");
+                    println!("║            CONNECTED PEERS ({} total)                      ║", peers.len());
+                    println!("╠══════════════════════════════════════════════════════════╣");
+                    
+                    if peers.is_empty() {
+                        println!("║  No peers connected                                      ║");
+                    } else {
+                        for (i, peer) in peers.iter().enumerate() {
+                            println!("║  {}. {}                                    ║", i + 1, peer.address);
+                        }
+                    }
+                    
+                    println!("╚══════════════════════════════════════════════════════════╝\n");
+                }
+                Err(e) => {
+                    eprintln!("✗ Failed to get peers: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::StartMining { address, rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            println!("Starting mining to address: {}", address);
+            
+            match client.start_mining(&address).await {
+                Ok(_) => {
+                    println!("✓ Mining started successfully");
+                    println!("  Rewards will be sent to: {}", address);
+                    println!("  Use './quanta mining_status' to check status");
+                }
+                Err(e) => {
+                    eprintln!("✗ Failed to start mining: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::StopMining { rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            println!("Stopping mining...");
+            
+            match client.stop_mining().await {
+                Ok(_) => {
+                    println!("✓ Mining stopped successfully");
+                }
+                Err(e) => {
+                    eprintln!("✗ Failed to stop mining: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::PrintHeight { rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            match client.get_node_status().await {
+                Ok(status) => {
+                    println!("\n╔══════════════════════════════════════════════════════════╗");
+                    println!("║            BLOCKCHAIN HEIGHT                             ║");
+                    println!("╠══════════════════════════════════════════════════════════╣");
+                    println!("║  Current Height: {} blocks                              ║", status.chain_height);
+                    println!("╚══════════════════════════════════════════════════════════╝\n");
+                }
+                Err(e) => {
+                    eprintln!("✗ Failed to get blockchain height: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::Stop { rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            println!("Sending shutdown signal to node on RPC port {}...", rpc_port);
+            
+            match client.shutdown().await {
+                Ok(_) => {
+                    println!("✓ Shutdown signal sent successfully");
+                    println!("  Node will stop gracefully...");
+                }
+                Err(e) => {
+                    eprintln!("✗ Failed to send shutdown signal: {}", e);
+                    eprintln!("\n  Is the node running? Check with:");
+                    eprintln!("  ./quanta status --rpc-port {}", rpc_port);
+                    std::process::exit(1);
                 }
             }
         }

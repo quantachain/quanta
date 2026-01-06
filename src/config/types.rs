@@ -17,6 +17,7 @@ pub struct QuantaConfig {
 pub struct NodeConfig {
     pub api_port: u16,
     pub network_port: u16,
+    pub rpc_port: u16,
     pub db_path: String,
     pub no_network: bool,
 }
@@ -73,6 +74,7 @@ impl Default for QuantaConfig {
             node: NodeConfig {
                 api_port: 3000,
                 network_port: 8333,
+                rpc_port: 7782,
                 db_path: "./quanta_data".to_string(),
                 no_network: false,
             },
