@@ -269,6 +269,22 @@ impl AccountState {
             }
         }
     }
+    
+    /// Add locked balance for mining reward vesting (ANTI-DUMP mechanism)
+    /// Used for 50% of mining rewards locked for 6 months
+    pub fn add_locked_balance(&mut self, address: &str, amount: u64, unlock_height: u64) {
+        let account = self.accounts.entry(address.to_string()).or_insert(AccountBalance {
+            address: address.to_string(),
+            balance: 0,
+            nonce: 0,
+            locked_balance: 0,
+            unlock_height: 0,
+        });
+        
+        // Add to locked balance with max unlock height
+        account.locked_balance = account.locked_balance.saturating_add(amount);
+        account.unlock_height = account.unlock_height.max(unlock_height);
+    }
 
     /// Get balance for an address (spendable only)
     pub fn get_balance(&self, address: &str) -> u64 {

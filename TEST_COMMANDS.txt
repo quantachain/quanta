@@ -114,7 +114,7 @@ curl -X POST http://localhost:3000/api/mine \
 # Example with actual address:
 curl -X POST http://localhost:3000/api/mine \
   -H "Content-Type: application/json" \
-  -d '{"miner_address":"0x143b5a183ae4a597761753a8fcd4c17924a4e3f1"}'
+  -d '{"miner_address":"0x0bd4bf5eeb3be846f44cc2f9241ea3214e57295a"}'
 
 # Watch all 3 node terminals:
 # - Node 1: "Block 1 mined"

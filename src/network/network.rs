@@ -129,7 +129,6 @@ impl Network {
                 Ok((stream, addr)) => {
                     info!("Incoming connection from {}", addr);
                     
-                    // Inline connection handling to avoid Network cloning
                     let message_tx = self.message_tx.clone();
                     let peer_manager = Arc::clone(&self.peer_manager);
                     let blockchain = Arc::clone(&self.blockchain);
@@ -143,25 +142,9 @@ impl Network {
                                 // Perform handshake
                                 let height = blockchain.read().await.get_chain().len() as u64;
                                 if let Ok(_) = peer.handshake(PROTOCOL_VERSION, height, node_id).await {
-                                    // Add peer
+                                    // Add peer and start receive task
                                     if peer_manager.add_peer(Arc::clone(&peer)).await.is_ok() {
-                                        // Start receiving
-                                        let addr = peer.address().await;
-                                        loop {
-                                            match peer.receive_message().await {
-                                                Ok(msg) => {
-                                                    if let Err(e) = message_tx.send((addr, msg)) {
-                                                        error!("Failed to queue message: {}", e);
-                                                        break;
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    warn!("Error receiving from {}: {}", addr, e);
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                        peer_manager.remove_peer(addr).await;
+                                        Self::start_peer_receive_task(peer, message_tx, peer_manager).await;
                                     }
                                 }
                             }
@@ -178,26 +161,14 @@ impl Network {
         }
     }
 
-    /// Handle an incoming connection
-    async fn handle_incoming_connection(&self, stream: TcpStream, addr: SocketAddr) -> Result<(), String> {
-        let peer = Arc::new(Peer::new(stream, addr).await?);
-        
-        // Perform handshake
-        let blockchain = self.blockchain.read().await;
-        let height = blockchain.get_chain().len() as u64;
-        drop(blockchain);
-        
-        peer.handshake(PROTOCOL_VERSION, height, self.config.node_id.clone()).await?;
-        
-        // Add to peer manager
-        self.peer_manager.add_peer(Arc::clone(&peer)).await?;
-        
-        // Start receiving messages from this peer (pass self reference via closure)
-        let message_tx = self.message_tx.clone();
-        let peer_manager = Arc::clone(&self.peer_manager);
-        
+    /// Start a single receive task for a peer (prevents duplicate loops)
+    async fn start_peer_receive_task(
+        peer: Arc<Peer>,
+        message_tx: mpsc::UnboundedSender<(SocketAddr, P2PMessage)>,
+        peer_manager: Arc<PeerManager>
+    ) {
+        let addr = peer.address().await;
         tokio::spawn(async move {
-            let addr = peer.address().await;
             loop {
                 match peer.receive_message().await {
                     Ok(msg) => {
@@ -215,8 +186,6 @@ impl Network {
             }
             peer_manager.remove_peer(addr).await;
         });
-        
-        Ok(())
     }
 
     /// Connect to a peer
@@ -239,56 +208,15 @@ impl Network {
         // Add to peer manager
         self.peer_manager.add_peer(Arc::clone(&peer)).await?;
         
-        // Start receiving messages (inline to avoid cloning Network)
-        let message_tx = self.message_tx.clone();
-        let peer_manager = Arc::clone(&self.peer_manager);
-        
-        tokio::spawn(async move {
-            let addr = peer.address().await;
-            loop {
-                match peer.receive_message().await {
-                    Ok(msg) => {
-                        debug!("Received message from {}: {:?}", addr, msg);
-                        if let Err(e) = message_tx.send((addr, msg)) {
-                            error!("Failed to queue message: {}", e);
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Error receiving from {}: {}", addr, e);
-                        break;
-                    }
-                }
-            }
-            peer_manager.remove_peer(addr).await;
-        });
+        // Start single receive task
+        Self::start_peer_receive_task(
+            peer,
+            self.message_tx.clone(),
+            Arc::clone(&self.peer_manager)
+        ).await;
         
         info!("Connected to peer {}", addr);
         Ok(())
-    }
-
-    /// Receive messages from a peer
-    async fn receive_from_peer(&self, peer: Arc<Peer>) {
-        let addr = peer.address().await;
-        
-        loop {
-            match peer.receive_message().await {
-                Ok(msg) => {
-                    debug!("Received message from {}: {:?}", addr, msg);
-                    if let Err(e) = self.message_tx.send((addr, msg)) {
-                        error!("Failed to queue message: {}", e);
-                        break;
-                    }
-                }
-                Err(e) => {
-                    warn!("Error receiving from {}: {}", addr, e);
-                    break;
-                }
-            }
-        }
-        
-        // Connection lost, remove peer
-        self.peer_manager.remove_peer(addr).await;
     }
 
     /// Process incoming messages (PARALLELIZED - spawn handler per message)
@@ -388,18 +316,28 @@ impl Network {
             return Err(format!("Block too far ahead: {} vs our {}", block.index, latest.index));
         }
         
-        // CRITICAL: Verify block linkage
-        if block.index != latest.index + 1 {
-            return Err(format!("Invalid block index: expected {}, got {}", latest.index + 1, block.index));
+        // Allow blocks that are the next in sequence OR fill a gap
+        // This handles out-of-order arrival during sync
+        if block.index <= latest.index {
+            // Block is older than our chain tip - might fill a gap, let add_network_block decide
+            drop(blockchain);
+            let bc = self.blockchain.write().await;
+            return match bc.add_network_block(block) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(format!("Failed to add historical block: {}", e)),
+            };
         }
         
-        if block.previous_hash != latest.hash {
-            return Err("Invalid previous hash".to_string());
-        }
-        
-        // Cryptographic validation
-        if !block.is_valid(Some(&latest)) {
-            return Err("Block failed validation".to_string());
+        // For next block, validate linkage
+        if block.index == latest.index + 1 {
+            if block.previous_hash != latest.hash {
+                return Err("Invalid previous hash".to_string());
+            }
+            
+            // Cryptographic validation
+            if !block.is_valid(Some(&latest)) {
+                return Err("Block failed validation".to_string());
+            }
         }
         
         // Add block to chain (use add_network_block for full validation)
@@ -557,18 +495,8 @@ impl Network {
                                 let height = blockchain.read().await.get_chain().len() as u64;
                                 if peer.handshake(PROTOCOL_VERSION, height, node_id).await.is_ok() {
                                     if peer_manager.add_peer(Arc::clone(&peer)).await.is_ok() {
-                                        let addr = peer.address().await;
-                                        loop {
-                                            match peer.receive_message().await {
-                                                Ok(msg) => {
-                                                    if message_tx.send((addr, msg)).is_err() {
-                                                        break;
-                                                    }
-                                                }
-                                                Err(_) => break,
-                                            }
-                                        }
-                                        peer_manager.remove_peer(addr).await;
+                                        // Use centralized receive task instead of inline loop
+                                        Self::start_peer_receive_task(peer, message_tx, peer_manager).await;
                                     }
                                 }
                             }

@@ -37,8 +37,31 @@ pub enum BlockchainError {
 
 const TARGET_BLOCK_TIME: u64 = 10; // 10 seconds
 const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = 10; // Adjust every 10 blocks
-const INITIAL_MINING_REWARD: u64 = 50_000_000; // 50 QUA in microunits
-const HALVING_INTERVAL: u64 = 210; // Reward halves every 210 blocks
+
+// MODERN ADAPTIVE TOKENOMICS (Option 3 - Solana-style)
+const YEAR_1_REWARD: u64 = 100_000_000; // 100 QUA in microunits
+const ANNUAL_REDUCTION_PERCENT: u64 = 15; // 15% reduction per year (faster value creation)
+const MIN_REWARD: u64 = 5_000_000; // 5 QUA floor (reached after ~20 years)
+const BLOCKS_PER_YEAR: u64 = 3_153_600; // 365.25 days * 86400 / 10 seconds
+
+// UNIQUE FEATURES - Early Adopter Incentives
+const EARLY_ADOPTER_BONUS_BLOCKS: u64 = 100_000; // First ~11.5 days
+const EARLY_ADOPTER_MULTIPLIER: f64 = 1.5; // 1.5x rewards for early miners
+const BOOTSTRAP_PHASE_BLOCKS: u64 = 315_360; // First month gets network usage boost
+
+// SUSTAINABLE ECONOMICS - Fee Structure & Value Capture
+const BASE_TRANSACTION_FEE: u64 = 1_000; // 0.001 QUA minimum (prevents spam)
+const FEE_BURN_PERCENT: u64 = 70; // 70% of fees burned (deflationary pressure)
+const FEE_TREASURY_PERCENT: u64 = 20; // 20% to development treasury
+const FEE_VALIDATOR_PERCENT: u64 = 10; // 10% to block validator (miner)
+
+// TREASURY FUND - Development, Marketing, Listings
+const TREASURY_ALLOCATION_PERCENT: u64 = 5; // 5% of block rewards → treasury
+const TREASURY_ADDRESS: &str = "0x0000000000000000000000000000000000000001"; // Hardcoded treasury
+
+// ANTI-DUMP MECHANISM - Mining Reward Lockup
+const MINING_REWARD_LOCK_PERCENT: u64 = 50; // 50% of mining rewards locked
+const MINING_REWARD_LOCK_BLOCKS: u64 = 157_680; // 6 months vesting (182.5 days)
 
 // Security limits
 const MAX_MEMPOOL_SIZE: usize = 5000; // Maximum pending transactions
@@ -246,12 +269,34 @@ impl Blockchain {
             block_size += tx_size;
         }
         
-        // Create coinbase transaction
+        // Create coinbase transaction with fee distribution
         let total_fees: u64 = transactions.iter().map(|tx| tx.fee).sum();
+        
+        // FEE DISTRIBUTION (70% burn, 20% treasury, 10% miner)
+        let fee_burned = (total_fees * FEE_BURN_PERCENT) / 100;
+        let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100;
+        let fee_to_miner = (total_fees * FEE_VALIDATOR_PERCENT) / 100;
+        
+        // TREASURY ALLOCATION (5% of block rewards)
+        let treasury_allocation = (reward * TREASURY_ALLOCATION_PERCENT) / 100;
+        let miner_reward = reward - treasury_allocation; // 95% to miner
+        
+        // ANTI-DUMP: 50% of mining rewards locked for 6 months
+        let immediate_reward = (miner_reward * (100 - MINING_REWARD_LOCK_PERCENT)) / 100;
+        let locked_reward = miner_reward - immediate_reward;
+        
+        tracing::info!(
+            "Mining Economics: Reward={} QUA, Treasury={} QUA, Fees Burned={} QUA, Locked={} QUA",
+            reward / 1_000_000, treasury_allocation / 1_000_000,
+            fee_burned / 1_000_000, locked_reward / 1_000_000
+        );
+        
+        // Coinbase transaction (immediate + fees to miner)
+        let coinbase_amount = immediate_reward.saturating_add(fee_to_miner);
         let coinbase_tx = Transaction {
             sender: "COINBASE".to_string(),
             recipient: miner_address.clone(),
-            amount: reward.saturating_add(total_fees),
+            amount: coinbase_amount,
             timestamp: chrono::Utc::now().timestamp(),
             signature: vec![],
             public_key: vec![],
@@ -259,8 +304,25 @@ impl Blockchain {
             nonce: 0,
             tx_type: crate::core::transaction::TransactionType::Transfer,
         };
-
+        
+        // Treasury allocation transaction (if any)
         let mut all_transactions = vec![coinbase_tx.clone()];
+        
+        if treasury_allocation + fee_to_treasury > 0 {
+            let treasury_tx = Transaction {
+                sender: "TREASURY".to_string(),
+                recipient: TREASURY_ADDRESS.to_string(),
+                amount: treasury_allocation.saturating_add(fee_to_treasury),
+                timestamp: chrono::Utc::now().timestamp(),
+                signature: vec![],
+                public_key: vec![],
+                fee: 0,
+                nonce: 0,
+                tx_type: crate::core::transaction::TransactionType::Transfer,
+            };
+            all_transactions.push(treasury_tx);
+        }
+        
         all_transactions.extend(transactions);
 
         // CRITICAL: Clone state for transactional update
@@ -272,7 +334,7 @@ impl Blockchain {
         
         // Apply transactions to cloned state
         for tx in &all_transactions {
-            if !tx.is_coinbase() {
+            if !tx.is_coinbase() && tx.sender != "TREASURY" {
                 let total = tx.amount.saturating_add(tx.fee);
                 if !new_state.debit_account(&tx.sender, total) {
                     tracing::warn!("Failed to spend for {} - skipping tx", tx.sender);
@@ -280,6 +342,16 @@ impl Blockchain {
                 }
             }
             new_state.credit_account(tx, current_height, COINBASE_MATURITY);
+        }
+        
+        // ANTI-DUMP: Add locked mining reward (50% vested over 6 months)
+        if locked_reward > 0 {
+            let unlock_height = current_height + MINING_REWARD_LOCK_BLOCKS;
+            new_state.add_locked_balance(&miner_address, locked_reward, unlock_height);
+            tracing::info!(
+                "Locked {} QUA for miner {} until block {}",
+                locked_reward / 1_000_000, miner_address, unlock_height
+            );
         }
 
         // Create and mine new block
@@ -319,11 +391,65 @@ impl Blockchain {
         Ok(())
     }
 
-    /// Get current mining reward with halving (u64 microunits)
+    /// Get current mining reward with adaptive model (u64 microunits)
     fn get_mining_reward(&self) -> u64 {
         let chain_len = self.chain.read().len() as u64;
-        let halvings = chain_len / HALVING_INTERVAL;
-        INITIAL_MINING_REWARD / 2_u64.pow(halvings as u32)
+        
+        // Calculate base reward with annual reduction
+        let years_elapsed = chain_len / BLOCKS_PER_YEAR;
+        let reduction_factor = (100 - ANNUAL_REDUCTION_PERCENT) as f64 / 100.0;
+        let base_reward = (YEAR_1_REWARD as f64 * reduction_factor.powi(years_elapsed as i32)).round() as u64;
+        
+        // Apply minimum floor
+        let base_reward = base_reward.max(MIN_REWARD);
+        
+        // UNIQUE FEATURE 1: Early adopter bonus (first 100k blocks)
+        let reward_with_bonus = if chain_len < EARLY_ADOPTER_BONUS_BLOCKS {
+            (base_reward as f64 * EARLY_ADOPTER_MULTIPLIER).round() as u64
+        } else {
+            base_reward
+        };
+        
+        // UNIQUE FEATURE 2: Network usage adjustment during bootstrap
+        let final_reward = if chain_len < BOOTSTRAP_PHASE_BLOCKS {
+            // During bootstrap, adjust based on transaction activity
+            let usage_factor = self.get_usage_factor();
+            let adjusted = (reward_with_bonus as f64 * usage_factor).round() as u64;
+            // Clamp between base and 2x base (encourages transaction activity)
+            adjusted.clamp(reward_with_bonus, reward_with_bonus * 2)
+        } else {
+            reward_with_bonus
+        };
+        
+        final_reward
+    }
+    
+    /// Calculate network usage factor (1.0 = baseline, up to 2.0 during high activity)
+    /// ANTI-SPAM: Weighted by TOTAL FEES PAID, not transaction count
+    fn get_usage_factor(&self) -> f64 {
+        let recent_blocks = 100.min(self.chain.read().len());
+        if recent_blocks < 10 {
+            return 1.0; // Not enough data
+        }
+        
+        let chain = self.chain.read();
+        let start_idx = chain.len().saturating_sub(recent_blocks);
+        let recent = &chain[start_idx..];
+        
+        // Sum total fees paid in recent blocks (excludes coinbase which has 0 fee)
+        let total_fees: u64 = recent.iter()
+            .flat_map(|b| b.transactions.iter())
+            .filter(|tx| tx.sender != "COINBASE") // Exclude coinbase
+            .map(|tx| tx.fee)
+            .sum();
+        
+        // Average fees per block (in QUA)
+        let avg_fees_per_block = (total_fees as f64 / recent_blocks as f64) / 1_000_000.0; // Convert to QUA
+        
+        // Factor based on economic activity (fee spending), not spam count
+        // 0 fees → 1.0x, 50 QUA avg fees/block → 2.0x
+        // This makes spam UNPROFITABLE (must pay real fees to boost rewards)
+        (1.0 + (avg_fees_per_block / 50.0).min(1.0)).min(2.0)
     }
     
     /// Get current difficulty (DERIVED FROM CHAIN, not local memory)
@@ -441,8 +567,19 @@ impl Blockchain {
     
     /// Calculate reward at specific height (for validation)
     fn calculate_reward_at_height(&self, height: u64) -> u64 {
-        let halvings = height / HALVING_INTERVAL;
-        INITIAL_MINING_REWARD / 2_u64.pow(halvings as u32)
+        // Use same logic as get_mining_reward but with specified height
+        let years_elapsed = height / BLOCKS_PER_YEAR;
+        let reduction_factor = (100 - ANNUAL_REDUCTION_PERCENT) as f64 / 100.0;
+        let base_reward = (YEAR_1_REWARD as f64 * reduction_factor.powi(years_elapsed as i32)).round() as u64;
+        let base_reward = base_reward.max(MIN_REWARD);
+        
+        // Apply early adopter bonus if applicable
+        if height < EARLY_ADOPTER_BONUS_BLOCKS {
+            (base_reward as f64 * EARLY_ADOPTER_MULTIPLIER).round() as u64
+        } else {
+            base_reward
+        }
+        // Note: Usage factor not included here since it's dynamic and based on recent blocks
     }
 
     /// Calculate next difficulty (pure function, deterministic)
