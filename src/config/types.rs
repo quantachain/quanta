@@ -26,6 +26,7 @@ pub struct NodeConfig {
 pub struct NetworkConfig {
     pub max_peers: usize,
     pub bootstrap_nodes: Vec<String>,
+    pub dns_seeds: Vec<String>,
 }
 
 /// Consensus-critical configuration (MUST match across all nodes)
@@ -81,6 +82,12 @@ impl Default for QuantaConfig {
             network: NetworkConfig {
                 max_peers: 125,
                 bootstrap_nodes: Vec::new(),
+                dns_seeds: vec![
+                    // Add DNS seeds here for mainnet:
+                    // "seed1.quanta.network".to_string(),
+                    // "seed2.quanta.network".to_string(),
+                    // "seed3.quanta.network".to_string(),
+                ],
             },
             consensus: ConsensusConfig {
                 max_block_transactions: 2000,

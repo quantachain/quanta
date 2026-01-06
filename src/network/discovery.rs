@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
@@ -26,6 +26,7 @@ pub enum PeerSource {
 pub struct PeerDiscovery {
     known_peers: Arc<RwLock<HashMap<SocketAddr, PeerMeta>>>,
     seed_nodes: Vec<SocketAddr>,
+    dns_seeds: Vec<String>,
 }
 
 impl PeerDiscovery {
@@ -34,7 +35,56 @@ impl PeerDiscovery {
         Self {
             known_peers: Arc::new(RwLock::new(HashMap::new())),
             seed_nodes,
+            dns_seeds: Vec::new(),
         }
+    }
+    
+    /// Create with DNS seeds
+    pub fn with_dns_seeds(seed_nodes: Vec<SocketAddr>, dns_seeds: Vec<String>) -> Self {
+        Self {
+            known_peers: Arc::new(RwLock::new(HashMap::new())),
+            seed_nodes,
+            dns_seeds,
+        }
+    }
+
+    /// Resolve DNS seeds to socket addresses
+    pub async fn resolve_dns_seeds(&self) -> Vec<SocketAddr> {
+        let mut resolved = Vec::new();
+        
+        for dns_seed in &self.dns_seeds {
+            info!("Resolving DNS seed: {}", dns_seed);
+            
+            // Try with standard port if not specified
+            let lookup_addr = if dns_seed.contains(':') {
+                dns_seed.clone()
+            } else {
+                format!("{}:8333", dns_seed) // Default Quanta P2P port
+            };
+            
+            match tokio::task::spawn_blocking(move || {
+                lookup_addr.to_socket_addrs()
+            }).await {
+                Ok(Ok(addrs)) => {
+                    let addresses: Vec<SocketAddr> = addrs.collect();
+                    info!("DNS seed {} resolved to {} addresses", dns_seed, addresses.len());
+                    resolved.extend(addresses);
+                }
+                Ok(Err(e)) => {
+                    warn!("Failed to resolve DNS seed {}: {}", dns_seed, e);
+                }
+                Err(e) => {
+                    warn!("DNS resolution task failed for {}: {}", dns_seed, e);
+                }
+            }
+        }
+        
+        // Add resolved addresses to known peers
+        for addr in &resolved {
+            self.add_peer_with_source(*addr, PeerSource::Seed).await;
+        }
+        
+        resolved
     }
 
     /// Get seed nodes

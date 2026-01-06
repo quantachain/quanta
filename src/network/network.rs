@@ -3,7 +3,7 @@ use crate::consensus::blockchain::Blockchain;
 use crate::network::peer::{Peer, PeerManager};
 use crate::network::protocol::{P2PMessage, PROTOCOL_VERSION};
 use crate::core::transaction::Transaction;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, RwLock};
@@ -18,6 +18,7 @@ pub struct NetworkConfig {
     pub max_peers: usize,
     pub node_id: String,
     pub bootstrap_nodes: Vec<SocketAddr>,
+    pub dns_seeds: Vec<String>,
 }
 
 impl Default for NetworkConfig {
@@ -27,6 +28,7 @@ impl Default for NetworkConfig {
             max_peers: 125,
             node_id: Uuid::new_v4().to_string(),
             bootstrap_nodes: Vec::new(),
+            dns_seeds: Vec::new(),
         }
     }
 }
@@ -96,6 +98,30 @@ impl Network {
                 }
             })
         };
+
+        // Resolve DNS seeds to get additional bootstrap nodes
+        if !self.config.dns_seeds.is_empty() {
+            info!("Resolving {} DNS seeds...", self.config.dns_seeds.len());
+            for dns_seed in &self.config.dns_seeds {
+                let network = Arc::clone(&self);
+                let seed = dns_seed.clone();
+                tokio::spawn(async move {
+                    match network.resolve_dns_seed(&seed).await {
+                        Ok(addrs) => {
+                            info!("DNS seed {} resolved to {} peers", seed, addrs.len());
+                            for addr in addrs {
+                                if let Err(e) = network.connect_to_peer(addr).await {
+                                    debug!("Failed to connect to DNS peer {}: {}", addr, e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!("Failed to resolve DNS seed {}: {}", seed, e);
+                        }
+                    }
+                });
+            }
+        }
 
         // Connect to bootstrap nodes
         for addr in &self.config.bootstrap_nodes {
@@ -186,6 +212,24 @@ impl Network {
             }
             peer_manager.remove_peer(addr).await;
         });
+    }
+
+    /// Resolve DNS seed to socket addresses
+    async fn resolve_dns_seed(&self, dns_seed: &str) -> Result<Vec<SocketAddr>, String> {
+        let lookup_addr = if dns_seed.contains(':') {
+            dns_seed.to_string()
+        } else {
+            format!("{}:8333", dns_seed) // Default Quanta P2P port
+        };
+        
+        tokio::task::spawn_blocking(move || {
+            lookup_addr
+                .to_socket_addrs()
+                .map(|addrs| addrs.collect())
+                .map_err(|e| format!("DNS resolution failed: {}", e))
+        })
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
     }
 
     /// Connect to a peer

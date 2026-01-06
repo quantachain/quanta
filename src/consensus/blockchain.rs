@@ -79,6 +79,17 @@ const MAX_FUTURE_BLOCK_TIME: i64 = 7200; // 2 hours maximum future timestamp
 //  VERIFIED: 2026-01-04 - Hash regenerated with correct parameters
 const GENESIS_HASH: &str = "527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d";
 
+// CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
+// Format: (block_height, block_hash)
+// Add checkpoints every ~1000 blocks for devnet, ~10000 for mainnet
+const CHECKPOINTS: &[(u64, &str)] = &[
+    (0, GENESIS_HASH),
+    // Add more checkpoints as network matures:
+    // (1000, "<block_1000_hash>"),
+    // (5000, "<block_5000_hash>"),
+    // (10000, "<block_10000_hash>"),
+];
+
 /// Thread-safe blockchain with persistent storage
 pub struct Blockchain {
     chain: Arc<RwLock<Vec<Block>>>,
@@ -151,6 +162,24 @@ impl Blockchain {
             storage,
             orphaned_blocks: Arc::new(RwLock::new(Vec::new())),
         })
+    }
+
+    /// Validate block against checkpoints (prevents deep reorgs)
+    fn validate_checkpoint(&self, height: u64, hash: &str) -> bool {
+        for (checkpoint_height, checkpoint_hash) in CHECKPOINTS {
+            if *checkpoint_height == height {
+                if hash != *checkpoint_hash {
+                    tracing::error!(
+                        "Checkpoint violation at height {}: expected {}, got {}",
+                        height, checkpoint_hash, hash
+                    );
+                    return false;
+                }
+                tracing::debug!("Checkpoint validated at height {}", height);
+                return true;
+            }
+        }
+        true // No checkpoint at this height
     }
 
     /// Get the latest block
@@ -249,13 +278,18 @@ impl Blockchain {
         let reward = self.get_mining_reward();
         let difficulty = self.calculate_next_difficulty();
         
-        // Get pending transactions (limit by size and count)
+        // Get pending transactions sorted by fee (highest first) with size limits
         let mut pending_txs = self.pending_transactions.write();
+        
+        // Sort by fee descending (highest fee first)
+        let mut sorted_txs = pending_txs.clone();
+        sorted_txs.sort_by(|a, b| b.fee.cmp(&a.fee));
+        
         let mut transactions = Vec::new();
         let mut block_size = 0usize;
         
-        // Select transactions that fit in block limits
-        for tx in pending_txs.iter() {
+        // Select transactions that fit in block limits (prioritize high fees)
+        for tx in sorted_txs.iter() {
             if transactions.len() >= MAX_BLOCK_TRANSACTIONS {
                 break;
             }
@@ -752,6 +786,12 @@ impl Blockchain {
     /// Add block to main chain (internal helper)
     fn add_block_to_main_chain(&self, block: Block) -> Result<(), BlockchainError> {
         let latest = self.get_latest_block();
+        
+        // CHECKPOINT VALIDATION: Prevent reorganization past checkpoints
+        if !self.validate_checkpoint(block.index, &block.hash) {
+            tracing::error!("Rejecting block {} due to checkpoint violation", block.index);
+            return Err(BlockchainError::InvalidBlock);
+        }
         
         // Cryptographic validation
         if !block.is_valid(Some(&latest)) {

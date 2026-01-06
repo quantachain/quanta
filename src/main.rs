@@ -392,6 +392,7 @@ async fn main() {
                     max_peers: cfg.network.max_peers,
                     node_id: uuid::Uuid::new_v4().to_string(),
                     bootstrap_nodes,
+                    dns_seeds: cfg.network.dns_seeds.clone(),
                 };
                 
                 let network = Arc::new(Network::new(network_config, Arc::clone(&blockchain)));

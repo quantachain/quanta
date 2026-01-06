@@ -11,6 +11,7 @@ use axum::{
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::time::Instant;
+use tokio_util::sync::CancellationToken;
 
 pub struct RpcServer {
     pub blockchain: Arc<RwLock<Blockchain>>,
@@ -22,10 +23,11 @@ pub struct RpcServer {
     pub rpc_port: u16,
 }
 
-#[derive(Clone)]
 pub struct MiningState {
     pub address: String,
     pub is_active: bool,
+    pub cancel_token: CancellationToken,
+    pub blocks_mined: Arc<RwLock<u64>>,
 }
 
 #[derive(Clone)]
@@ -186,13 +188,56 @@ async fn handle_start_mining(state: &AppState, params: &serde_json::Value) -> Js
         }
     }
 
+    // Create cancellation token for mining task
+    let cancel_token = CancellationToken::new();
+    let blocks_mined = Arc::new(RwLock::new(0u64));
+    
     // Start mining
     *mining_state = Some(MiningState {
         address: address.clone(),
         is_active: true,
+        cancel_token: cancel_token.clone(),
+        blocks_mined: blocks_mined.clone(),
     });
+    drop(mining_state);
 
-    // TODO: Actually start mining thread/task here
+    // Spawn mining task
+    let blockchain = state.blockchain.clone();
+    let mining_address = address.clone();
+    let network = state.network.clone();
+    
+    tokio::spawn(async move {
+        tracing::info!("Mining task started for address: {}", mining_address);
+        
+        loop {
+            // Check if mining should stop
+            if cancel_token.is_cancelled() {
+                tracing::info!("Mining task stopped");
+                break;
+            }
+            
+            // Mine a block
+            match blockchain.write().await.mine_pending_transactions(mining_address.clone()) {
+                Ok(_) => {
+                    let mut count = blocks_mined.write().await;
+                    *count += 1;
+                    tracing::info!("Successfully mined block #{}", *count);
+                    
+                    // Broadcast block to network
+                    if let Some(ref net) = network {
+                        let latest_block = blockchain.read().await.get_latest_block();
+                        net.broadcast_block(latest_block).await;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Mining attempt failed: {}", e);
+                }
+            }
+            
+            // Small delay between mining attempts
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+    });
 
     JsonRpcResponse::success(
         1,
@@ -214,9 +259,14 @@ async fn handle_stop_mining(state: &AppState) -> JsonRpcResponse {
         );
     }
 
+    // Cancel mining task
+    if let Some(ref ms) = *mining_state {
+        ms.cancel_token.cancel();
+        let blocks = *ms.blocks_mined.read().await;
+        tracing::info!("Mining stopped. Total blocks mined: {}", blocks);
+    }
+    
     *mining_state = None;
-
-    // TODO: Actually stop mining thread/task here
 
     JsonRpcResponse::success(
         1,

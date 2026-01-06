@@ -24,6 +24,15 @@ max_peers = 125
 # Bootstrap peer addresses (comma-separated host:port)
 bootstrap_nodes = []
 
+# DNS seeds for peer discovery (domain names that resolve to peer IPs)
+# Add your DNS seeds here for mainnet/testnet
+dns_seeds = [
+    # Examples (configure these for your network):
+    # "seed1.quanta.network",
+    # "seed2.quanta.network",
+    # "seed3.quanta.network",
+]
+
 #  CONSENSUS CONFIG - MUST MATCH NETWORK 
 [consensus]
 max_block_transactions = 2000
