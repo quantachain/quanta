@@ -67,6 +67,7 @@ const MINING_REWARD_LOCK_BLOCKS: u64 = 157_680; // 6 months vesting (182.5 days)
 const MAX_MEMPOOL_SIZE: usize = 5000; // Maximum pending transactions
 const MAX_BLOCK_TRANSACTIONS: usize = 2000; // Maximum transactions per block
 const MAX_BLOCK_SIZE_BYTES: usize = 1_048_576; // 1 MB max block size
+const MAX_ORPHAN_BLOCKS: usize = 100; // Maximum orphaned blocks (prevents memory exhaustion)
 const MAX_TRANSACTION_SIZE_BYTES: usize = 102400; // 100KB max per transaction (prevents DOS)
 const MIN_TRANSACTION_FEE: u64 = 100; // 0.0001 QUA in microunits
 const TRANSACTION_EXPIRY_SECONDS: i64 = 86400; // 24 hours
@@ -512,10 +513,12 @@ impl Blockchain {
                 block.timestamp - current_time, MAX_FUTURE_BLOCK_TIME);
             return Err(BlockchainError::InvalidBlock);
         }
-        // Prevent ridiculous backdating (within 1 week of previous block)
-        if block.timestamp < previous.timestamp - 604800 {
-            tracing::warn!("Block timestamp backdated by {} seconds", 
-                previous.timestamp - block.timestamp);
+        // Prevent backdating/forward-dating (within 2 hours of previous block)
+        const MAX_TIME_DELTA: i64 = 7200; // 2 hours
+        if block.timestamp > previous.timestamp + MAX_TIME_DELTA ||
+           block.timestamp < previous.timestamp - MAX_TIME_DELTA {
+            tracing::warn!("Block timestamp {} outside acceptable range (prev: {}, delta: {})", 
+                block.timestamp, previous.timestamp, block.timestamp - previous.timestamp);
             return Err(BlockchainError::InvalidBlock);
         }
         
@@ -525,25 +528,71 @@ impl Blockchain {
             return Err(BlockchainError::InvalidDifficulty);
         }
         
-        // 4. Coinbase validation
+        // 4. Coinbase validation - Must account for fee distribution
         let coinbase_txs: Vec<_> = block.transactions.iter().filter(|tx| tx.is_coinbase()).collect();
-        if coinbase_txs.len() != 1 {
+        if coinbase_txs.is_empty() || coinbase_txs.len() > 1 {
+            tracing::warn!("Block must have exactly one coinbase transaction, found {}", coinbase_txs.len());
             return Err(BlockchainError::InvalidBlock);
         }
+        
+        // Validate treasury transaction if present
+        let treasury_txs: Vec<_> = block.transactions.iter()
+            .filter(|tx| tx.sender == "TREASURY")
+            .collect();
         
         let coinbase = coinbase_txs[0];
         let expected_reward = self.calculate_reward_at_height(block.index);
         let total_fees: u64 = block.transactions.iter()
-            .filter(|tx| !tx.is_coinbase())
+            .filter(|tx| !tx.is_coinbase() && tx.sender != "TREASURY")
             .map(|tx| tx.fee)
             .sum();
         
-        let expected_total = expected_reward.saturating_add(total_fees);
-        if coinbase.amount != expected_total {
+        // FEE DISTRIBUTION: 70% burn, 20% treasury, 10% miner
+        let fee_to_miner = (total_fees * FEE_VALIDATOR_PERCENT) / 100;
+        let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100;
+        
+        // REWARD DISTRIBUTION: 5% treasury, 95% to miner (50% locked)
+        let treasury_allocation = (expected_reward * TREASURY_ALLOCATION_PERCENT) / 100;
+        let miner_reward = expected_reward - treasury_allocation;
+        let immediate_reward = (miner_reward * (100 - MINING_REWARD_LOCK_PERCENT)) / 100;
+        
+        // Coinbase should contain: immediate reward + miner's fee share
+        let expected_coinbase = immediate_reward.saturating_add(fee_to_miner);
+        if coinbase.amount != expected_coinbase {
+            tracing::warn!(
+                "Invalid coinbase amount: expected {} (reward: {}, fees: {}), got {}",
+                expected_coinbase, immediate_reward, fee_to_miner, coinbase.amount
+            );
             return Err(BlockchainError::InvalidCoinbaseReward {
                 actual: coinbase.amount,
-                expected: expected_total,
+                expected: expected_coinbase,
             });
+        }
+        
+        // Validate treasury transaction if fees or allocation exist
+        let expected_treasury = treasury_allocation.saturating_add(fee_to_treasury);
+        if expected_treasury > 0 {
+            if treasury_txs.len() != 1 {
+                tracing::warn!("Block should have treasury transaction for {} microunits", expected_treasury);
+                return Err(BlockchainError::InvalidBlock);
+            }
+            
+            let treasury_tx = treasury_txs[0];
+            if treasury_tx.amount != expected_treasury {
+                tracing::warn!(
+                    "Invalid treasury amount: expected {}, got {}",
+                    expected_treasury, treasury_tx.amount
+                );
+                return Err(BlockchainError::InvalidBlock);
+            }
+            
+            if treasury_tx.recipient != TREASURY_ADDRESS {
+                tracing::warn!("Treasury transaction sent to wrong address: {}", treasury_tx.recipient);
+                return Err(BlockchainError::InvalidBlock);
+            }
+        } else if !treasury_txs.is_empty() {
+            tracing::warn!("Block has treasury transaction but no allocation expected");
+            return Err(BlockchainError::InvalidBlock);
         }
         
         // 5. All non-coinbase txs must have valid signatures and nonces
@@ -759,8 +808,14 @@ impl Blockchain {
             tracing::warn!("Fork detected: Block {} at height {}, we're at {}", 
                 &block.hash[..8], block.index, latest.index);
             
-            // Store as orphaned block
-            self.orphaned_blocks.write().push(block.clone());
+            // Store as orphaned block (with size limit)
+            let mut orphans = self.orphaned_blocks.write();
+            if orphans.len() >= MAX_ORPHAN_BLOCKS {
+                tracing::warn!("Max orphan blocks reached, dropping oldest");
+                orphans.remove(0);
+            }
+            orphans.push(block.clone());
+            drop(orphans);
             
             // Try to resolve fork by fetching missing blocks
             // (This would trigger sync - simplified for now)
@@ -773,7 +828,13 @@ impl Blockchain {
             
             // For now, keep our block (in production: compare total work)
             // TODO: Implement total difficulty comparison
-            self.orphaned_blocks.write().push(block);
+            let mut orphans = self.orphaned_blocks.write();
+            if orphans.len() >= MAX_ORPHAN_BLOCKS {
+                tracing::warn!("Max orphan blocks reached, dropping oldest");
+                orphans.remove(0);
+            }
+            orphans.push(block);
+            drop(orphans);
             return Ok(());
         } else {
             // Block is behind our chain - likely stale

@@ -209,16 +209,20 @@ async fn handle_start_mining(state: &AppState, params: &serde_json::Value) -> Js
     tokio::spawn(async move {
         tracing::info!("Mining task started for address: {}", mining_address);
         
+        let mut consecutive_failures = 0;
+        const MAX_CONSECUTIVE_FAILURES: u32 = 10;
+        
         loop {
             // Check if mining should stop
             if cancel_token.is_cancelled() {
-                tracing::info!("Mining task stopped");
+                tracing::info!("Mining task stopped by cancellation");
                 break;
             }
             
             // Mine a block
             match blockchain.write().await.mine_pending_transactions(mining_address.clone()) {
                 Ok(_) => {
+                    consecutive_failures = 0; // Reset on success
                     let mut count = blocks_mined.write().await;
                     *count += 1;
                     tracing::info!("Successfully mined block #{}", *count);
@@ -230,7 +234,21 @@ async fn handle_start_mining(state: &AppState, params: &serde_json::Value) -> Js
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Mining attempt failed: {}", e);
+                    consecutive_failures += 1;
+                    tracing::warn!("Mining attempt failed ({}): {}", consecutive_failures, e);
+                    
+                    if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
+                        tracing::error!(
+                            "Mining failed {} times consecutively, stopping task",
+                            MAX_CONSECUTIVE_FAILURES
+                        );
+                        break;
+                    }
+                    
+                    // Exponential backoff on failures
+                    let backoff_ms = std::cmp::min(1000 * consecutive_failures as u64, 30000);
+                    tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
+                    continue;
                 }
             }
             
@@ -367,7 +385,7 @@ async fn handle_get_mempool(state: &AppState) -> JsonRpcResponse {
     JsonRpcResponse::success(1, serde_json::json!({ "transactions": tx_data }))
 }
 
-async fn handle_shutdown(_state: &AppState) -> JsonRpcResponse {
+async fn handle_shutdown(state: &AppState) -> JsonRpcResponse {
     tracing::info!("Shutdown requested via RPC");
     
     // Spawn a task to shutdown after a brief delay

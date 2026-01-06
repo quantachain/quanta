@@ -50,6 +50,7 @@ tokio-tungstenite = "0.21"
 # Thread safety
 parking_lot = "0.12"
 tokio-util = "0.7"  # For CancellationToken
+once_cell = "1.19"  # For lazy static initialization
 
 # Logging
 tracing = "0.1"

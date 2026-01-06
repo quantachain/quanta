@@ -2,10 +2,6 @@ use crate::core::block::Block;
 use crate::core::transaction::Transaction;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use hmac::{Hmac, Mac};
-use sha3::Sha3_256;
-
-type HmacSha3_256 = Hmac<Sha3_256>;
 
 /// P2P protocol messages for blockchain network communication
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -50,12 +46,11 @@ pub enum P2PMessage {
     Disconnect,
 }
 
-/// Authenticated message wrapper (prevents Sybil attacks and tampering)
+/// Network message wrapper with magic bytes for network identification
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct AuthenticatedMessage {
+pub struct NetworkMessage {
+    pub magic: [u8; 4], // Network identifier
     pub message: P2PMessage,
-    pub hmac: Vec<u8>, // HMAC-SHA3-256 of message
-    pub nonce: u64, // Prevents replay attacks
 }
 
 /// Simplified block header for efficient sync
@@ -84,59 +79,33 @@ impl From<&Block> for BlockHeader {
 
 /// Protocol constants
 pub const PROTOCOL_VERSION: u32 = 1;
-pub const MAX_MESSAGE_SIZE: usize = 10 * 1024 * 1024; // 10MB
+pub const MAX_MESSAGE_SIZE: usize = 2 * 1024 * 1024; // 2MB
 pub const PING_INTERVAL_SECS: u64 = 60;
 pub const PEER_TIMEOUT_SECS: u64 = 180;
 
-//  CRITICAL SECURITY WARNING 
-// NETWORK_SECRET must be CHANGED before testnet launch!
-// 
-// PRODUCTION SETUP:
-// 1. Generate: openssl rand -hex 32
-// 2. Store in environment: QUANTA_NETWORK_SECRET=<your_secret>
-// 3. Read from env or config file (NEVER commit to git)
-// 4. All testnet nodes MUST share the same secret
-// 5. Use different secrets for mainnet vs testnet
-//
-//  TESTNET SECRET (Updated 2026-01-04):
-const NETWORK_SECRET: &[u8] = b"0ca4cea38e2e914d3170feab4990b5a08dbe83153b2766ff60a228271887d0f9";
+/// Network magic bytes (prevents testnet/mainnet message mixing)
+pub const TESTNET_MAGIC: [u8; 4] = *b"QUAX"; // Quanta Testnet
+pub const MAINNET_MAGIC: [u8; 4] = *b"QUAM"; // Quanta Mainnet
 
-impl AuthenticatedMessage {
-    /// Create authenticated message with HMAC
-    pub fn create(message: P2PMessage) -> Result<Self, String> {
-        let nonce = rand::random::<u64>();
-        let message_bytes = bincode::serialize(&message)
-            .map_err(|e| format!("Serialization error: {}", e))?;
-        
-        // Compute HMAC-SHA3-256
-        let mut mac = HmacSha3_256::new_from_slice(NETWORK_SECRET)
-            .map_err(|e| format!("HMAC error: {}", e))?;
-        mac.update(&message_bytes);
-        mac.update(&nonce.to_le_bytes());
-        let hmac = mac.finalize().into_bytes().to_vec();
-        
-        Ok(Self {
+/// Get network magic based on configuration
+#[cfg(feature = "mainnet")]
+pub const NETWORK_MAGIC: [u8; 4] = MAINNET_MAGIC;
+
+#[cfg(not(feature = "mainnet"))]
+pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;
+
+impl NetworkMessage {
+    /// Create network message with magic bytes
+    pub fn create(message: P2PMessage) -> Self {
+        Self {
+            magic: NETWORK_MAGIC,
             message,
-            hmac,
-            nonce,
-        })
+        }
     }
     
-    /// Verify message HMAC (prevents tampering and Sybil attacks)
+    /// Verify message has correct network magic
     pub fn verify(&self) -> bool {
-        let message_bytes = match bincode::serialize(&self.message) {
-            Ok(b) => b,
-            Err(_) => return false,
-        };
-        
-        let mut mac = match HmacSha3_256::new_from_slice(NETWORK_SECRET) {
-            Ok(m) => m,
-            Err(_) => return false,
-        };
-        mac.update(&message_bytes);
-        mac.update(&self.nonce.to_le_bytes());
-        
-        mac.verify_slice(&self.hmac).is_ok()
+        self.magic == NETWORK_MAGIC
     }
 }
 

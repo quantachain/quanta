@@ -184,4 +184,38 @@ impl Block {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    #[test]
+    fn verify_genesis_hash() {
+        let genesis = Block::genesis();
+        
+        // CONSENSUS-CRITICAL: Genesis block must have these exact parameters
+        assert_eq!(genesis.index, 0);
+        assert_eq!(genesis.timestamp, 1735689600); // 2026-01-01 00:00:00 UTC
+        assert_eq!(genesis.difficulty, 6);
+        assert_eq!(genesis.previous_hash, "0".repeat(64));
+        assert_eq!(genesis.merkle_root, "0".repeat(64));
+        assert_eq!(genesis.transactions.len(), 0);
+        
+        // CRITICAL: Hash must match hardcoded value in blockchain.rs
+        assert_eq!(
+            genesis.hash,
+            "527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d",
+            "Genesis hash mismatch! This will cause chain splits."
+        );
+    }
+
+    #[test]
+    fn genesis_hash_recalculation() {
+        let genesis = Block::genesis();
+        let recalculated = genesis.calculate_hash();
+        
+        assert_eq!(
+            genesis.hash, recalculated,
+            "Genesis hash calculation must be deterministic"
+        );
+    }
+}
