@@ -529,90 +529,90 @@ Hard forks will be:
 ### Phase 1: Testnet (Q2-Q3 2026)
 
 **Q2 2026**:
-- Public testnet launch with coordinated bootstrap nodes
+- Public testnet launch with 3-5 bootstrap nodes
 - Core functionality validation
-- Stress testing with simulated high-volume transactions
+- Basic stress testing with simulated transactions
 - Community onboarding and documentation refinement
 
 **Q3 2026**:
-- External security audits (minimum 3 independent firms)
-- Public bug bounty program ($100,000+ rewards pool)
+- Community code review and feedback
+- Self-hosted bug bounty program (modest rewards as budget allows)
 - Performance optimization based on testnet data
-- Network resilience testing (partition tolerance, eclipse attack resistance)
+- Network resilience testing
 
 **Success Criteria**:
-- 1,000+ testnet nodes across 50+ countries
-- 1 million+ test transactions processed
-- Zero critical vulnerabilities in final audit
-- 99.9%+ uptime for testnet bootstrap nodes
+- 20-50 active testnet nodes from community
+- 10,000+ test transactions processed
+- No critical vulnerabilities discovered
+- Stable testnet operation for 30+ consecutive days
 
 ### Phase 2: Mainnet Preparation (Q4 2026)
 
 - Comprehensive remediation of all testnet findings
-- Final security audit and formal code freeze
+- Community security review and code freeze
 - Genesis block configuration and fair launch planning
-- Bootstrap node deployment (minimum 10 nodes, 5+ geographic regions)
-- Exchange partnership agreements (targeting 3-5 Tier 1 exchanges)
-- Third-party wallet provider integrations
-- Emergency response procedures and incident playbooks
-- Network monitoring infrastructure (Prometheus/Grafana dashboards)
+- Bootstrap node deployment (3-5 nodes in accessible regions)
+- Basic exchange outreach (targeting 1-2 smaller exchanges initially)
+- Reference wallet implementation and documentation
+- Emergency response procedures
+- Basic monitoring infrastructure
 
 ### Phase 3: Mainnet Launch (Q1 2027)
 
 **Genesis Event**:
 - Coordinated mainnet launch with transparent genesis parameters
-- Initial bootstrap nodes operational across North America, Europe, Asia-Pacific
-- Official block explorer deployment (open-source)
-- Desktop wallet releases (Windows, macOS, Linux)
+- Initial bootstrap nodes operational (3-5 nodes)
+- Basic block explorer deployment (open-source)
+- Desktop wallet release (primary platforms)
 
 **First 30 Days**:
-- 24/7 network monitoring and incident response
-- Daily status reports to community
-- Rapid response to any network issues
-- Exchange listing activations (post-stabilization period)
+- Network monitoring with community support
+- Regular status updates to community
+- Best-effort response to network issues
+- Exchange listing exploration (if interest exists)
 
 **Success Criteria**:
-- 500+ mainnet nodes in first week
-- 99.5%+ network uptime
-- Average block time within 10-15 seconds
+- 15-30 mainnet nodes in first month
+- 95%+ network uptime
+- Average block time within 10-20 seconds
 - No consensus failures or chain splits
 
 ### Phase 4: Expansion (Q2-Q4 2027)
 
 **Q2 2027**:
-- Light client protocol (SPV) specification and implementation
-- Signature aggregation research and prototyping
-- Mobile wallet SDK development
+- Light client protocol (SPV) specification
+- Signature aggregation research
+- Mobile wallet exploration
 
 **Q3 2027**:
-- Mobile wallet releases (iOS App Store, Google Play)
-- Hardware wallet integrations (Ledger, Trezor partnerships)
-- Pruning mode optimization (target: 100 GB storage for pruned nodes)
+- Mobile wallet prototype (if resources allow)
+- Hardware wallet integration research
+- Pruning mode optimization
 
 **Q4 2027**:
-- Developer documentation and API reference
-- Third-party integration toolkit
-- First developer grants awarded
-- Signature compression implementation (target: 50% reduction)
+- Developer documentation improvements
+- API reference completion
+- Community contribution guidelines
+- Performance optimization research
 
 ### Phase 5: Ecosystem (2028+)
 
-**Smart Contract Layer**:
-- Post-quantum VM design specification (Q1-Q2 2028)
-- VM prototype and testnet deployment (Q3-Q4 2028)
-- Mainnet smart contract activation (Q1 2029)
+**Smart Contract Layer** (pending resources and community demand):
+- Post-quantum VM design research
+- VM prototype exploration
+- Community feedback and requirements gathering
 
-**Advanced Features**:
-- Privacy enhancements (confidential transactions research)
-- Cross-chain bridges (requires quantum-resistant relay protocols)
-- Layer 2 solutions (rollups, state channels)
-- Interoperability standards
+**Advanced Features** (long-term research goals):
+- Privacy enhancements research
+- Cross-chain bridge exploration
+- Layer 2 solutions research
+- Interoperability standards participation
 
-**Ecosystem Growth**:
-- Developer grants program ($1M+ annual budget)
-- DApp incubator program
-- Educational initiatives and workshops
-- Enterprise adoption partnerships
+**Ecosystem Growth** (community-driven):
+- Community contribution recognition
+- Educational content and guides
+- Developer documentation
+- Organic adoption and partnerships
 
 ### Long-Term Research (2029+)
 
@@ -625,10 +625,10 @@ Hard forks will be:
 
 **Why Extended Timeline?**
 1. **Security First**: Rushing mainnet risks catastrophic vulnerabilities
-2. **Community Building**: Strong testnet participation ensures healthy mainnet
-3. **Audit Thoroughness**: Post-quantum cryptography requires specialized review
-4. **Operational Readiness**: Bootstrap infrastructure must be production-grade
-5. **Economic Stability**: Exchange partnerships and liquidity take time
+2. **Small Team**: Limited resources require realistic pacing
+3. **Community Building**: Organic growth takes time
+4. **Testing Thoroughness**: Post-quantum cryptography requires careful validation
+5. **Operational Learning**: Bootstrap infrastructure needs real-world testing
 
 **Current Status** (January 2026):
 - Core protocol implementation: 95% complete
