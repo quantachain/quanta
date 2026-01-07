@@ -305,7 +305,7 @@ async fn main() {
                         std::fs::write(&pid_file, child_pid.to_string())
                             .expect("Failed to write PID file");
                         
-                        println!("✓ QUANTA node started as daemon (PID: {})", child_pid);
+                        println!(" QUANTA node started as daemon (PID: {})", child_pid);
                         println!("  API Port: {}", cfg.node.api_port);
                         println!("  Network Port: {}", cfg.node.network_port);
                         println!("  RPC Port: {}", rpc_port);
@@ -512,24 +512,24 @@ async fn main() {
             
             match client.get_node_status().await {
                 Ok(status) => {
-                    println!("\n╔══════════════════════════════════════════════════════════╗");
-                    println!("║            QUANTA NODE STATUS                            ║");
-                    println!("╠══════════════════════════════════════════════════════════╣");
-                    println!("║  Status:         {}                              ║", if status.running { "RUNNING ✓" } else { "STOPPED" });
-                    println!("║  Version:        {}                                     ║", status.version);
-                    println!("║  Uptime:         {} seconds                             ║", status.uptime_seconds);
-                    println!("║                                                          ║");
-                    println!("║  Chain Height:   {} blocks                              ║", status.chain_height);
-                    println!("║  Mempool:        {} pending transactions                ║", status.mempool_size);
-                    println!("║  Peers:          {} connected                           ║", status.peer_count);
-                    println!("║                                                          ║");
-                    println!("║  API Port:       {}                                     ║", status.api_port);
-                    println!("║  Network Port:   {}                                     ║", status.network_port);
-                    println!("║  RPC Port:       {}                                     ║", status.rpc_port);
-                    println!("╚══════════════════════════════════════════════════════════╝\n");
+                    println!("\n");
+                    println!("            QUANTA NODE STATUS                            ");
+                    println!("");
+                    println!("  Status:         {}                              ", if status.running { "RUNNING " } else { "STOPPED" });
+                    println!("  Version:        {}                                     ", status.version);
+                    println!("  Uptime:         {} seconds                             ", status.uptime_seconds);
+                    println!("                                                          ");
+                    println!("  Chain Height:   {} blocks                              ", status.chain_height);
+                    println!("  Mempool:        {} pending transactions                ", status.mempool_size);
+                    println!("  Peers:          {} connected                           ", status.peer_count);
+                    println!("                                                          ");
+                    println!("  API Port:       {}                                     ", status.api_port);
+                    println!("  Network Port:   {}                                     ", status.network_port);
+                    println!("  RPC Port:       {}                                     ", status.rpc_port);
+                    println!("\n");
                 }
                 Err(e) => {
-                    eprintln!("✗ Failed to connect to node RPC server on port {}", rpc_port);
+                    eprintln!(" Failed to connect to node RPC server on port {}", rpc_port);
                     eprintln!("  Error: {}", e);
                     eprintln!("\n  Is the node running? Start it with:");
                     eprintln!("  ./quanta start --detach --rpc-port {}", rpc_port);
@@ -543,16 +543,16 @@ async fn main() {
             
             match client.get_mining_status().await {
                 Ok(status) => {
-                    println!("\n╔══════════════════════════════════════════════════════════╗");
-                    println!("║            QUANTA MINING STATUS                          ║");
-                    println!("╠══════════════════════════════════════════════════════════╣");
-                    println!("║  Mining Active:  {}                              ║", if status.is_mining { "YES ✓" } else { "NO" });
+                    println!("\n");
+                    println!("            QUANTA MINING STATUS                          ");
+                    println!("");
+                    println!("  Mining Active:  {}                              ", if status.is_mining { "YES " } else { "NO" });
                     if let Some(ref addr) = status.mining_address {
-                        println!("║  Mining To:      {}...║", &addr[..32]);
+                        println!("  Mining To:      {}...", &addr[..32]);
                     }
-                    println!("║  Blocks Mined:   {}                                      ║", status.blocks_mined);
-                    println!("║  Difficulty:     {}                                      ║", status.difficulty);
-                    println!("║  Block Reward:   {} microunits ({:.6} QUA)         ║", 
+                    println!("  Blocks Mined:   {}                                      ", status.blocks_mined);
+                    println!("  Difficulty:     {}                                      ", status.difficulty);
+                    println!("  Block Reward:   {} microunits ({:.6} QUA)         ", 
                         status.mining_reward, 
                         status.mining_reward as f64 / 1_000_000.0
                     );
@@ -560,12 +560,12 @@ async fn main() {
                         use chrono::{DateTime, Utc as ChronoUtc};
                         let dt = DateTime::<ChronoUtc>::from_timestamp(last_time, 0)
                             .unwrap_or_else(|| ChronoUtc::now());
-                        println!("║  Last Block:     {}                        ║", dt.format("%Y-%m-%d %H:%M:%S UTC"));
+                        println!("  Last Block:     {}                        ", dt.format("%Y-%m-%d %H:%M:%S UTC"));
                     }
-                    println!("╚══════════════════════════════════════════════════════════╝\n");
+                    println!("\n");
                 }
                 Err(e) => {
-                    eprintln!("✗ Failed to get mining status: {}", e);
+                    eprintln!(" Failed to get mining status: {}", e);
                     std::process::exit(1);
                 }
             }
@@ -580,18 +580,18 @@ async fn main() {
                     let dt = DateTime::<ChronoUtc>::from_timestamp(block.timestamp, 0)
                         .unwrap_or_else(|| ChronoUtc::now());
                     
-                    println!("\n╔══════════════════════════════════════════════════════════╗");
-                    println!("║            BLOCK INFORMATION                             ║");
-                    println!("╠══════════════════════════════════════════════════════════╣");
-                    println!("║  Height:         {}                                      ║", block.height);
-                    println!("║  Hash:           {}...║", &block.hash[..24]);
-                    println!("║  Timestamp:      {}                        ║", dt.format("%Y-%m-%d %H:%M:%S UTC"));
-                    println!("║  Transactions:   {}                                      ║", block.transactions);
-                    println!("║  Difficulty:     {}                                      ║", block.difficulty);
-                    println!("╚══════════════════════════════════════════════════════════╝\n");
+                    println!("\n");
+                    println!("            BLOCK INFORMATION                             ");
+                    println!("");
+                    println!("  Height:         {}                                      ", block.height);
+                    println!("  Hash:           {}...", &block.hash[..24]);
+                    println!("  Timestamp:      {}                        ", dt.format("%Y-%m-%d %H:%M:%S UTC"));
+                    println!("  Transactions:   {}                                      ", block.transactions);
+                    println!("  Difficulty:     {}                                      ", block.difficulty);
+                    println!("\n");
                 }
                 Err(e) => {
-                    eprintln!("✗ Failed to get block: {}", e);
+                    eprintln!(" Failed to get block: {}", e);
                     std::process::exit(1);
                 }
             }
@@ -602,22 +602,22 @@ async fn main() {
             
             match client.get_peers().await {
                 Ok(peers) => {
-                    println!("\n╔══════════════════════════════════════════════════════════╗");
-                    println!("║            CONNECTED PEERS ({} total)                      ║", peers.len());
-                    println!("╠══════════════════════════════════════════════════════════╣");
+                    println!("\n");
+                    println!("            CONNECTED PEERS ({} total)                      ", peers.len());
+                    println!("");
                     
                     if peers.is_empty() {
-                        println!("║  No peers connected                                      ║");
+                        println!("  No peers connected                                      ");
                     } else {
                         for (i, peer) in peers.iter().enumerate() {
-                            println!("║  {}. {}                                    ║", i + 1, peer.address);
+                            println!("  {}. {}                                    ", i + 1, peer.address);
                         }
                     }
                     
-                    println!("╚══════════════════════════════════════════════════════════╝\n");
+                    println!("\n");
                 }
                 Err(e) => {
-                    eprintln!("✗ Failed to get peers: {}", e);
+                    eprintln!(" Failed to get peers: {}", e);
                     std::process::exit(1);
                 }
             }
@@ -630,12 +630,12 @@ async fn main() {
             
             match client.start_mining(&address).await {
                 Ok(_) => {
-                    println!("✓ Mining started successfully");
+                    println!(" Mining started successfully");
                     println!("  Rewards will be sent to: {}", address);
                     println!("  Use './quanta mining_status' to check status");
                 }
                 Err(e) => {
-                    eprintln!("✗ Failed to start mining: {}", e);
+                    eprintln!(" Failed to start mining: {}", e);
                     std::process::exit(1);
                 }
             }
@@ -648,10 +648,10 @@ async fn main() {
             
             match client.stop_mining().await {
                 Ok(_) => {
-                    println!("✓ Mining stopped successfully");
+                    println!(" Mining stopped successfully");
                 }
                 Err(e) => {
-                    eprintln!("✗ Failed to stop mining: {}", e);
+                    eprintln!(" Failed to stop mining: {}", e);
                     std::process::exit(1);
                 }
             }
@@ -662,14 +662,14 @@ async fn main() {
             
             match client.get_node_status().await {
                 Ok(status) => {
-                    println!("\n╔══════════════════════════════════════════════════════════╗");
-                    println!("║            BLOCKCHAIN HEIGHT                             ║");
-                    println!("╠══════════════════════════════════════════════════════════╣");
-                    println!("║  Current Height: {} blocks                              ║", status.chain_height);
-                    println!("╚══════════════════════════════════════════════════════════╝\n");
+                    println!("\n");
+                    println!("            BLOCKCHAIN HEIGHT                             ");
+                    println!("");
+                    println!("  Current Height: {} blocks                              ", status.chain_height);
+                    println!("\n");
                 }
                 Err(e) => {
-                    eprintln!("✗ Failed to get blockchain height: {}", e);
+                    eprintln!(" Failed to get blockchain height: {}", e);
                     std::process::exit(1);
                 }
             }
@@ -682,11 +682,11 @@ async fn main() {
             
             match client.shutdown().await {
                 Ok(_) => {
-                    println!("✓ Shutdown signal sent successfully");
+                    println!(" Shutdown signal sent successfully");
                     println!("  Node will stop gracefully...");
                 }
                 Err(e) => {
-                    eprintln!("✗ Failed to send shutdown signal: {}", e);
+                    eprintln!(" Failed to send shutdown signal: {}", e);
                     eprintln!("\n  Is the node running? Check with:");
                     eprintln!("  ./quanta status --rpc-port {}", rpc_port);
                     std::process::exit(1);

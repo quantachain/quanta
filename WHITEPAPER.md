@@ -526,58 +526,79 @@ Hard forks will be:
 
 ## 10. Roadmap
 
-### Phase 1: Testnet (Q2-Q3 2026)
+### Phase 1: Testnet Preparation (Q1 2026) - In Progress
 
-**Q2 2026**:
-- Public testnet launch with 3-5 bootstrap nodes
-- Core functionality validation
-- Basic stress testing with simulated transactions
-- Community onboarding and documentation refinement
+**Current Status**: Active Development
 
-**Q3 2026**:
-- Community code review and feedback
-- Self-hosted bug bounty program (modest rewards as budget allows)
-- Performance optimization based on testnet data
-- Network resilience testing
+**Core Development**:
+-  Testnet node development and deployment
+-  Internal testing and validation
+-  Private testnet launch for community
+-  Extensive internal security testing
+-  Network monitoring and health check systems
+-  Community onboarding materials and guides
+
+### Phase 2: Public Testnet Launch (Q2 2026)
+
+**Launch & Operations**:
+- Public testnet launch with geographically distributed bootstrap nodes
+- Real-world stress testing and network validation
+- Active community engagement and developer onboarding
+- Performance monitoring and optimization
+
+**Security Audits**:
+- External security audits and vulnerability assessments
+- Bug bounty program with progressive rewards
+- Network resilience testing under various conditions
+- Protocol refinement based on real-world data
 
 **Success Criteria**:
-- 20-50 active testnet nodes from community
-- 10,000+ test transactions processed
-- No critical vulnerabilities discovered
-- Stable testnet operation for 30+ consecutive days
+- 30+ active testnet nodes from diverse regions
+- 10,000+ transactions validated successfully
+- Zero critical vulnerabilities in production code
+- 30+ days of continuous stable operation
 
-### Phase 2: Mainnet Preparation (Q4 2026)
+### Phase 3: Security Hardening (Q3 2026)
 
-- Comprehensive remediation of all testnet findings
-- Community security review and code freeze
-- Genesis block configuration and fair launch planning
-- Bootstrap node deployment (3-5 nodes in accessible regions)
-- Basic exchange outreach (targeting 1-2 smaller exchanges initially)
-- Reference wallet implementation and documentation
-- Emergency response procedures
-- Basic monitoring infrastructure
+**Remediation & Refinement**:
+- Address all testnet findings and vulnerabilities
+- Comprehensive security audits and penetration testing
+- Code optimization and protocol finalization
+- Final security review and vulnerability patches
+- Documentation updates and security best practices
+- Emergency response procedures and incident management
 
-### Phase 3: Mainnet Launch (Q1 2027)
+### Phase 4: Mainnet Preparation (Q4 2026)
+
+**Pre-Launch Activities**:
+- Code freeze and final audit
+- Genesis block configuration and launch parameters
+- Production bootstrap node deployment across regions
+- Desktop wallet release for all major platforms
+- Block explorer deployment and transaction indexing
+- Exchange partnership discussions and integration support
+
+### Phase 5: Mainnet Launch (Q1 2027)
 
 **Genesis Event**:
-- Coordinated mainnet launch with transparent genesis parameters
-- Initial bootstrap nodes operational (3-5 nodes)
-- Basic block explorer deployment (open-source)
-- Desktop wallet release (primary platforms)
+- Mainnet genesis with transparent, auditable parameters
+- Multi-region bootstrap node activation
+- Full-featured block explorer and analytics dashboard
+- Production wallet release with comprehensive security
 
-**First 30 Days**:
-- Network monitoring with community support
-- Regular status updates to community
-- Best-effort response to network issues
-- Exchange listing exploration (if interest exists)
+**Post-Launch (First 30 Days)**:
+- Continuous network monitoring and health tracking
+- Daily community updates and transparency reports
+- Rapid incident response and network optimization
+- Exchange integration and listing coordination
 
 **Success Criteria**:
-- 15-30 mainnet nodes in first month
-- 95%+ network uptime
-- Average block time within 10-20 seconds
-- No consensus failures or chain splits
+- 25+ independent mainnet nodes within first month
+- 95%+ network uptime and stability
+- Block time consistency within 10-15 seconds
+- Zero consensus failures or chain reorganizations
 
-### Phase 4: Expansion (Q2-Q4 2027)
+### Phase 6: Expansion (Q2-Q4 2027)
 
 **Q2 2027**:
 - Light client protocol (SPV) specification
@@ -595,7 +616,7 @@ Hard forks will be:
 - Community contribution guidelines
 - Performance optimization research
 
-### Phase 5: Ecosystem (2028+)
+### Phase 7: Ecosystem (2028+)
 
 **Smart Contract Layer** (pending resources and community demand):
 - Post-quantum VM design research
