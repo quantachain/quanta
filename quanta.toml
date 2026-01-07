@@ -22,16 +22,43 @@ no_network = false
 max_peers = 125
 
 # Bootstrap peer addresses (comma-separated host:port)
-bootstrap_nodes = []
+# Testnet bootstrap nodes (Q2 2026 launch)
+bootstrap_nodes = [
+    # North America
+    "testnet-us-east.quanta.network:8333",
+    "testnet-us-west.quanta.network:8333",
+    
+    # Europe
+    "testnet-eu-west.quanta.network:8333",
+    "testnet-eu-central.quanta.network:8333",
+    
+    # Asia-Pacific
+    "testnet-ap-southeast.quanta.network:8333",
+    "testnet-ap-northeast.quanta.network:8333",
+    
+    # Backup nodes
+    "testnet-backup1.quanta.network:8333",
+    "testnet-backup2.quanta.network:8333",
+]
 
 # DNS seeds for peer discovery (domain names that resolve to peer IPs)
-# Add your DNS seeds here for mainnet/testnet
+# These will return multiple IP addresses for decentralized discovery
 dns_seeds = [
-    # Examples (configure these for your network):
-    # "seed1.quanta.network",
-    # "seed2.quanta.network",
-    # "seed3.quanta.network",
+    "seed.testnet.quanta.network",
+    "nodes.testnet.quanta.network",
+    "peers.testnet.quanta.network",
 ]
+
+# Mainnet bootstrap nodes (planned for Q1 2027)
+# Uncomment for mainnet:
+# bootstrap_nodes = [
+#     "mainnet-us-east.quanta.network:8333",
+#     "mainnet-us-west.quanta.network:8333",
+#     "mainnet-eu-west.quanta.network:8333",
+#     "mainnet-eu-central.quanta.network:8333",
+#     "mainnet-ap-southeast.quanta.network:8333",
+#     "mainnet-ap-northeast.quanta.network:8333",
+# ]
 
 #  CONSENSUS CONFIG - MUST MATCH NETWORK 
 [consensus]

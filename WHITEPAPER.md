@@ -98,14 +98,112 @@ Encrypted Wallet = Kyber-1024.Encrypt(plaintext_keys, user_password_via_Argon2)
 
 **Address Generation**:
 ```
-Address = Base58(SHA3-256(Falcon-512_PublicKey)[0:20])
+Address = Base58Check(0x00 || SHA3-256(Falcon-512.PublicKey)[:20])
 ```
+
+### 2.4 Operational Impact of Post-Quantum Cryptography
+
+**Signature Size Implications**:
+
+Falcon-512 signatures (~666 bytes) are significantly larger than ECDSA signatures (~64 bytes), creating operational considerations:
+
+**Storage Requirements**:
+- Block with 2,000 transactions: ~1.3 MB in signatures alone
+- Annual signature data: ~4.2 TB (at 10-second blocks, 2,000 tx/block average)
+- Full archival node (year 1): ~4.6 TB total
+- 5-year projection: ~23 TB
+
+**Bandwidth Requirements**:
+- Block propagation: ~1.5 MB average block size
+- Daily transmission (full node): ~13 GB download, ~5 GB upload
+- Initial sync: Can exceed 50 GB/day
+
+**Mitigation Strategies** (Planned):
+1. **Signature Aggregation**: Research into Falcon-compatible batch verification
+2. **Pruning**: Remove signatures older than 6 months (reducing to ~2.5 TB/year)
+3. **Compression**: Apply specialized compression for lattice signatures
+4. **SPV Protocol**: Light clients verify only relevant transactions
+
+**Performance Characteristics**:
+- Signature generation: ~0.8 ms
+- Signature verification: ~0.1 ms
+- Block validation (2,000 tx): ~200 ms (parallelizable)
 
 ---
 
-## 3. Consensus Mechanism
+## 3. System Requirements
 
-### 3.1 Adaptive Proof-of-Work
+### 3.1 Hardware Requirements
+
+**Full Node (Archival)**:
+- **CPU**: 4 cores @ 2.0 GHz (x86-64 or ARM64)
+- **RAM**: 8 GB minimum, 16 GB recommended
+- **Storage**: 1 TB SSD (year 1), plan for 5 TB over 5 years
+- **Bandwidth**: 50 Mbps down, 20 Mbps up
+- **Uptime**: 99%+ recommended for mining nodes
+
+**Pruned Node**:
+- **CPU**: 2 cores @ 2.0 GHz
+- **RAM**: 4 GB
+- **Storage**: 100 GB SSD (maintains recent 6 months)
+- **Bandwidth**: 25 Mbps down, 10 Mbps up
+
+**Light Client** (Planned):
+- **CPU**: 1 core
+- **RAM**: 1 GB
+- **Storage**: 1 GB (headers + proofs only)
+- **Bandwidth**: 5 Mbps
+
+### 3.2 Network Requirements
+
+**Connectivity**:
+- IPv4 or IPv6 support
+- Stable internet connection (residential broadband sufficient)
+- Port forwarding for incoming connections (optional but recommended)
+- No CGNAT or restrictive firewall (for full connectivity)
+
+**Bootstrap Nodes**:
+
+Testnet bootstrap nodes (Q2 2026):
+- `testnet-us-east.quanta.network:8333`
+- `testnet-us-west.quanta.network:8333`
+- `testnet-eu-west.quanta.network:8333`
+- `testnet-eu-central.quanta.network:8333`
+- `testnet-ap-southeast.quanta.network:8333`
+- `testnet-ap-northeast.quanta.network:8333`
+
+**DNS Seeds**:
+- `seed.testnet.quanta.network`
+- `nodes.testnet.quanta.network`
+- `peers.testnet.quanta.network`
+
+### 3.3 Software Requirements
+
+**Operating Systems**:
+- Linux: Ubuntu 20.04+, Debian 11+, CentOS 8+, Arch Linux
+- macOS: 10.15 (Catalina) or later
+- Windows: Windows 10 (build 1809+), Windows Server 2019+
+
+**Dependencies**:
+- Rust 1.70+ (for compilation)
+- OpenSSL 1.1.1+ or LibreSSL 3.0+
+- LLVM/Clang (for certain optimizations)
+
+### 3.4 Storage Growth Projections
+
+```
+Year 1:  4.6 TB (full) / 500 GB (pruned)
+Year 2:  9.2 TB (full) / 500 GB (pruned)
+Year 5: 23.0 TB (full) / 500 GB (pruned)
+```
+
+**Note**: Assumes 2,000 transactions per block average. Actual growth depends on adoption.
+
+---
+
+## 4. Consensus Mechanism
+
+### 4.1 Adaptive Proof-of-Work
 
 QUANTA uses a modified proof-of-work consensus with dynamic difficulty adjustment.
 
@@ -132,7 +230,7 @@ Valid Block: Hash < Target (leading zeros determined by difficulty)
   - Maximum decrease: 0.5x per adjustment
   - Prevents difficulty manipulation attacks
 
-### 3.2 Block Structure
+### 4.2 Block Structure
 
 ```rust
 Block {
@@ -148,7 +246,7 @@ Block {
 }
 ```
 
-### 3.3 Transaction Structure
+### 4.3 Transaction Structure
 
 ```rust
 Transaction {
@@ -163,7 +261,7 @@ Transaction {
 }
 ```
 
-### 3.4 Transaction Validation
+### 4.4 Transaction Validation
 
 Each transaction must satisfy:
 1. **Signature Verification**: Falcon-512 signature is valid
@@ -173,7 +271,7 @@ Each transaction must satisfy:
 5. **Fee Minimum**: Fee >= 100 microunits (0.0001 QUA)
 6. **No Duplicates**: Transaction hash not already in chain
 
-### 3.5 Block Validation
+### 4.5 Block Validation
 
 Each block must satisfy:
 1. **Proof-of-Work**: Block hash meets difficulty target
@@ -187,18 +285,18 @@ Each block must satisfy:
 
 ---
 
-## 4. Economic Model
+## 5. Economic Model
 
 See TOKENOMICS.md for complete economic specification.
 
-### 4.1 Supply Overview
+### 5.1 Supply Overview
 
 - **Initial Supply**: 0 QUA (fair launch)
 - **Emission Schedule**: Exponential decay with floor
 - **Asymptotic Maximum**: ~1.5 billion QUA
 - **Distribution**: 100% through mining (no pre-mine, no ICO)
 
-### 4.2 Block Reward Formula
+### 5.2 Block Reward Formula
 
 ```python
 def calculate_reward(block_height):
@@ -222,7 +320,7 @@ def calculate_reward(block_height):
     return annual_reward
 ```
 
-### 4.3 Fee Distribution
+### 5.3 Fee Distribution
 
 Transaction fees are split:
 - **70%**: Burned (permanent supply reduction)
@@ -233,9 +331,9 @@ This creates deflationary pressure while funding development and rewarding valid
 
 ---
 
-## 5. Network Architecture
+## 6. Network Architecture
 
-### 5.1 Peer-to-Peer Protocol
+### 6.1 Peer-to-Peer Protocol
 
 **Network Identification**:
 - Testnet Magic: `QUAX` (0x51554158)
@@ -255,7 +353,7 @@ This creates deflationary pressure while funding development and rewarding valid
 - Peer timeout: 180 seconds
 - Invalid message handling: Automatic peer disconnection
 
-### 5.2 DNS Seed Discovery
+### 6.2 DNS Seed Discovery
 
 Nodes can discover peers through DNS seeds:
 ```
@@ -265,7 +363,7 @@ seed2.quanta.network
 
 Fallback to hardcoded bootstrap nodes if DNS unavailable.
 
-### 5.3 Block Propagation
+### 6.3 Block Propagation
 
 1. Miner mines valid block
 2. Broadcast to all connected peers
@@ -273,7 +371,7 @@ Fallback to hardcoded bootstrap nodes if DNS unavailable.
 4. Peers rebroadcast to their connections
 5. Full network propagation in <5 seconds (target)
 
-### 5.4 Mempool Management
+### 6.4 Mempool Management
 
 - **Maximum Size**: 5,000 pending transactions
 - **Eviction Policy**: Lowest fee transactions removed first
@@ -282,9 +380,9 @@ Fallback to hardcoded bootstrap nodes if DNS unavailable.
 
 ---
 
-## 6. Security Analysis
+## 7. Security Analysis
 
-### 6.1 Threat Model
+### 7.1 Threat Model
 
 **Assumptions**:
 - Adversary has bounded computational power
@@ -297,7 +395,7 @@ Fallback to hardcoded bootstrap nodes if DNS unavailable.
 - Eclipse attacks on network-isolated nodes
 - Physical key extraction from compromised devices
 
-### 6.2 Attack Resistance
+### 7.2 Attack Resistance
 
 #### Double-Spend Attack
 **Mitigation**: 
@@ -329,7 +427,7 @@ Fallback to hardcoded bootstrap nodes if DNS unavailable.
 - Connection limits per IP range
 - Peer reputation system (future enhancement)
 
-### 6.3 Post-Quantum Security Considerations
+### 7.3 Post-Quantum Security Considerations
 
 **Harvest Now, Decrypt Later (HNDL)**:
 - Threat: Adversary stores encrypted data to decrypt with future quantum computer
@@ -343,9 +441,9 @@ Fallback to hardcoded bootstrap nodes if DNS unavailable.
 
 ---
 
-## 7. Implementation Details
+## 8. Implementation Details
 
-### 7.1 Technology Stack
+### 8.1 Technology Stack
 
 - **Language**: Rust 2021 (memory-safe, high-performance)
 - **Async Runtime**: Tokio (efficient concurrent I/O)
@@ -359,7 +457,7 @@ Fallback to hardcoded bootstrap nodes if DNS unavailable.
   - sha3 (SHA3 hashing)
   - argon2 (key derivation)
 
-### 7.2 Storage Schema
+### 8.2 Storage Schema
 
 **Blockchain Storage**:
 ```
@@ -381,7 +479,7 @@ accounts/{address}/lock_release_height → u64
 transactions/{tx_hash} → (block_height, tx_index)
 ```
 
-### 7.3 Atomic Operations
+### 8.3 Atomic Operations
 
 All state modifications are atomic using database transactions:
 ```rust
@@ -398,9 +496,9 @@ Ensures consistency even under crashes or power loss.
 
 ---
 
-## 8. Governance and Upgrades
+## 9. Governance and Upgrades
 
-### 8.1 Current Governance Model
+### 9.1 Current Governance Model
 
 QUANTA v1.0 uses off-chain governance:
 - Development team proposes upgrades
@@ -408,7 +506,7 @@ QUANTA v1.0 uses off-chain governance:
 - Testnet deployment and testing period
 - Mainnet upgrade with clear migration path
 
-### 8.2 Future On-Chain Governance
+### 9.2 Future On-Chain Governance
 
 Planned features:
 - Token-weighted voting
@@ -416,7 +514,7 @@ Planned features:
 - Time-locked protocol upgrades
 - Emergency security patches with multisig
 
-### 8.3 Hard Fork Policy
+### 9.3 Hard Fork Policy
 
 Hard forks will be:
 - Well-announced (minimum 4 weeks notice)
@@ -426,35 +524,128 @@ Hard forks will be:
 
 ---
 
-## 9. Roadmap
+## 10. Roadmap
 
-### Phase 1: Foundation (Q1 2026)
-- Testnet launch
+### Phase 1: Testnet (Q2-Q3 2026)
+
+**Q2 2026**:
+- Public testnet launch with coordinated bootstrap nodes
 - Core functionality validation
-- Community building
-- Security audits
+- Stress testing with simulated high-volume transactions
+- Community onboarding and documentation refinement
 
-### Phase 2: Mainnet (Q2 2026)
-- Mainnet genesis
-- Exchange integrations
-- Block explorer
-- Light wallet
+**Q3 2026**:
+- External security audits (minimum 3 independent firms)
+- Public bug bounty program ($100,000+ rewards pool)
+- Performance optimization based on testnet data
+- Network resilience testing (partition tolerance, eclipse attack resistance)
 
-### Phase 3: Expansion (Q3-Q4 2026)
-- Smart contract layer (post-quantum VM)
-- Light client protocol (SPV)
-- Hardware wallet support (Ledger/Trezor)
-- Mobile wallets
+**Success Criteria**:
+- 1,000+ testnet nodes across 50+ countries
+- 1 million+ test transactions processed
+- Zero critical vulnerabilities in final audit
+- 99.9%+ uptime for testnet bootstrap nodes
 
-### Phase 4: Ecosystem (2027+)
-- Developer grants program
-- DApp ecosystem growth
-- Cross-chain bridges
-- Layer 2 solutions
+### Phase 2: Mainnet Preparation (Q4 2026)
+
+- Comprehensive remediation of all testnet findings
+- Final security audit and formal code freeze
+- Genesis block configuration and fair launch planning
+- Bootstrap node deployment (minimum 10 nodes, 5+ geographic regions)
+- Exchange partnership agreements (targeting 3-5 Tier 1 exchanges)
+- Third-party wallet provider integrations
+- Emergency response procedures and incident playbooks
+- Network monitoring infrastructure (Prometheus/Grafana dashboards)
+
+### Phase 3: Mainnet Launch (Q1 2027)
+
+**Genesis Event**:
+- Coordinated mainnet launch with transparent genesis parameters
+- Initial bootstrap nodes operational across North America, Europe, Asia-Pacific
+- Official block explorer deployment (open-source)
+- Desktop wallet releases (Windows, macOS, Linux)
+
+**First 30 Days**:
+- 24/7 network monitoring and incident response
+- Daily status reports to community
+- Rapid response to any network issues
+- Exchange listing activations (post-stabilization period)
+
+**Success Criteria**:
+- 500+ mainnet nodes in first week
+- 99.5%+ network uptime
+- Average block time within 10-15 seconds
+- No consensus failures or chain splits
+
+### Phase 4: Expansion (Q2-Q4 2027)
+
+**Q2 2027**:
+- Light client protocol (SPV) specification and implementation
+- Signature aggregation research and prototyping
+- Mobile wallet SDK development
+
+**Q3 2027**:
+- Mobile wallet releases (iOS App Store, Google Play)
+- Hardware wallet integrations (Ledger, Trezor partnerships)
+- Pruning mode optimization (target: 100 GB storage for pruned nodes)
+
+**Q4 2027**:
+- Developer documentation and API reference
+- Third-party integration toolkit
+- First developer grants awarded
+- Signature compression implementation (target: 50% reduction)
+
+### Phase 5: Ecosystem (2028+)
+
+**Smart Contract Layer**:
+- Post-quantum VM design specification (Q1-Q2 2028)
+- VM prototype and testnet deployment (Q3-Q4 2028)
+- Mainnet smart contract activation (Q1 2029)
+
+**Advanced Features**:
+- Privacy enhancements (confidential transactions research)
+- Cross-chain bridges (requires quantum-resistant relay protocols)
+- Layer 2 solutions (rollups, state channels)
+- Interoperability standards
+
+**Ecosystem Growth**:
+- Developer grants program ($1M+ annual budget)
+- DApp incubator program
+- Educational initiatives and workshops
+- Enterprise adoption partnerships
+
+### Long-Term Research (2029+)
+
+- Post-quantum zero-knowledge proofs
+- Quantum random number generation integration
+- Proof-of-stake research (quantum-resistant consensus)
+- Cryptographic agility framework (algorithm migration paths)
+
+### Timeline Rationale
+
+**Why Extended Timeline?**
+1. **Security First**: Rushing mainnet risks catastrophic vulnerabilities
+2. **Community Building**: Strong testnet participation ensures healthy mainnet
+3. **Audit Thoroughness**: Post-quantum cryptography requires specialized review
+4. **Operational Readiness**: Bootstrap infrastructure must be production-grade
+5. **Economic Stability**: Exchange partnerships and liquidity take time
+
+**Current Status** (January 2026):
+- Core protocol implementation: 95% complete
+- Network layer: 90% complete
+- Wallet implementation: 85% complete
+- Testing infrastructure: 70% complete
+- Documentation: 80% complete
+
+**Critical Path to Testnet**:
+1. Complete remaining test coverage (February 2026)
+2. Internal security audit (March 2026)
+3. Bootstrap node deployment (April 2026)
+4. Public testnet launch (May 2026)
 
 ---
 
-## 10. Comparison with Existing Solutions
+## 11. Comparison with Existing Solutions
 
 ### vs Bitcoin/Ethereum
 - **Advantage**: Quantum-resistant cryptography
@@ -470,7 +661,7 @@ Hard forks will be:
 
 ---
 
-## 11. Conclusion
+## 12. Conclusion
 
 QUANTA represents a pragmatic approach to quantum-resistant blockchain technology. By implementing NIST-standardized post-quantum cryptography today, QUANTA provides security guarantees that will remain valid decades into the future.
 
@@ -510,6 +701,6 @@ A: PoW provides fair distribution and proven security. PoS may be considered in 
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: January 6, 2026  
+**Document Version**: 1.1  
+**Last Updated**: January 7, 2026  
 **License**: CC BY 4.0

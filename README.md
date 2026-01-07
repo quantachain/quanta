@@ -31,6 +31,46 @@ QUANTA is not a research project or academic prototype. It's a production-ready 
 3. **Operational Excellence**: Production-grade security, monitoring, and tooling
 4. **Fair Launch**: No pre-mine, no ICO - 100% distributed through mining
 
+## System Requirements
+
+### Minimum Requirements (Full Node)
+- **CPU**: 4 cores (2.0 GHz or higher)
+- **RAM**: 8 GB
+- **Storage**: 1 TB SSD (recommended for first year)
+- **Bandwidth**: 50 Mbps down, 20 Mbps up
+- **OS**: Linux (Ubuntu 20.04+), macOS (10.15+), Windows 10+
+
+### Pruned Node
+- **CPU**: 2 cores
+- **RAM**: 4 GB
+- **Storage**: 100 GB SSD
+- **Bandwidth**: 25 Mbps down, 10 Mbps up
+
+### Light Client (Planned)
+- **CPU**: 1 core
+- **RAM**: 1 GB
+- **Storage**: 1 GB
+- **Bandwidth**: 5 Mbps
+
+### Storage Estimates
+
+**Year 1 Projections (10 second blocks, 2000 tx/block average)**:
+- **Block headers**: ~2 GB
+- **Transactions**: ~350 GB
+- **Signatures**: ~4.2 TB (Falcon-512 at ~666 bytes/signature)
+- **State database**: ~50 GB
+- **Total**: ~4.6 TB (full archival node)
+
+**Pruned mode** (keeps only recent 6 months):
+- **Total**: ~500 GB
+
+**Note**: Signature compression and pruning strategies are planned for Phase 3 to reduce storage requirements.
+
+### Bandwidth Estimates
+- **Full node**: ~13 GB/day download, ~5 GB/day upload
+- **Pruned node**: ~6 GB/day download, ~2 GB/day upload
+- **Peak**: Up to 50 GB/day during initial sync
+
 ## Features
 
 ### Cryptography
@@ -352,29 +392,43 @@ quanta validate                      # Validate blockchain
 
 ## Roadmap
 
-### Phase 1: Foundation (Q1 2026)
-- Testnet launch
-- Core functionality validation
-- Community building
-- Security audits
+### Phase 1: Testnet (Q2-Q3 2026)
+- **Q2 2026**: Public testnet launch
+- Core functionality validation and stress testing
+- Community building and documentation
+- External security audits (2-3 independent firms)
+- Bug bounty program launch
+- Performance optimization
 
-### Phase 2: Mainnet (Q2 2026)
-- Mainnet genesis
-- Exchange integrations
-- Block explorer
-- Light wallet
+### Phase 2: Mainnet Preparation (Q4 2026)
+- Address testnet findings and vulnerabilities
+- Final security audit and code freeze
+- Genesis block preparation
+- Bootstrap node deployment (5+ geographic regions)
+- Exchange partnership negotiations
+- Third-party wallet integrations
 
-### Phase 3: Expansion (Q3-Q4 2026)
-- Smart contract layer (post-quantum VM)
-- Light client protocol (SPV)
-- Hardware wallet support (Ledger/Trezor)
-- Mobile wallets
+### Phase 3: Mainnet Launch (Q1 2027)
+- **Mainnet genesis** with coordinated launch
+- Initial exchange integrations
+- Official block explorer deployment
+- Desktop wallet releases (Windows, macOS, Linux)
+- Network monitoring and incident response readiness
 
-### Phase 4: Ecosystem (2027+)
+### Phase 4: Expansion (Q2-Q4 2027)
+- Light client protocol (SPV) implementation
+- Signature aggregation and pruning optimization
+- Mobile wallet releases (iOS, Android)
+- Hardware wallet support (Ledger/Trezor partnership)
+- Developer documentation and SDK
+
+### Phase 5: Ecosystem (2028+)
+- Smart contract layer (post-quantum VM research and implementation)
 - Developer grants program
 - DApp ecosystem growth
-- Cross-chain bridges
-- Layer 2 solutions
+- Cross-chain bridges (requires quantum-resistant relay protocols)
+- Layer 2 solutions exploration
+- Privacy feature research (confidential transactions)
 
 ## Contributing
 
