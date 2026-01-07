@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: GitHub Discussions
+    url: https://github.com/quantachain/quanta/discussions
+    about: Ask questions and discuss ideas with the community
+  - name: Security Vulnerability
+    url: https://github.com/quantachain/quanta/security/advisories/new
+    about: Report security vulnerabilities privately (DO NOT open public issues)
+  - name: Website
+    url: https://www.quantachain.org
+    about: Official QUANTA website with documentation and guides

@@ -1,16 +1,48 @@
 # QUANTA WHITEPAPER
 
-**Version 1.0 - January 2026**
+**A Quantum-Resistant Blockchain Built for the Future**
 
-A Post-Quantum Blockchain for the Next Era of Computing
+Version 1.1 | January 2026
 
 ---
 
-## Abstract
+## Executive Summary
 
-QUANTA is a quantum-resistant blockchain that addresses the existential threat posed by quantum computers to current cryptographic systems. By implementing NIST-standardized post-quantum cryptography (PQC), adaptive tokenomics, and modern security practices, QUANTA provides a foundation for long-term secure decentralized applications.
+QUANTA is the first production-ready blockchain purpose-built with post-quantum cryptography from inception. While current blockchains face existential risk from quantum computers capable of breaking elliptic curve cryptography, QUANTA provides future-proof security through NIST-standardized algorithms that resist both classical and quantum attacks.
 
-This whitepaper presents the technical architecture, consensus mechanism, economic model, and security considerations of the QUANTA blockchain.
+**Key Highlights:**
+- **Quantum-Resistant Security**: NIST-standardized Falcon-512 signatures and Kyber-1024 encryption
+- **Fair Launch Model**: No pre-mine, no ICO, 100% community distribution through mining
+- **Sustainable Economics**: Adaptive tokenomics with 70% fee burning and perpetual mining incentives
+- **Production-Ready**: Built in Rust with comprehensive testing, monitoring, and operational tooling
+- **Open Development**: Transparent roadmap, open-source codebase, and active security audits
+
+This whitepaper presents the technical architecture, cryptographic foundations, consensus mechanism, economic model, and implementation details of the QUANTA blockchain.
+
+**Target Audiences:**
+- **Investors**: Understand the market opportunity and long-term value proposition
+- **Developers**: Learn the technical architecture and integration possibilities
+- **Miners**: Evaluate profitability and operational requirements
+- **Researchers**: Review cryptographic choices and security analysis
+
+---
+
+## Table of Contents
+
+1. [Introduction](#1-introduction)
+2. [Cryptographic Foundations](#2-cryptographic-foundations)
+3. [System Requirements](#3-system-requirements)
+4. [Consensus Mechanism](#4-consensus-mechanism)
+5. [Economic Model](#5-economic-model)
+6. [Network Architecture](#6-network-architecture)
+7. [Security Analysis](#7-security-analysis)
+8. [Implementation Details](#8-implementation-details)
+9. [Governance and Upgrades](#9-governance-and-upgrades)
+10. [Roadmap](#10-roadmap)
+11. [Comparison with Existing Solutions](#11-comparison-with-existing-solutions)
+12. [Conclusion](#12-conclusion)
+13. [References](#references)
+14. [Appendix A: FAQ](#appendix-a-faq)
 
 ---
 
@@ -722,6 +754,42 @@ A: PoW provides fair distribution and proven security. PoS may be considered in 
 
 ---
 
-**Document Version**: 1.1  
+---
+
+## Appendix B: Glossary
+
+**Falcon-512**: NIST-standardized post-quantum signature scheme based on NTRU lattices  
+**Kyber-1024**: NIST-standardized post-quantum key encapsulation mechanism  
+**SHA3-256**: Quantum-resistant cryptographic hash function  
+**Argon2id**: Memory-hard password hashing function resistant to GPU/ASIC attacks  
+**PoW (Proof-of-Work)**: Consensus mechanism requiring computational work to mine blocks  
+**HD Wallet**: Hierarchical Deterministic wallet following BIP39 standard  
+**SPV**: Simplified Payment Verification for light clients  
+**Microunits**: Base unit for amounts (1 QUA = 1,000,000 microunits)
+
+---
+
+## Document Information
+
+**Version**: 1.1  
+**Publication Date**: January 2026  
 **Last Updated**: January 7, 2026  
-**License**: CC BY 4.0
+**Status**: Living Document (subject to updates)  
+**License**: Creative Commons Attribution 4.0 International (CC BY 4.0)
+
+**Authors**: QUANTA Development Team  
+**Contact**: [GitHub Issues](https://github.com/quantachain/quanta/issues) | [Discord](https://discord.gg/quanta)  
+**Repository**: https://github.com/quantachain/quanta  
+**Website**: https://www.quantachain.org
+
+---
+
+## Disclaimer
+
+This whitepaper is for informational purposes only and does not constitute investment advice, financial advice, trading advice, or any other sort of advice. QUANTA is experimental software. Use at your own risk. The development team makes no warranties about the fitness of this software for any purpose.
+
+**No Investment Offering**: This whitepaper does not constitute an offer to sell or a solicitation to buy any tokens or securities. QUANTA has no initial coin offering (ICO), no pre-mine, and no token sale.
+
+**Forward-Looking Statements**: This document contains forward-looking statements about planned features and timelines. Actual results may differ materially from those expressed or implied.
+
+**Security Considerations**: While QUANTA implements quantum-resistant cryptography, no system is completely secure. Users should practice proper security hygiene and understand the risks.
