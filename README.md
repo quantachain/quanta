@@ -6,7 +6,6 @@ Quantum-resistant blockchain using Falcon-512 post-quantum signatures and Kyber-
 
 - **[Whitepaper](WHITEPAPER.md)** - Complete technical specification
 - **[Tokenomics](TOKENOMICS.md)** - Economic model and supply schedule
-- **[Security Audit](SECURITY_AUDIT.md)** - Pre-testnet security assessment
 - **[Contributing](CONTRIBUTING.md)** - Development guidelines
 
 ## Why QUANTA?
@@ -383,3 +382,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
 ## License
 
 MIT
+
