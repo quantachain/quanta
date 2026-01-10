@@ -1,0 +1,244 @@
+========================================
+QUANTA TESTNET - LOCAL 3-NODE TESTING
+========================================
+
+QUICK START (DETACHED MODE)
+===========================
+
+# Clean old data
+cd /mnt/d/tempp/qua
+rm -rf ./node1_data ./node2_data ./node3_data ./logs
+
+# Build
+cargo build --release
+
+# Start all 3 nodes in background (detached)
+./target/release/quanta start --port 3000 --network-port 8333 --db ./node1_data --detach &
+./target/release/quanta start --port 3001 --network-port 8334 --db ./node2_data --bootstrap 127.0.0.1:8333 --detach &
+./target/release/quanta start --port 3002 --network-port 8335 --db ./node3_data --bootstrap 127.0.0.1:8333 --detach &
+
+# Wait 5 seconds for startup
+sleep 5
+
+# Check they're running
+curl http://localhost:3000/api/stats
+curl http://localhost:3001/api/stats
+curl http://localhost:3002/api/stats
+
+# View logs
+tail -f logs/quanta_node_8333.log   # Node 1
+tail -f logs/quanta_node_8334.log   # Node 2
+tail -f logs/quanta_node_8335.log   # Node 3
+
+# Stop all nodes
+kill $(cat logs/quanta_node_8333.pid)
+kill $(cat logs/quanta_node_8334.pid)
+kill $(cat logs/quanta_node_8335.pid)
+
+
+STEP 1: START THE NODES (MANUAL MODE)
+========================
+
+Terminal 1 - Node 1 (Seed):
+---------------------------
+cd /mnt/d/tempp/qua
+./target/release/quanta start --port 3000 --network-port 8333 --db ./node1_data
+
+Terminal 2 - Node 2:
+-------------------
+cd /mnt/d/tempp/qua
+./target/release/quanta start --port 3001 --network-port 8334 --db ./node2_data --bootstrap 127.0.0.1:8333
+
+Terminal 3 - Node 3:
+-------------------
+cd /mnt/d/tempp/qua
+./target/release/quanta start --port 3002 --network-port 8335 --db ./node3_data --bootstrap 127.0.0.1:8333
+
+
+STEP 2: CREATE WALLETS
+=======================
+
+Terminal 4 - Commands:
+---------------------
+cd /mnt/d/tempp/qua
+
+# Create wallet 1:
+./target/release/quanta new-wallet --file node1_wallet.qua
+# Enter password: test123
+# Confirm: test123
+
+# Create wallet 2:
+./target/release/quanta new-wallet --file node2_wallet.qua
+# Enter password: test123
+# Confirm: test123
+
+# Create wallet 3:
+./target/release/quanta new-wallet --file node3_wallet.qua
+# Enter password: test123
+# Confirm: test123
+
+
+STEP 3: VIEW WALLET ADDRESSES
+==============================
+
+./target/release/quanta wallet --file node1_wallet.qua
+# Enter password: test123
+# Copy the address (starts with 0x...)
+
+./target/release/quanta wallet --file node2_wallet.qua
+# Enter password: test123
+
+./target/release/quanta wallet --file node3_wallet.qua
+# Enter password: test123
+
+
+STEP 4: CHECK INITIAL STATS
+============================
+
+curl http://localhost:3000/api/stats
+curl http://localhost:3001/api/stats
+curl http://localhost:3002/api/stats
+
+# All should show: chain_length: 1, total_supply: 0
+
+
+STEP 5: MINE VIA API (NOT CLI)
+===============================
+
+# Get wallet 1 address first, then replace YOUR_ADDRESS below:
+
+curl -X POST http://localhost:3000/api/mine \
+  -H "Content-Type: application/json" \
+  -d '{"miner_address":"0x0bd4bf5eeb3be846f44cc2f9241ea3214e57295a"}'
+
+# Example with actual address:
+curl -X POST http://localhost:3000/api/mine \
+  -H "Content-Type: application/json" \
+  -d '{"miner_address":"0x0bd4bf5eeb3be846f44cc2f9241ea3214e57295a"}'
+
+# Watch all 3 node terminals:
+# - Node 1: "Block 1 mined"
+# - Node 2: Should see sync activity
+# - Node 3: Should see sync activity
+
+# Wait for mining to complete (30-180 seconds with difficulty 6)
+
+
+STEP 6: VERIFY SYNC
+====================
+
+curl http://localhost:3000/api/stats
+curl http://localhost:3001/api/stats
+curl http://localhost:3002/api/stats
+
+# ALL should now show: chain_length: 2, total_supply: 50000000
+
+
+STEP 7: CHECK BALANCE
+======================
+
+# Replace YOUR_ADDRESS with wallet 1 address:
+
+curl -X POST http://localhost:3000/api/balance \
+  -H "Content-Type: application/json" \
+  -d '{"address":"YOUR_ADDRESS_HERE"}'
+
+# Should show: balance_microunits: 50000000 (50 QUA)
+
+
+STEP 8: SEND TRANSACTION
+=========================
+
+# From wallet 1 to wallet 2 (get wallet 2 address first)
+
+curl -X POST http://localhost:3000/api/transaction \
+  -H "Content-Type: application/json" \
+  -d '{
+    "wallet_file": "node1_wallet.qua",
+    "wallet_password": "test123",
+    "recipient": "WALLET2_ADDRESS_HERE",
+    "amount_microunits": 5000000
+  }'
+
+# This sends 5 QUA to wallet 2
+
+
+STEP 9: MINE ANOTHER BLOCK
+===========================
+
+curl -X POST http://localhost:3000/api/mine \
+  -H "Content-Type: application/json" \
+  -d '{"miner_address":"YOUR_ADDRESS_HERE"}'
+
+# This will include the transaction in a new block
+
+
+STEP 10: CHECK PEER CONNECTIONS
+================================
+
+curl http://localhost:3000/api/peers
+
+# Should show 2 connected peers
+
+
+STEP 11: CHECK MEMPOOL
+=======================
+
+curl http://localhost:3000/api/mempool
+
+# Shows pending transactions (before mining)
+
+
+TROUBLESHOOTING
+===============
+
+If nodes don't sync:
+-------------------
+1. Stop all nodes (Ctrl+C in each terminal)
+2. Delete data:
+   rm -rf ./node1_data ./node2_data ./node3_data
+3. Restart all 3 nodes
+4. Try mining again
+
+
+If "Broken pipe" errors:
+------------------------
+- This means peers disconnected during mining
+- The new build has heartbeat fix (15-second pings)
+- Restart nodes with new binary
+
+
+Clean restart:
+-------------
+# Stop all nodes
+rm -rf ./node1_data ./node2_data ./node3_data
+rm -rf node*.qua
+
+# Rebuild
+cargo build --release
+
+# Start fresh from STEP 1
+
+
+# Stop all running nodes first (Ctrl+C in each terminal)
+
+# Then clean data:
+cd /mnt/d/tempp/qua
+rm -rf ./node1_data ./node2_data ./node3_data
+
+# Optional - also remove wallets if you want fresh ones:
+rm -rf node*.qua
+
+
+NOTES
+=====
+
+- Mining via CLI creates blocks offline (no broadcast)
+- Mining via API broadcasts to network automatically
+- Difficulty 6 takes 30-180 seconds to mine
+- All nodes must have same genesis hash: 527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d
+- Peer timeouts are 120 seconds for receive operations
+- Heartbeat pings sent every 10 seconds to keep connections alive
+- Use --detach flag to run nodes in background
+- Logs written to logs/quanta_node_PORT.log in detached mode
+- PID files written to logs/quanta_node_PORT.pid for process management

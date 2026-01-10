@@ -1,0 +1,48 @@
+# Prometheus configuration for QUANTA blockchain monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'quanta-blockchain'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+# Scrape configurations
+scrape_configs:
+  # QUANTA Node 1
+  - job_name: 'quanta-node1'
+    static_configs:
+      - targets: ['node1:3000']
+        labels:
+          node: 'node1'
+          environment: 'development'
+
+  # QUANTA Node 2
+  - job_name: 'quanta-node2'
+    static_configs:
+      - targets: ['node2:3000']
+        labels:
+          node: 'node2'
+          environment: 'development'
+
+  # QUANTA Node 3
+  - job_name: 'quanta-node3'
+    static_configs:
+      - targets: ['node3:3000']
+        labels:
+          node: 'node3'
+          environment: 'development'
+
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+# Alerting rules
+rule_files:
+  - 'alerts.yml'

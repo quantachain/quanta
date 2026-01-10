@@ -1,35 +1,39 @@
+mod core;
+mod consensus;
 mod crypto;
-mod transaction;
-mod block;
-mod blockchain;
-mod quantum_wallet;
 mod storage;
+mod network;
 mod api;
-mod p2p;
-mod mempool;
 mod config;
-mod merkle;
-mod prometheus_metrics;
-mod hd_wallet;
-mod multisig;
-mod contract;
-mod contract_executor;
-mod probestack; // Stub for wasmer_vm on Linux
+mod rpc;
 
-#[cfg(test)]
-mod tests;
 
-use blockchain::Blockchain;
-use quantum_wallet::QuantumWallet;
+
+use consensus::Blockchain;
+use crypto::QuantumWallet;
 use storage::BlockchainStorage;
-use p2p::{Network, NetworkConfig};
-use mempool::MetricsCollector;
+use network::{Network, NetworkConfig};
+use consensus::MetricsCollector;
 use config::QuantaConfig;
+use rpc::{RpcServer, RpcClient};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing_subscriber;
+
+// CONSENSUS CONSTANTS: 1 QUA = 1_000_000 microunits
+const MICROUNITS_PER_QUA: u64 = 1_000_000;
+
+/// Convert QUA (f64 for CLI UX) to microunits (u64 for consensus)
+fn qua_to_microunits(qua: f64) -> u64 {
+    (qua * MICROUNITS_PER_QUA as f64) as u64
+}
+
+/// Convert microunits (u64) to QUA (f64 for display)
+fn microunits_to_qua(microunits: u64) -> f64 {
+    microunits as f64 / MICROUNITS_PER_QUA as f64
+}
 
 #[derive(Parser)]
 #[command(name = "quanta")]
@@ -40,8 +44,9 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[command(rename_all = "snake_case")]
 enum Commands {
-    /// Start the blockchain node with REST API and P2P networking
+    /// Start the blockchain node with REST API, RPC, and P2P networking
     Start {
         /// Configuration file path
         #[arg(short = 'c', long)]
@@ -52,8 +57,12 @@ enum Commands {
         port: Option<u16>,
         
         /// P2P network port (overrides config)
-        #[arg(short = 'n', long)]
+        #[arg(short = 'n', long = "network-port")]
         network_port: Option<u16>,
+        
+        /// RPC server port (overrides config)
+        #[arg(short = 'r', long = "rpc-port")]
+        rpc_port: Option<u16>,
         
         /// Database path (overrides config)
         #[arg(short, long)]
@@ -64,8 +73,74 @@ enum Commands {
         bootstrap: Option<String>,
         
         /// Disable P2P networking (single node mode)
-        #[arg(long)]
+        #[arg(long = "no-network")]
         no_network: bool,
+        
+        /// Run in background as daemon
+        #[arg(long)]
+        detach: bool,
+    },
+    
+    /// Check node status (requires running node)
+    Status {
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Check mining status (requires running node)
+    MiningStatus {
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Start mining blocks to a specific address (requires running node)
+    StartMining {
+        /// Address to receive mining rewards
+        address: String,
+        
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Stop mining (requires running node)
+    StopMining {
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Print current blockchain height (requires running node)
+    PrintHeight {
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Get information about a specific block (requires running node)
+    GetBlock {
+        /// Block height
+        height: u64,
+        
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Get list of connected peers (requires running node)
+    Peers {
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
+    },
+    
+    /// Stop the running node gracefully (requires running node)
+    Stop {
+        /// RPC port (default: 7782)
+        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
+        rpc_port: u16,
     },
     
     /// Create a new encrypted wallet
@@ -147,95 +222,147 @@ enum Commands {
         #[arg(short, long, default_value = "./quanta_demo")]
         db: String,
     },
-    
-    /// Deploy a smart contract (WASM)
-    DeployContract {
-        /// Path to WASM file
-        #[arg(short, long)]
-        wasm: String,
-        
-        /// Deployer wallet file
-        #[arg(short = 'w', long, default_value = "wallet.qua")]
-        wallet: String,
-        
-        /// Transaction fee
-        #[arg(short, long, default_value_t = 0.1)]
-        fee: f64,
-        
-        /// Database path
-        #[arg(short, long, default_value = "./quanta_data")]
-        db: String,
-    },
-    
-    /// Call a smart contract function
-    CallContract {
-        /// Contract address
-        #[arg(short, long)]
-        contract: String,
-        
-        /// Function name
-        #[arg(short, long)]
-        function: String,
-        
-        /// Function arguments (JSON format)
-        #[arg(short, long, default_value = "{}")]
-        args: String,
-        
-        /// Amount to send (QUA)
-        #[arg(short = 'm', long, default_value_t = 0.0)]
-        amount: f64,
-        
-        /// Caller wallet file
-        #[arg(short = 'w', long, default_value = "wallet.qua")]
-        wallet: String,
-        
-        /// Transaction fee
-        #[arg(short, long, default_value_t = 0.01)]
-        fee: f64,
-        
-        /// Database path
-        #[arg(short, long, default_value = "./quanta_data")]
-        db: String,
-    },
-    
-    /// List deployed contracts
-    ListContracts {
-        /// Database path
-        #[arg(short, long, default_value = "./quanta_data")]
-        db: String,
-    },
 }
 
 #[tokio::main]
 async fn main() {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .with_level(true)
-        .init();
-
-    println!("╔═══════════════════════════════════════════════════════════════╗");
-    println!("║        QUANTA - Quantum-Resistant Blockchain                  ║");
-    println!("║         Falcon Signatures | Post-Quantum Cryptography         ║");
-    println!("╚═══════════════════════════════════════════════════════════════╝\n");
+    println!("");
+    println!("        QUANTA - Quantum-Resistant Blockchain                  ");
+    println!("         Falcon Signatures | Post-Quantum Cryptography         ");
+    println!("\n");
 
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Start { config, port, network_port, db, bootstrap, no_network } => {
-            // Load configuration
-            let cfg = QuantaConfig::load_with_overrides(
+        Commands::Start { config, port, network_port, rpc_port, db, bootstrap, no_network, detach } => {
+            // Load configuration with RPC port override
+            let mut cfg = QuantaConfig::load_with_overrides(
                 config,
                 port,
                 network_port,
-                db,
+                db.clone(),
                 bootstrap.clone(),
                 no_network
             ).expect("Failed to load configuration");
             
+            // Set RPC port from CLI or default
+            let rpc_port = rpc_port.unwrap_or(7782);
+            
+            // Setup logging based on detach mode
+            if detach {
+                // Fork to background on Unix-like systems
+                #[cfg(unix)]
+                {
+                    use std::process::Command;
+                    
+                    // Check if already running as daemon
+                    if std::env::var("QUANTA_DAEMON").is_err() {
+                        println!("Starting QUANTA node in daemon mode...");
+                        
+                        // Create logs directory
+                        std::fs::create_dir_all("logs").expect("Failed to create logs directory");
+                        
+                        // Prepare arguments (include --detach to trigger file logging in child)
+                        let mut args = vec![
+                            "start".to_string(),
+                            "--detach".to_string(),
+                            "--port".to_string(),
+                            cfg.node.api_port.to_string(),
+                            "--network-port".to_string(),
+                            cfg.node.network_port.to_string(),
+                            "--rpc-port".to_string(),
+                            rpc_port.to_string(),
+                            "--db".to_string(),
+                            cfg.node.db_path.clone(),
+                        ];
+                        
+                        if cfg.node.no_network {
+                            args.push("--no-network".to_string());
+                        }
+                        
+                        // Open log file for the child process
+                        let log_file_path = format!("logs/quanta_node_{}.log", cfg.node.network_port);
+                        let log_file = std::fs::OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&log_file_path)
+                            .expect("Failed to open log file");
+                        
+                        // Fork process with proper file descriptors
+                        let child = Command::new(std::env::current_exe().unwrap())
+                            .args(&args)
+                            .env("QUANTA_DAEMON", "1")
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::from(log_file.try_clone().unwrap()))
+                            .stderr(std::process::Stdio::from(log_file))
+                            .spawn()
+                            .expect("Failed to start daemon process");
+                        
+                        let child_pid = child.id();
+                        
+                        // Write PID file
+                        let pid_file = format!("logs/quanta_{}.pid", cfg.node.network_port);
+                        std::fs::write(&pid_file, child_pid.to_string())
+                            .expect("Failed to write PID file");
+                        
+                        println!(" QUANTA node started as daemon (PID: {})", child_pid);
+                        println!("  API Port: {}", cfg.node.api_port);
+                        println!("  Network Port: {}", cfg.node.network_port);
+                        println!("  RPC Port: {}", rpc_port);
+                        println!("  Database: {}", cfg.node.db_path);
+                        println!("  Log file: {}", log_file_path);
+                        println!("  PID file: {}", pid_file);
+                        println!("\nWaiting for node to initialize...");
+                        std::thread::sleep(std::time::Duration::from_secs(3));
+                        println!("\nUse './quanta status --rpc-port {}' to check node status", rpc_port);
+                        println!("Use './quanta stop --rpc-port {}' to stop the node", rpc_port);
+                        
+                        return;
+                    }
+                }
+                
+                #[cfg(not(unix))]
+                {
+                    eprintln!("Warning: Daemon mode is not fully supported on Windows. Running in foreground with file logging.");
+                }
+                
+                // Setup file-based logging for daemon
+                std::fs::create_dir_all("logs").expect("Failed to create logs directory");
+                
+                let log_file = format!("logs/quanta_node_{}.log", cfg.node.network_port);
+                let file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log_file)
+                    .expect("Failed to open log file");
+                
+                tracing_subscriber::fmt()
+                    .with_writer(Arc::new(file))
+                    .with_ansi(false)
+                    .with_target(false)
+                    .with_level(true)
+                    .init();
+                
+                // Write PID file
+                let pid_file = format!("logs/quanta_{}.pid", cfg.node.network_port);
+                std::fs::write(&pid_file, std::process::id().to_string())
+                    .expect("Failed to write PID file");
+                
+                tracing::info!("Starting QUANTA node in DAEMON mode");
+                tracing::info!("Log file: {}", log_file);
+                tracing::info!("PID file: {}", pid_file);
+            } else {
+                // Initialize console logging for non-detached mode
+                tracing_subscriber::fmt()
+                    .with_target(false)
+                    .with_level(true)
+                    .init();
+            }
+            
             tracing::info!("Starting QUANTA node with configuration:");
             tracing::info!("  API Port: {}", cfg.node.api_port);
             tracing::info!("  Network Port: {}", cfg.node.network_port);
+            tracing::info!("  RPC Port: {}", rpc_port);
             tracing::info!("  Database: {}", cfg.node.db_path);
             
             let storage = Arc::new(BlockchainStorage::new(&cfg.node.db_path).expect("Failed to open database"));
@@ -245,9 +372,9 @@ async fn main() {
             
             // Start Prometheus metrics server if enabled
             if cfg.metrics.enabled {
-                let metrics_port = cfg.metrics.port;
+                let _metrics_port = cfg.metrics.port;
                 tokio::spawn(async move {
-                    prometheus_metrics::start_metrics_server(metrics_port).await;
+                // Metrics server removed - add back when needed
                 });
             }
             
@@ -265,6 +392,7 @@ async fn main() {
                     max_peers: cfg.network.max_peers,
                     node_id: uuid::Uuid::new_v4().to_string(),
                     bootstrap_nodes,
+                    dns_seeds: cfg.network.dns_seeds.clone(),
                 };
                 
                 let network = Arc::new(Network::new(network_config, Arc::clone(&blockchain)));
@@ -328,6 +456,24 @@ async fn main() {
                 let _ = shutdown_tx.send(()).await;
             });
             
+            // Start RPC server
+            let rpc_server = RpcServer::new(
+                Arc::clone(&blockchain),
+                network.clone(),
+                cfg.node.api_port,
+                cfg.node.network_port,
+                rpc_port,
+            );
+            
+            let rpc_handle = {
+                let rpc_port_clone = rpc_port;
+                tokio::spawn(async move {
+                    if let Err(e) = rpc_server.start(rpc_port_clone).await {
+                        tracing::error!("RPC server error: {}", e);
+                    }
+                })
+            };
+            
             // Start API server
             let server_handle = {
                 let blockchain_clone = Arc::clone(&blockchain);
@@ -355,10 +501,207 @@ async fn main() {
                 _ = server_handle => {
                     tracing::info!("Server stopped");
                 }
+                _ = rpc_handle => {
+                    tracing::info!("RPC server stopped");
+                }
+            }
+        }
+        
+        Commands::Status { rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            match client.get_node_status().await {
+                Ok(status) => {
+                    println!("\n");
+                    println!("            QUANTA NODE STATUS                            ");
+                    println!("");
+                    println!("  Status:         {}                              ", if status.running { "RUNNING " } else { "STOPPED" });
+                    println!("  Version:        {}                                     ", status.version);
+                    println!("  Uptime:         {} seconds                             ", status.uptime_seconds);
+                    println!("                                                          ");
+                    println!("  Chain Height:   {} blocks                              ", status.chain_height);
+                    println!("  Mempool:        {} pending transactions                ", status.mempool_size);
+                    println!("  Peers:          {} connected                           ", status.peer_count);
+                    println!("                                                          ");
+                    println!("  API Port:       {}                                     ", status.api_port);
+                    println!("  Network Port:   {}                                     ", status.network_port);
+                    println!("  RPC Port:       {}                                     ", status.rpc_port);
+                    println!("\n");
+                }
+                Err(e) => {
+                    eprintln!(" Failed to connect to node RPC server on port {}", rpc_port);
+                    eprintln!("  Error: {}", e);
+                    eprintln!("\n  Is the node running? Start it with:");
+                    eprintln!("  ./quanta start --detach --rpc-port {}", rpc_port);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::MiningStatus { rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            match client.get_mining_status().await {
+                Ok(status) => {
+                    println!("\n");
+                    println!("            QUANTA MINING STATUS                          ");
+                    println!("");
+                    println!("  Mining Active:  {}                              ", if status.is_mining { "YES " } else { "NO" });
+                    if let Some(ref addr) = status.mining_address {
+                        println!("  Mining To:      {}...", &addr[..32]);
+                    }
+                    println!("  Blocks Mined:   {}                                      ", status.blocks_mined);
+                    println!("  Difficulty:     {}                                      ", status.difficulty);
+                    println!("  Block Reward:   {} microunits ({:.6} QUA)         ", 
+                        status.mining_reward, 
+                        status.mining_reward as f64 / 1_000_000.0
+                    );
+                    if let Some(last_time) = status.last_block_time {
+                        use chrono::{DateTime, Utc as ChronoUtc};
+                        let dt = DateTime::<ChronoUtc>::from_timestamp(last_time, 0)
+                            .unwrap_or_else(|| ChronoUtc::now());
+                        println!("  Last Block:     {}                        ", dt.format("%Y-%m-%d %H:%M:%S UTC"));
+                    }
+                    println!("\n");
+                }
+                Err(e) => {
+                    eprintln!(" Failed to get mining status: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::GetBlock { height, rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            match client.get_block(height).await {
+                Ok(block) => {
+                    use chrono::{DateTime, Utc as ChronoUtc};
+                    let dt = DateTime::<ChronoUtc>::from_timestamp(block.timestamp, 0)
+                        .unwrap_or_else(|| ChronoUtc::now());
+                    
+                    println!("\n");
+                    println!("            BLOCK INFORMATION                             ");
+                    println!("");
+                    println!("  Height:         {}                                      ", block.height);
+                    println!("  Hash:           {}...", &block.hash[..24]);
+                    println!("  Timestamp:      {}                        ", dt.format("%Y-%m-%d %H:%M:%S UTC"));
+                    println!("  Transactions:   {}                                      ", block.transactions);
+                    println!("  Difficulty:     {}                                      ", block.difficulty);
+                    println!("\n");
+                }
+                Err(e) => {
+                    eprintln!(" Failed to get block: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::Peers { rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            match client.get_peers().await {
+                Ok(peers) => {
+                    println!("\n");
+                    println!("            CONNECTED PEERS ({} total)                      ", peers.len());
+                    println!("");
+                    
+                    if peers.is_empty() {
+                        println!("  No peers connected                                      ");
+                    } else {
+                        for (i, peer) in peers.iter().enumerate() {
+                            println!("  {}. {}                                    ", i + 1, peer.address);
+                        }
+                    }
+                    
+                    println!("\n");
+                }
+                Err(e) => {
+                    eprintln!(" Failed to get peers: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::StartMining { address, rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            println!("Starting mining to address: {}", address);
+            
+            match client.start_mining(&address).await {
+                Ok(_) => {
+                    println!(" Mining started successfully");
+                    println!("  Rewards will be sent to: {}", address);
+                    println!("  Use './quanta mining_status' to check status");
+                }
+                Err(e) => {
+                    eprintln!(" Failed to start mining: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::StopMining { rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            println!("Stopping mining...");
+            
+            match client.stop_mining().await {
+                Ok(_) => {
+                    println!(" Mining stopped successfully");
+                }
+                Err(e) => {
+                    eprintln!(" Failed to stop mining: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::PrintHeight { rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            match client.get_node_status().await {
+                Ok(status) => {
+                    println!("\n");
+                    println!("            BLOCKCHAIN HEIGHT                             ");
+                    println!("");
+                    println!("  Current Height: {} blocks                              ", status.chain_height);
+                    println!("\n");
+                }
+                Err(e) => {
+                    eprintln!(" Failed to get blockchain height: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        
+        Commands::Stop { rpc_port } => {
+            let client = RpcClient::new(rpc_port);
+            
+            println!("Sending shutdown signal to node on RPC port {}...", rpc_port);
+            
+            match client.shutdown().await {
+                Ok(_) => {
+                    println!(" Shutdown signal sent successfully");
+                    println!("  Node will stop gracefully...");
+                }
+                Err(e) => {
+                    eprintln!(" Failed to send shutdown signal: {}", e);
+                    eprintln!("\n  Is the node running? Check with:");
+                    eprintln!("  ./quanta status --rpc-port {}", rpc_port);
+                    std::process::exit(1);
+                }
             }
         }
 
         Commands::NewWallet { file } => {
+            // Initialize console logging for non-start commands
+            tracing_subscriber::fmt()
+                .with_target(false)
+                .with_level(true)
+                .try_init()
+                .ok();
+            
             let wallet = QuantumWallet::new();
             
             println!("\nEnter password to encrypt wallet:");
@@ -377,7 +720,7 @@ async fn main() {
         }
 
         Commands::NewHdWallet { file, accounts } => {
-            use hd_wallet::HDWallet;
+            use crate::crypto::HDWallet;
             
             let mut wallet = HDWallet::new();
             
@@ -403,9 +746,9 @@ async fn main() {
             let encrypted = wallet.export_encrypted(&password).expect("Failed to encrypt wallet");
             std::fs::write(&file, encrypted).expect("Failed to save wallet");
             
-            println!("\n✅ HD Wallet created and encrypted successfully!");
-            println!("📁 Saved to: {}", file);
-            println!("\n⚠️  CRITICAL: Write down your 24-word mnemonic phrase!");
+            println!("\n HD Wallet created and encrypted successfully!");
+            println!(" Saved to: {}", file);
+            println!("\n  CRITICAL: Write down your 24-word mnemonic phrase!");
             println!("   This is the ONLY way to recover your wallet.");
         }
 
@@ -433,9 +776,9 @@ async fn main() {
             // Load blockchain to get balance
             let storage = Arc::new(BlockchainStorage::new("./quanta_data").expect("Failed to open database"));
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
-            let balance = blockchain.read().await.get_balance(&wallet.address);
+            let balance_microunits = blockchain.read().await.get_balance(&wallet.address);
             
-            wallet.display_info(balance);
+            wallet.display_info(microunits_to_qua(balance_microunits));
         }
 
         Commands::Mine { wallet: wallet_file, db } => {
@@ -445,7 +788,7 @@ async fn main() {
             let wallet = match QuantumWallet::load_quantum_safe(&wallet_file, &password) {
                 Ok(w) => w,
                 Err(e) => {
-                    eprintln!("❌ Failed to load wallet: {}", e);
+                    eprintln!(" Failed to load wallet: {}", e);
                     return;
                 }
             };
@@ -453,15 +796,15 @@ async fn main() {
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
             
-            println!("Mining new block...");
+            println!("  Mining new block...");
             let mine_result = blockchain.write().await.mine_pending_transactions(wallet.address.clone());
             match mine_result {
                 Ok(_) => {
-                    println!("Block mined successfully!");
-                    let balance = blockchain.read().await.get_balance(&wallet.address);
-                    println!("New balance: {:.6} QUA", balance);
+                    println!(" Block mined successfully!");
+                    let balance_microunits = blockchain.read().await.get_balance(&wallet.address);
+                    println!(" New balance: {:.6} QUA", microunits_to_qua(balance_microunits));
                 }
-                Err(e) => eprintln!("Mining failed: {}", e),
+                Err(e) => eprintln!(" Mining failed: {}", e),
             }
         }
 
@@ -472,7 +815,7 @@ async fn main() {
             let wallet = match QuantumWallet::load_quantum_safe(&wallet_file, &password) {
                 Ok(w) => w,
                 Err(e) => {
-                    eprintln!("❌ Failed to load wallet: {}", e);
+                    eprintln!(" Failed to load wallet: {}", e);
                     return;
                 }
             };
@@ -480,22 +823,43 @@ async fn main() {
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
             
-            let mut tx = transaction::Transaction::new(
-                wallet.address.clone(),
-                to,
-                amount,
-                Utc::now().timestamp(),
-            );
+            // Convert QUA to microunits
+            let amount_microunits = qua_to_microunits(amount);
+            
+            // Get current nonce for sender
+            let current_nonce = {
+                let bc = blockchain.read().await;
+                bc.get_balance(&wallet.address); // Ensure account exists
+                let nonce = bc.get_account_state_mut().get_nonce(&wallet.address);
+                nonce
+            };
+            let next_nonce = current_nonce + 1;
+            
+            use crate::core::transaction::{Transaction, TransactionType};
+            let mut tx = Transaction {
+                sender: wallet.address.clone(),
+                recipient: to.clone(),
+                amount: amount_microunits,
+                timestamp: Utc::now().timestamp(),
+                signature: vec![],
+                public_key: wallet.keypair.public_key.clone(),
+                fee: 1000, // 0.001 QUA default fee
+                nonce: next_nonce,
+                tx_type: TransactionType::Transfer,
+            };
             
             // Sign transaction
             let signing_data = tx.get_signing_data();
             tx.signature = wallet.keypair.sign(&signing_data);
-            tx.public_key = wallet.keypair.public_key.clone();
             
             let add_result = blockchain.write().await.add_transaction(tx);
             match add_result {
-                Ok(_) => println!("Transaction added to mempool"),
-                Err(e) => eprintln!("Transaction failed: {}", e),
+                Ok(_) => {
+                    println!(" Transaction added to mempool");
+                    println!(" Sending {:.6} QUA to {}", amount, to);
+                    println!(" Nonce: {}", next_nonce);
+                }
+                Err(e) => eprintln!(" Transaction failed: {}", e),
             }
         }
 
@@ -504,22 +868,26 @@ async fn main() {
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
             let stats = blockchain.read().await.get_stats();
             
-            println!("╔═══════════════════════════════════════════════════════════════╗");
-            println!("║                QUANTA BLOCKCHAIN STATISTICS                   ║");
-            println!("╠═══════════════════════════════════════════════════════════════╣");
-            println!("║ Chain Length: {} blocks                                  ║", stats.chain_length);
-            println!("║ Total Transactions: {}                                    ║", stats.total_transactions);
-            println!("║ Current Difficulty: {}                                     ║", stats.current_difficulty);
-            println!("║ Mining Reward: {:.2} QUA                                 ║", stats.mining_reward);
-            println!("║ Total Supply: {:.2} QUA                                 ║", stats.total_supply);
-            println!("║ Pending Transactions: {}                                   ║", stats.pending_transactions);
-            println!("╠═══════════════════════════════════════════════════════════════╣");
-            println!("║ Quantum Resistance: ACTIVE                                  ║");
-            println!("║ Signature Algorithm: Falcon-512 (NIST PQC)                   ║");
-            println!("║ Hash Algorithm: SHA3-256                                      ║");
-            println!("║ Wallet Encryption: Kyber-1024 + ChaCha20-Poly1305            ║");
-            println!("║ Persistent Storage: Sled Database                            ║");
-            println!("╚═══════════════════════════════════════════════════════════════╝");
+            let reward_qua = microunits_to_qua(stats.mining_reward);
+            let supply_qua = microunits_to_qua(stats.total_supply);
+            
+            println!("");
+            println!("                QUANTA BLOCKCHAIN STATISTICS                   ");
+            println!("");
+            println!(" Chain Length: {} blocks                                  ", stats.chain_length);
+            println!(" Total Transactions: {}                                    ", stats.total_transactions);
+            println!(" Current Difficulty: {}                                     ", stats.current_difficulty);
+            println!(" Mining Reward: {:.6} QUA                                 ", reward_qua);
+            println!(" Total Supply: {:.6} QUA                                  ", supply_qua);
+            println!(" Pending Transactions: {}                                   ", stats.pending_transactions);
+            println!("");
+            println!(" Quantum Resistance: ACTIVE                                  ");
+            println!(" Signature Algorithm: Falcon-512 (NIST PQC)                   ");
+            println!(" Hash Algorithm: SHA3-256                                      ");
+            println!(" Wallet Encryption: Kyber-1024 + ChaCha20-Poly1305            ");
+            println!(" Persistent Storage: Sled Database                            ");
+            println!(" Amount Precision: u64 microunits (deterministic)             ");
+            println!("");
         }
 
         Commands::Validate { db } => {
@@ -542,23 +910,11 @@ async fn main() {
             println!("Running Production Demo...\n");
             run_demo(&db).await;
         }
-        
-        Commands::DeployContract { wasm, wallet, fee, db } => {
-            handle_deploy_contract(wasm, wallet, fee, db).await;
-        }
-        
-        Commands::CallContract { contract, function, args, amount, wallet, fee, db } => {
-            handle_call_contract(contract, function, args, amount, wallet, fee, db).await;
-        }
-        
-        Commands::ListContracts { db } => {
-            handle_list_contracts(db).await;
-        }
     }
 }
 
 async fn run_demo(db_path: &str) {
-    use crate::transaction;
+    use crate::core::transaction::{Transaction, TransactionType};
     let storage = Arc::new(BlockchainStorage::new(db_path).expect("Failed to open database"));
     
     // Clear old demo data
@@ -567,233 +923,125 @@ async fn run_demo(db_path: &str) {
     let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
     
     // Create demo wallets
-    println!("📝 Creating quantum-safe encrypted demo wallets...");
+    println!(" Creating quantum-safe encrypted demo wallets...");
     let wallet1 = QuantumWallet::new();
     let wallet2 = QuantumWallet::new();
     let wallet3 = QuantumWallet::new();
     
     // WARNING: Insecure password for demo ONLY! Never use in production!
     const DEMO_PASSWORD: &str = "INSECURE_DEMO_PASSWORD_DO_NOT_USE_IN_PRODUCTION";
-    println!("⚠️  Demo wallets use INSECURE password - FOR TESTING ONLY!");
+    println!("  Demo wallets use INSECURE password - FOR TESTING ONLY!");
     
     wallet1.save_quantum_safe("demo_wallet1.qua", DEMO_PASSWORD).unwrap();
     wallet2.save_quantum_safe("demo_wallet2.qua", DEMO_PASSWORD).unwrap();
     wallet3.save_quantum_safe("demo_wallet3.qua", DEMO_PASSWORD).unwrap();
     
-    println!("\n⛏️  Mining genesis rewards...");
+    println!("\n  Mining genesis rewards...");
     blockchain.write().await.mine_pending_transactions(wallet1.address.clone()).unwrap();
     blockchain.write().await.mine_pending_transactions(wallet1.address.clone()).unwrap();
     
-    println!("\n💸 Creating transactions...");
+    println!("\n Creating transactions...");
     
-    // Transaction 1
-    let mut tx1 = transaction::Transaction::new(
-        wallet1.address.clone(),
-        wallet2.address.clone(),
-        25.0,
-        Utc::now().timestamp(),
-    );
+    // Transaction 1: 25 QUA = 25_000_000 microunits
+    let amount1_microunits = qua_to_microunits(25.0);
+    let nonce1 = {
+        let bc = blockchain.read().await;
+        let nonce = bc.get_account_state_mut().get_nonce(&wallet1.address);
+        nonce + 1
+    };
+    
+    let mut tx1 = Transaction {
+        sender: wallet1.address.clone(),
+        recipient: wallet2.address.clone(),
+        amount: amount1_microunits,
+        timestamp: Utc::now().timestamp(),
+        signature: vec![],
+        public_key: wallet1.keypair.public_key.clone(),
+        fee: 1000, // 0.001 QUA
+        nonce: nonce1,
+        tx_type: TransactionType::Transfer,
+    };
     let signing_data1 = tx1.get_signing_data();
     tx1.signature = wallet1.keypair.sign(&signing_data1);
-    tx1.public_key = wallet1.keypair.public_key.clone();
     blockchain.write().await.add_transaction(tx1).unwrap();
+    println!("   Tx 1: 25 QUA to wallet2 (nonce {})", nonce1);
     
-    println!("\n⛏️  Mining first transaction...");
+    println!("\n  Mining first transaction...");
     blockchain.write().await.mine_pending_transactions(wallet2.address.clone()).unwrap();
     
-    // Transaction 2
-    let mut tx2 = transaction::Transaction::new(
-        wallet1.address.clone(),
-        wallet3.address.clone(),
-        15.0,
-        Utc::now().timestamp(),
-    );
+    // Transaction 2: 15 QUA = 15_000_000 microunits
+    let amount2_microunits = qua_to_microunits(15.0);
+    let nonce2 = {
+        let bc = blockchain.read().await;
+        let nonce = bc.get_account_state_mut().get_nonce(&wallet1.address);
+        nonce + 1
+    };
+    
+    let mut tx2 = Transaction {
+        sender: wallet1.address.clone(),
+        recipient: wallet3.address.clone(),
+        amount: amount2_microunits,
+        timestamp: Utc::now().timestamp(),
+        signature: vec![],
+        public_key: wallet1.keypair.public_key.clone(),
+        fee: 1000,
+        nonce: nonce2,
+        tx_type: TransactionType::Transfer,
+    };
     let signing_data2 = tx2.get_signing_data();
     tx2.signature = wallet1.keypair.sign(&signing_data2);
-    tx2.public_key = wallet1.keypair.public_key.clone();
     blockchain.write().await.add_transaction(tx2).unwrap();
+    println!("   Tx 2: 15 QUA to wallet3 (nonce {})", nonce2);
     
-    println!("\n⛏️  Mining second transaction...");
+    println!("\n  Mining second transaction...");
     blockchain.write().await.mine_pending_transactions(wallet3.address.clone()).unwrap();
     
     // Show final balances
-    println!("\n💰 Final Balances:");
+    println!("\n Final Balances:");
     let bc = blockchain.read().await;
-    println!("Wallet 1: {:.6} QUA", bc.get_balance(&wallet1.address));
-    println!("Wallet 2: {:.6} QUA", bc.get_balance(&wallet2.address));
-    println!("Wallet 3: {:.6} QUA", bc.get_balance(&wallet3.address));
+    let bal1 = microunits_to_qua(bc.get_balance(&wallet1.address));
+    let bal2 = microunits_to_qua(bc.get_balance(&wallet2.address));
+    let bal3 = microunits_to_qua(bc.get_balance(&wallet3.address));
+    println!("  Wallet 1: {:.6} QUA", bal1);
+    println!("  Wallet 2: {:.6} QUA", bal2);
+    println!("  Wallet 3: {:.6} QUA", bal3);
     
     // Show stats
     let stats = bc.get_stats();
-    println!("\n📊 Blockchain Stats:");
-    println!("Blocks: {}", stats.chain_length);
-    println!("Transactions: {}", stats.total_transactions);
-    println!("Total Supply: {:.2} QUA", stats.total_supply);
+    println!("\n Blockchain Stats:");
+    println!("  Blocks: {}", stats.chain_length);
+    println!("  Transactions: {}", stats.total_transactions);
+    println!("  Total Supply: {:.6} QUA ({} microunits)", microunits_to_qua(stats.total_supply), stats.total_supply);
+    println!("  Current Difficulty: {}", stats.current_difficulty);
     
     // Validate
-    println!("\n🔍 Validating blockchain...");
+    println!("\n Validating blockchain...");
     if bc.is_valid() {
-        println!("✅ All Falcon signatures verified!");
-        println!("✅ Blockchain integrity confirmed!");
-        println!("✅ Data persisted to disk: {}", db_path);
+        println!("   All Falcon signatures verified!");
+        println!("   All nonces valid!");
+        println!("   Blockchain integrity confirmed!");
+        println!("   Data persisted to disk: {}", db_path);
     }
     drop(bc);
     
     // Display comparison
-    println!("\n╔═══════════════════════════════════════════════════════════════╗");
-    println!("║           FALCON vs ECDSA COMPARISON                          ║");
-    println!("╠═══════════════════════════════════════════════════════════════╣");
-    println!("║                    Falcon-512  │  ECDSA (secp256k1)           ║");
-    println!("║ Public Key Size:    897 bytes  │  33 bytes                    ║");
-    println!("║ Private Key Size:  1281 bytes  │  32 bytes                    ║");
-    println!("║ Signature Size:     666 bytes  │  65 bytes                    ║");
-    println!("║ Quantum Resistant:  ✓ YES      │  ✗ NO                        ║");
-    println!("║ NIST PQC Standard:  ✓ YES      │  ✗ NO                        ║");
-    println!("╚═══════════════════════════════════════════════════════════════╝");
+    println!("\n");
+    println!("           FALCON vs ECDSA COMPARISON                          ");
+    println!("");
+    println!("                    Falcon-512    ECDSA (secp256k1)           ");
+    println!(" Public Key Size:    897 bytes    33 bytes                    ");
+    println!(" Private Key Size:  1281 bytes    32 bytes                    ");
+    println!(" Signature Size:     666 bytes    65 bytes                    ");
+    println!(" Quantum Resistant:   YES         NO                        ");
+    println!(" NIST PQC Standard:   YES         NO                        ");
+    println!("");
     
-    println!("\n🎉 Production demo complete!");
-    println!("💾 Blockchain persisted to: {}", db_path);
-    println!("⚠️  Demo wallets password: INSECURE_DEMO_PASSWORD_DO_NOT_USE_IN_PRODUCTION");
-    println!("⚠️  WARNING: Demo password is PUBLIC - delete wallets after testing!");
-    println!("\n📡 To start API server:");
+    println!("\n Production demo complete!");
+    println!(" Blockchain persisted to: {}", db_path);
+    println!(" All amounts stored as u64 microunits (deterministic)");
+    println!(" Nonce-based replay protection enabled");
+    println!("  Demo wallets password: INSECURE_DEMO_PASSWORD_DO_NOT_USE_IN_PRODUCTION");
+    println!("  WARNING: Demo password is PUBLIC - delete wallets after testing!");
+    println!("\n To start API server:");
     println!("   cargo run --release -- start --db {} --port 3000", db_path);
-}
-
-async fn handle_deploy_contract(wasm: String, wallet: String, fee: f64, db: String) {
-    use std::fs;
-    use std::sync::Arc;
-    use crate::storage::BlockchainStorage;
-    use crate::blockchain::Blockchain;
-    use crate::transaction::Transaction;
-    use chrono::Utc;
-    
-    println!("🚀 Deploying smart contract...");
-    
-    // Read WASM file
-    let code = match fs::read(&wasm) {
-        Ok(data) => data,
-        Err(e) => {
-            eprintln!("❌ Failed to read WASM file: {}", e);
-            return;
-        }
-    };
-    
-    println!("📦 WASM size: {} bytes", code.len());
-    
-    // Load wallet
-    println!("🔓 Enter wallet password:");
-    let password = rpassword::read_password().expect("Failed to read password");
-    
-    let wallet = match quantum_wallet::QuantumWallet::load_quantum_safe(&wallet, &password) {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("❌ Failed to load wallet: {}", e);
-            return;
-        }
-    };
-    
-    // Load blockchain
-    let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
-    let blockchain = Blockchain::new(storage).expect("Failed to load blockchain");
-    
-    // Create deploy transaction
-    let mut tx = Transaction::new_deploy_contract(
-        wallet.address.clone(),
-        code,
-        Utc::now().timestamp(),
-        fee,
-    );
-    
-    // Sign transaction
-    let signing_data = tx.get_signing_data();
-    tx.signature = wallet.keypair.sign(&signing_data);
-    tx.public_key = wallet.keypair.public_key.clone();
-    
-    // Add to blockchain
-    match blockchain.add_transaction(tx) {
-        Ok(_) => {
-            println!("✅ Contract deployment transaction added to mempool");
-            println!("⛏️  Transaction will be included in the next mined block");
-            println!("💡 Contract address will be generated upon mining");
-        }
-        Err(e) => {
-            eprintln!("❌ Failed to add transaction: {:?}", e);
-        }
-    }
-}
-
-async fn handle_call_contract(
-    contract: String,
-    function: String,
-    args: String,
-    amount: f64,
-    wallet: String,
-    fee: f64,
-    db: String,
-) {
-    use std::sync::Arc;
-    use crate::storage::BlockchainStorage;
-    use crate::blockchain::Blockchain;
-    use crate::transaction::Transaction;
-    use chrono::Utc;
-    
-    println!("📞 Calling smart contract...");
-    println!("   Contract: {}", contract);
-    println!("   Function: {}", function);
-    println!("   Args: {}", args);
-    
-    // Parse args (for now, just convert to bytes)
-    let args_bytes = args.as_bytes().to_vec();
-    
-    // Load wallet
-    println!("🔓 Enter wallet password:");
-    let password = rpassword::read_password().expect("Failed to read password");
-    
-    let wallet = match quantum_wallet::QuantumWallet::load_quantum_safe(&wallet, &password) {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("❌ Failed to load wallet: {}", e);
-            return;
-        }
-    };
-    
-    // Load blockchain
-    let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
-    let blockchain = Blockchain::new(storage).expect("Failed to load blockchain");
-    
-    // Create call transaction
-    let mut tx = Transaction::new_call_contract(
-        wallet.address.clone(),
-        contract.clone(),
-        function.clone(),
-        args_bytes,
-        amount,
-        Utc::now().timestamp(),
-        fee,
-    );
-    
-    // Sign transaction
-    let signing_data = tx.get_signing_data();
-    tx.signature = wallet.keypair.sign(&signing_data);
-    tx.public_key = wallet.keypair.public_key.clone();
-    
-    // Add to blockchain
-    match blockchain.add_transaction(tx) {
-        Ok(_) => {
-            println!("✅ Contract call transaction added to mempool");
-            println!("⛏️  Will be executed when block is mined");
-        }
-        Err(e) => {
-            eprintln!("❌ Failed to add transaction: {:?}", e);
-        }
-    }
-}
-
-async fn handle_list_contracts(db: String) {
-    println!("📜 Listing deployed contracts...\n");
-    
-    // TODO: Implement contract listing from storage
-    // For now, show placeholder
-    println!("Contract listing not yet implemented");
-    println!("Contracts will be stored in: {}/contracts", db);
 }

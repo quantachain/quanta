@@ -34,3 +34,7 @@ Thumbs.db
 # Environment
 .env
 .env.local
+
+# Remove emojis
+remove_emojis.py
+docs/

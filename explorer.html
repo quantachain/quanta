@@ -26,7 +26,7 @@
     <hr>
     
     <h2>Mine Block</h2>
-    <p>Miner Address: <input type="text" id="miner-address" size="50" value="2416136398caf277667578cdecc495e1040e1e5d"></p>
+    <p>Miner Address: <input type="text" id="miner-address" size="50" value="0x0bd4bf5eeb3be846f44cc2f9241ea3214e57295a"></p>
     <button onclick="mineBlock()">Mine Single Block</button>
     <button onclick="startContinuousMining()">Start Continuous Mining</button>
     <button onclick="stopContinuousMining()">Stop Continuous Mining</button>
@@ -35,7 +35,7 @@
     <hr>
     
     <h2>Check Balance</h2>
-    <p>Address: <input type="text" id="balance-address" size="50" value="2416136398caf277667578cdecc495e1040e1e5d"></p>
+    <p>Address: <input type="text" id="balance-address" size="50" value="0x0bd4bf5eeb3be846f44cc2f9241ea3214e57295a"></p>
     <button onclick="checkBalance()">Check Balance</button>
     <pre id="balance-result"></pre>
     <hr>
@@ -68,7 +68,9 @@
                     document.getElementById('chain-length').textContent = data.chain_length;
                     document.getElementById('difficulty').textContent = data.current_difficulty;
                     document.getElementById('total-txs').textContent = data.total_transactions;
-                    document.getElementById('mining-reward').textContent = data.mining_reward + ' QUA';
+                    // Convert mining reward from microunits to QUA
+                    const rewardQUA = (data.mining_reward / 1000000).toFixed(2);
+                    document.getElementById('mining-reward').textContent = rewardQUA + ' QUA';
                 })
                 .catch(err => document.getElementById('chain-length').textContent = 'Error: ' + err.message);
             
@@ -156,8 +158,10 @@
             })
             .then(r => r.json())
             .then(data => {
+                // Convert microunits to QUA (1 QUA = 1,000,000 microunits)
+                const balanceQUA = (data.balance_microunits / 1000000).toFixed(6);
                 document.getElementById('balance-result').textContent = 
-                    `Balance: ${data.balance} QUA\nAddress: ${data.address}`;
+                    `Balance: ${balanceQUA} QUA (${data.balance_microunits.toLocaleString()} microunits)\nAddress: ${data.address}`;
             })
             .catch(err => document.getElementById('balance-result').textContent = 'Error: ' + err.message);
         }
