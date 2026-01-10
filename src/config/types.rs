@@ -56,8 +56,27 @@ pub struct SecurityConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MiningConfig {
-    pub initial_reward_microunits: u64,
-    pub halving_interval: u64,
+    // Adaptive tokenomics with annual reduction
+    pub year_1_reward_microunits: u64,
+    pub annual_reduction_percent: u8,
+    pub min_reward_microunits: u64,
+    pub blocks_per_year: u64,
+    
+    // Early adopter incentives
+    pub early_adopter_bonus_blocks: u64,
+    pub early_adopter_multiplier: f64,
+    pub bootstrap_phase_blocks: u64,
+    
+    // Mining reward vesting (anti-dump mechanism)
+    pub mining_reward_lock_percent: u8,
+    pub mining_reward_lock_blocks: u64,
+    
+    // Fee distribution
+    pub fee_burn_percent: u8,
+    pub fee_treasury_percent: u8,
+    pub fee_validator_percent: u8,
+    
+    // Blockchain timing
     pub target_block_time: u64,
     pub difficulty_adjustment_interval: u64,
 }
@@ -105,8 +124,18 @@ impl Default for QuantaConfig {
                 require_tls: false,          // Set true for public nodes
             },
             mining: MiningConfig {
-                initial_reward_microunits: 50_000_000, // 50 QUA
-                halving_interval: 210,
+                year_1_reward_microunits: 100_000_000, // 100 QUA
+                annual_reduction_percent: 15,
+                min_reward_microunits: 5_000_000, // 5 QUA floor
+                blocks_per_year: 3_153_600,
+                early_adopter_bonus_blocks: 100_000,
+                early_adopter_multiplier: 1.5,
+                bootstrap_phase_blocks: 315_360,
+                mining_reward_lock_percent: 50,
+                mining_reward_lock_blocks: 157_680,
+                fee_burn_percent: 70,
+                fee_treasury_percent: 20,
+                fee_validator_percent: 10,
                 target_block_time: 10,
                 difficulty_adjustment_interval: 10,
             },
@@ -215,11 +244,14 @@ impl QuantaConfig {
         if self.mining.difficulty_adjustment_interval == 0 {
             return Err("Difficulty adjustment interval must be > 0".into());
         }
-        if self.mining.halving_interval == 0 {
-            return Err("Halving interval must be > 0".into());
+        if self.mining.year_1_reward_microunits == 0 {
+            return Err("Year 1 mining reward must be > 0".into());
         }
-        if self.mining.initial_reward_microunits == 0 {
-            return Err("Initial mining reward must be > 0".into());
+        if self.mining.annual_reduction_percent > 100 {
+            return Err("Annual reduction percent must be <= 100".into());
+        }
+        if self.mining.fee_burn_percent + self.mining.fee_treasury_percent + self.mining.fee_validator_percent != 100 {
+            return Err("Fee distribution percentages must sum to 100".into());
         }
         
         // Security limits
@@ -255,8 +287,13 @@ impl QuantaConfig {
         tracing::info!("  Tx Expiry: {} blocks", self.consensus.transaction_expiry_blocks);
         tracing::info!("  Coinbase Maturity: {} blocks", self.consensus.coinbase_maturity);
         tracing::info!("Mining:");
-        tracing::info!("  Initial Reward: {} microunits", self.mining.initial_reward_microunits);
-        tracing::info!("  Halving Interval: {} blocks", self.mining.halving_interval);
+        tracing::info!("  Year 1 Reward: {} microunits", self.mining.year_1_reward_microunits);
+        tracing::info!("  Annual Reduction: {}%", self.mining.annual_reduction_percent);
+        tracing::info!("  Min Reward Floor: {} microunits", self.mining.min_reward_microunits);
+        tracing::info!("  Early Adopter Bonus: {} blocks @ {}x", self.mining.early_adopter_bonus_blocks, self.mining.early_adopter_multiplier);
+        tracing::info!("  Reward Vesting: {}% locked for {} blocks", self.mining.mining_reward_lock_percent, self.mining.mining_reward_lock_blocks);
+        tracing::info!("  Fee Distribution: {}% burn, {}% treasury, {}% validator", 
+            self.mining.fee_burn_percent, self.mining.fee_treasury_percent, self.mining.fee_validator_percent);
         tracing::info!("  Target Block Time: {}s", self.mining.target_block_time);
         tracing::info!("  Difficulty Adjustment: {} blocks", self.mining.difficulty_adjustment_interval);
         tracing::info!("Security:");
