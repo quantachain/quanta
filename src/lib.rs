@@ -7,3 +7,7 @@ pub mod network;
 pub mod api;
 pub mod config;
 pub mod rpc;
+
+// Smart Contract Layer (Quasar Framework)
+pub mod contract;
+pub mod contract_executor;

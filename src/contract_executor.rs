@@ -5,7 +5,7 @@ use crate::contract::{Account, ContractInstruction};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use wasmer::{
-    imports, Function, FunctionEnv, FunctionEnvMut, Instance, Module, Store, Value,
+    imports, Function, FunctionEnv, FunctionEnvMut, Instance, Memory, Module, Store, Value,
 };
 use wasmer_compiler_singlepass::Singlepass;
 
@@ -69,6 +69,7 @@ pub struct ContractEnv {
     pub block_height: u64,
     pub quantum_entropy: [u8; 32],
     pub logs: Arc<Mutex<Vec<String>>>,
+    pub memory: Option<Memory>,
 }
 
 impl ContractEnv {
@@ -84,7 +85,12 @@ impl ContractEnv {
             block_height,
             quantum_entropy,
             logs: Arc::new(Mutex::new(Vec::new())),
+            memory: None,
         }
+    }
+    
+    pub fn set_memory(&mut self, memory: Memory) {
+        self.memory = Some(memory);
     }
 }
 
@@ -149,7 +155,7 @@ impl ContractExecutor {
         gas_limit: u64,
     ) -> Result<ExecutionResult, ExecutionError> {
         // Create execution environment
-        let env = ContractEnv::new(gas_limit, accounts, block_height, quantum_entropy);
+        let mut env = ContractEnv::new(gas_limit, accounts, block_height, quantum_entropy);
         let func_env = FunctionEnv::new(&mut self.store, env.clone());
 
         // Compile WASM module
@@ -174,6 +180,12 @@ impl ContractExecutor {
         // Instantiate module
         let instance = Instance::new(&mut self.store, &module, &imports)
             .map_err(|e| ExecutionError::InstantiationError(e.to_string()))?;
+
+        // Get memory and store it in environment
+        if let Ok(memory) = instance.exports.get_memory("memory") {
+            env.set_memory(memory.clone());
+            func_env.as_mut(&mut self.store).set_memory(memory.clone());
+        }
 
         // Get the entrypoint function
         let entrypoint = instance
@@ -222,19 +234,24 @@ fn consume_gas(env: FunctionEnvMut<ContractEnv>, amount: u64) -> i32 {
 }
 
 /// Log a message from contract
-fn log_message(env: FunctionEnvMut<ContractEnv>, ptr: u32, len: u32) -> i32 {
-    let data = env.data();
-
-    // For now, just log directly without reading from WASM memory
-    // In production, we'd need to properly access the instance's memory
-    data.logs.lock().unwrap().push(format!("Log at ptr={}, len={}", ptr, len));
-    return 0;
-
-    // TODO: Fix memory access
-    /*
+fn log_message(mut env: FunctionEnvMut<ContractEnv>, ptr: u32, len: u32) -> i32 {
+    let (data, store) = env.data_and_store_mut();
+    
+    // Get memory
+    let memory = match &data.memory {
+        Some(mem) => mem.clone(),
+        None => {
+            data.logs.lock().unwrap().push("Memory not available".to_string());
+            return 1;
+        }
+    };
+    
+    // Read string from WASM memory
     let view = memory.view(&store);
     let mut bytes = vec![0u8; len as usize];
-    if view.read(ptr as u64, &mut bytes).is_err() {
+    
+    if let Err(_) = view.read(ptr as u64, &mut bytes) {
+        data.logs.lock().unwrap().push(format!("Failed to read memory at ptr={}", ptr));
         return 1;
     }
 
@@ -242,9 +259,9 @@ fn log_message(env: FunctionEnvMut<ContractEnv>, ptr: u32, len: u32) -> i32 {
         data.logs.lock().unwrap().push(message);
         0
     } else {
+        data.logs.lock().unwrap().push("Invalid UTF-8 in log message".to_string());
         1
     }
-    */
 }
 
 /// Get account balance
@@ -259,12 +276,12 @@ fn get_account_balance(env: FunctionEnvMut<ContractEnv>, index: u32) -> u64 {
 
 /// Set account data
 fn set_account_data(
-    env: FunctionEnvMut<ContractEnv>,
+    mut env: FunctionEnvMut<ContractEnv>,
     index: u32,
-    _ptr: u32,
-    _len: u32,
+    ptr: u32,
+    len: u32,
 ) -> i32 {
-    let data = env.data();
+    let (data, store) = env.data_and_store_mut();
 
     // Consume gas for storage write
     if data
@@ -277,10 +294,24 @@ fn set_account_data(
         return 1;
     }
 
-    // TODO: Implement proper memory access
-    // For now, just check if account exists
-    let accounts = data.accounts.lock().unwrap();
-    if accounts.get(index as usize).is_some() {
+    // Get memory
+    let memory = match &data.memory {
+        Some(mem) => mem.clone(),
+        None => return 1,
+    };
+    
+    // Read data from WASM memory
+    let view = memory.view(&store);
+    let mut bytes = vec![0u8; len as usize];
+    
+    if let Err(_) = view.read(ptr as u64, &mut bytes) {
+        return 1;
+    }
+
+    // Update account data
+    let mut accounts = data.accounts.lock().unwrap();
+    if let Some(account) = accounts.get_mut(index as usize) {
+        account.data = bytes;
         0
     } else {
         1
@@ -289,12 +320,12 @@ fn set_account_data(
 
 /// Get account data
 fn get_account_data(
-    env: FunctionEnvMut<ContractEnv>,
+    mut env: FunctionEnvMut<ContractEnv>,
     index: u32,
-    _ptr: u32,
-    _max_len: u32,
+    ptr: u32,
+    max_len: u32,
 ) -> i32 {
-    let data = env.data();
+    let (data, store) = env.data_and_store_mut();
 
     // Consume gas for storage read
     if data
@@ -304,7 +335,7 @@ fn get_account_data(
         .consume(gas_costs::STORAGE_READ)
         .is_err()
     {
-        return 1;
+        return -1;
     }
 
     // Get account data
@@ -314,8 +345,21 @@ fn get_account_data(
         None => return -1,
     };
 
-    // TODO: Implement proper memory write
-    account_data.len() as i32
+    // Get memory
+    let memory = match &data.memory {
+        Some(mem) => mem.clone(),
+        None => return -1,
+    };
+    
+    // Write data to WASM memory
+    let view = memory.view(&store);
+    let write_len = account_data.len().min(max_len as usize);
+    
+    if let Err(_) = view.write(ptr as u64, &account_data[..write_len]) {
+        return -1;
+    }
+
+    write_len as i32
 }
 
 /// Get quantum random number
@@ -346,8 +390,10 @@ fn quantum_random(env: FunctionEnvMut<ContractEnv>, max: u32) -> u32 {
 }
 
 /// SHA3 hash
-fn sha3_hash(env: FunctionEnvMut<ContractEnv>, _ptr: u32, _len: u32, _out_ptr: u32) -> i32 {
-    let data = env.data();
+fn sha3_hash(mut env: FunctionEnvMut<ContractEnv>, ptr: u32, len: u32, out_ptr: u32) -> i32 {
+    use sha3::{Digest, Sha3_256};
+    
+    let (data, store) = env.data_and_store_mut();
 
     // Consume gas
     if data
@@ -360,21 +406,42 @@ fn sha3_hash(env: FunctionEnvMut<ContractEnv>, _ptr: u32, _len: u32, _out_ptr: u
         return 1;
     }
 
-    // TODO: Implement proper memory access for hashing
+    // Get memory
+    let memory = match &data.memory {
+        Some(mem) => mem.clone(),
+        None => return 1,
+    };
+    
+    // Read input data
+    let view = memory.view(&store);
+    let mut input = vec![0u8; len as usize];
+    
+    if let Err(_) = view.read(ptr as u64, &mut input) {
+        return 1;
+    }
+
+    // Compute hash
+    let hash = Sha3_256::digest(&input);
+    
+    // Write hash to output
+    if let Err(_) = view.write(out_ptr as u64, hash.as_slice()) {
+        return 1;
+    }
+
     0
 }
 
 /// Verify Falcon signature
 fn falcon_verify(
-    env: FunctionEnvMut<ContractEnv>,
-    _msg_ptr: u32,
-    _msg_len: u32,
-    _sig_ptr: u32,
-    _sig_len: u32,
-    _pk_ptr: u32,
-    _pk_len: u32,
+    mut env: FunctionEnvMut<ContractEnv>,
+    msg_ptr: u32,
+    msg_len: u32,
+    sig_ptr: u32,
+    sig_len: u32,
+    pk_ptr: u32,
+    pk_len: u32,
 ) -> i32 {
-    let data = env.data();
+    let (data, store) = env.data_and_store_mut();
 
     // Consume gas for signature verification
     if data
@@ -387,8 +454,37 @@ fn falcon_verify(
         return 1;
     }
 
-    // TODO: Implement proper memory access for signature verification
-    0
+    // Get memory
+    let memory = match &data.memory {
+        Some(mem) => mem.clone(),
+        None => return 1,
+    };
+    
+    let view = memory.view(&store);
+    
+    // Read message
+    let mut message = vec![0u8; msg_len as usize];
+    if let Err(_) = view.read(msg_ptr as u64, &mut message) {
+        return 1;
+    }
+    
+    // Read signature
+    let mut signature = vec![0u8; sig_len as usize];
+    if let Err(_) = view.read(sig_ptr as u64, &mut signature) {
+        return 1;
+    }
+    
+    // Read public key
+    let mut public_key = vec![0u8; pk_len as usize];
+    if let Err(_) = view.read(pk_ptr as u64, &mut public_key) {
+        return 1;
+    }
+
+    // Verify signature
+    match crate::contract::quantum_primitives::verify_falcon_signature(&message, &signature, &public_key) {
+        Ok(true) => 0,
+        _ => 1,
+    }
 }
 
 /// Get current block height
