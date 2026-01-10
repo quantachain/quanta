@@ -47,12 +47,13 @@ RUN mkdir -p /home/quanta/data && \
 
 USER quanta
 
-# Expose API and P2P ports
-EXPOSE 3000 7000
+# Expose ports for multi-node setup
+# API ports (3000-3002), P2P ports (8333-8335), RPC ports (7782-7784), Metrics (9090-9092)
+EXPOSE 3000 3001 3002 8333 8334 8335 7782 7783 7784 9090 9091 9092
 
-# Health check
+# Health check (dynamic port based on config)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+    CMD curl -f http://localhost:${API_PORT:-3000}/health || exit 1
 
 # Default command
 CMD ["quanta", "start", "-c", "/home/quanta/quanta.toml"]

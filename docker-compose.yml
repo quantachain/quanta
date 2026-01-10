@@ -1,85 +1,112 @@
-# Docker Compose for QUANTA Development and Testing
+# Docker Compose for QUANTA Multi-Node Setup
+# 3 Nodes: 1 Main Node + 1 Mining Node + 1 Peer Node
 
 version: '3.8'
 
 services:
-  # Primary node
+  # ========================================
+  # NODE 1 - Main/Primary Node
+  # ========================================
   node1:
     build: .
     container_name: quanta-node1
+    hostname: quanta-node1
     ports:
-      - "3000:3000"
-      - "7000:7000"
+      - "3000:3000"    # API port
+      - "8333:8333"    # P2P network port
+      - "7782:7782"    # RPC port
+      - "9090:9090"    # Metrics port
     volumes:
-      - node1_data:/home/quanta/data
-      - ./quanta.toml:/home/quanta/quanta.toml:ro
+      - node1_data:/home/quanta/quanta_data_node1
+      - ./quanta-node1.toml:/home/quanta/quanta.toml:ro
     environment:
       - RUST_LOG=info
+      - QUANTA_NODE_NAME=node1
     networks:
-      - quanta-network
-    command: ["quanta", "start", "--port", "3000", "--network-port", "7000"]
+      quanta-network:
+        ipv4_address: 172.20.0.10
+    command: ["quanta", "start", "-c", "/home/quanta/quanta.toml"]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
+    restart: unless-stopped
 
-  # Secondary node (peer)
-  node2:
+  # ========================================
+  # NODE 2 - Mining Node (Dedicated Miner)
+  # ========================================
+  node2-miner:
     build: .
-    container_name: quanta-node2
+    container_name: quanta-node2-miner
+    hostname: quanta-node2-miner
     ports:
-      - "3001:3000"
-      - "7001:7000"
+      - "3001:3001"    # API port
+      - "8334:8334"    # P2P network port
+      - "7783:7783"    # RPC port
+      - "9091:9091"    # Metrics port
     volumes:
-      - node2_data:/home/quanta/data
-      - ./quanta.toml:/home/quanta/quanta.toml:ro
+      - node2_data:/home/quanta/quanta_data_node2
+      - ./quanta-node2.toml:/home/quanta/quanta.toml:ro
     environment:
       - RUST_LOG=info
+      - QUANTA_NODE_NAME=node2-miner
     networks:
-      - quanta-network
-    command: ["quanta", "start", "--port", "3000", "--network-port", "7000", "--bootstrap", "node1:7000"]
+      quanta-network:
+        ipv4_address: 172.20.0.11
+    command: ["quanta", "start", "-c", "/home/quanta/quanta.toml"]
     depends_on:
       - node1
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
+    restart: unless-stopped
 
-  # Third node (peer)
+  # ========================================
+  # NODE 3 - Peer Node
+  # ========================================
   node3:
     build: .
     container_name: quanta-node3
+    hostname: quanta-node3
     ports:
-      - "3002:3000"
-      - "7002:7000"
+      - "3002:3002"    # API port
+      - "8335:8335"    # P2P network port
+      - "7784:7784"    # RPC port
+      - "9092:9092"    # Metrics port
     volumes:
-      - node3_data:/home/quanta/data
-      - ./quanta.toml:/home/quanta/quanta.toml:ro
+      - node3_data:/home/quanta/quanta_data_node3
+      - ./quanta-node3.toml:/home/quanta/quanta.toml:ro
     environment:
       - RUST_LOG=info
+      - QUANTA_NODE_NAME=node3
     networks:
-      - quanta-network
-    command: ["quanta", "start", "--port", "3000", "--network-port", "7000", "--bootstrap", "node1:7000,node2:7000"]
+      quanta-network:
+        ipv4_address: 172.20.0.12
+    command: ["quanta", "start", "-c", "/home/quanta/quanta.toml"]
     depends_on:
       - node1
-      - node2
+      - node2-miner
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
+    restart: unless-stopped
 
-  # Prometheus for metrics
+  # ========================================
+  # Prometheus - Metrics Collection
+  # ========================================
   prometheus:
     image: prom/prometheus:latest
     container_name: quanta-prometheus
     ports:
-      - "9090:9090"
+      - "9093:9090"    # Changed to avoid conflict with node1 metrics
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -88,8 +115,13 @@ services:
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    restart: unless-stopped
 
-  # Grafana for visualization
+  # ========================================
+  # Grafana - Metrics Visualization
+  # ========================================
   grafana:
     image: grafana/grafana:latest
     container_name: quanta-grafana
@@ -100,20 +132,37 @@ services:
       - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=quanta2026
       - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3030
     networks:
       - quanta-network
     depends_on:
       - prometheus
+    restart: unless-stopped
 
+# ========================================
+# Networks
+# ========================================
 networks:
   quanta-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
 
+# ========================================
+# Persistent Volumes
+# ========================================
 volumes:
   node1_data:
+    driver: local
   node2_data:
+    driver: local
   node3_data:
+    driver: local
   prometheus_data:
+    driver: local
   grafana_data:
+    driver: local

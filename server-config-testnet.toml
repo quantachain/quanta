@@ -1,0 +1,73 @@
+# QUANTA Testnet Production Configuration
+# Server: 207.148.73.146
+# DNS: api.testnet.quantachain.org, seed.testnet.quantachain.org, testnet.quantachain.org
+
+version = 1
+
+[node]
+# API server port
+api_port = 3000
+
+# P2P network port
+network_port = 8333
+
+# RPC server port (for daemon control)
+rpc_port = 7782
+
+# Database path
+db_path = "./quanta_data_node1"
+
+# Enable P2P networking
+no_network = false
+
+[network]
+# Maximum number of peers
+max_peers = 125
+
+# Bootstrap nodes - initially empty, will be populated as network grows
+bootstrap_nodes = []
+
+# DNS seeds for peer discovery
+dns_seeds = ["seed.testnet.quantachain.org"]
+
+[consensus]
+max_block_transactions = 2000
+max_block_size_bytes = 1_048_576  # 1 MB
+min_transaction_fee_microunits = 100  # 0.0001 QUA
+transaction_expiry_blocks = 8640  # ~24 hours at 10s blocks
+coinbase_maturity = 100  # Blocks before mining reward is spendable
+
+[security]
+max_mempool_size = 5000
+transaction_expiry_seconds = 86400  # 24 hours
+enable_rate_limiting = true
+rate_limit_per_minute = 60
+
+[mining]
+# Year 1 tokenomics
+year_1_reward_microunits = 100_000_000  # 100 QUA
+annual_reduction_percent = 15
+min_reward_microunits = 5_000_000  # 5 QUA floor
+blocks_per_year = 3_153_600
+
+# Early adopter bonus
+early_adopter_bonus_blocks = 100_000
+early_adopter_multiplier = 1.5
+bootstrap_phase_blocks = 315_360
+
+# Vesting
+mining_reward_lock_percent = 50
+mining_reward_lock_blocks = 157_680  # 6 months
+
+# Fee distribution
+fee_burn_percent = 70
+fee_treasury_percent = 20
+fee_validator_percent = 10
+
+# Timing
+target_block_time = 10
+difficulty_adjustment_interval = 10
+
+[metrics]
+enabled = true
+port = 9090

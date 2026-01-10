@@ -106,21 +106,21 @@ cargo install cargo-watch cargo-audit cargo-outdated
 
 ```
 quanta/
-├── src/
-│   ├── main.rs                 # Entry point
-│   ├── lib.rs                  # Library root
-│   ├── api/                    # REST API handlers
-│   ├── consensus/              # Blockchain and consensus logic
-│   ├── core/                   # Block and transaction structures
-│   ├── crypto/                 # Cryptography (Falcon, Kyber, wallets)
-│   ├── network/                # P2P networking
-│   ├── rpc/                    # JSON-RPC server
-│   └── storage/                # Database layer
-├── tests/                      # Integration tests
-├── Cargo.toml                  # Dependencies
-├── WHITEPAPER.md              # Technical specification
-├── TOKENOMICS.md              # Economic model
-└── CONTRIBUTING.md            # This file
+ src/
+    main.rs                 # Entry point
+    lib.rs                  # Library root
+    api/                    # REST API handlers
+    consensus/              # Blockchain and consensus logic
+    core/                   # Block and transaction structures
+    crypto/                 # Cryptography (Falcon, Kyber, wallets)
+    network/                # P2P networking
+    rpc/                    # JSON-RPC server
+    storage/                # Database layer
+ tests/                      # Integration tests
+ Cargo.toml                  # Dependencies
+ WHITEPAPER.md              # Technical specification
+ TOKENOMICS.md              # Economic model
+ CONTRIBUTING.md            # This file
 ```
 
 ---

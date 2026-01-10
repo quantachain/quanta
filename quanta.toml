@@ -43,11 +43,7 @@ bootstrap_nodes = [
 
 # DNS seeds for peer discovery (domain names that resolve to peer IPs)
 # These will return multiple IP addresses for decentralized discovery
-dns_seeds = [
-    "seed.testnet.quanta.network",
-    "nodes.testnet.quanta.network",
-    "peers.testnet.quanta.network",
-]
+   dns_seeds = ["seed.testnet.quantachain.org"]
 
 # Mainnet bootstrap nodes (planned for Q1 2027)
 # Uncomment for mainnet:
@@ -60,52 +56,3 @@ dns_seeds = [
 #     "mainnet-ap-northeast.quanta.network:8333",
 # ]
 
-#  CONSENSUS CONFIG - MUST MATCH NETWORK 
-[consensus]
-max_block_transactions = 2000
-max_block_size_bytes = 1_048_576  # 1 MB
-min_transaction_fee_microunits = 100  # 0.0001 QUA
-transaction_expiry_blocks = 8640  # ~24 hours at 10s blocks
-coinbase_maturity = 100  # Blocks before mining reward is spendable
-
-# Node-local security preferences
-[security]
-max_mempool_size = 5000
-transaction_expiry_seconds = 86400  # 24 hours
-
-#  PRODUCTION SECURITY (enable before testnet launch)
-enable_rate_limiting = true         # Prevent API abuse
-rate_limit_per_minute = 60          # Max 60 requests/min per IP
-enable_peer_banning = true          # Auto-ban malicious peers
-require_tls = false                 # Set true for public RPC nodes
-
-#  FOR PUBLIC NODES: Set require_tls = true and configure TLS certificates
-
-[mining]
-# Adaptive tokenomics with annual reduction (Solana-style)
-year_1_reward_microunits = 100_000_000  # 100 QUA starting reward
-annual_reduction_percent = 15            # 15% reduction per year
-min_reward_microunits = 5_000_000       # 5 QUA minimum floor
-blocks_per_year = 3_153_600             # Blocks per year calculation
-
-# Early adopter incentives
-early_adopter_bonus_blocks = 100_000    # First ~11.5 days get bonus
-early_adopter_multiplier = 1.5          # 1.5x rewards multiplier
-bootstrap_phase_blocks = 315_360        # First month dynamic adjustments
-
-# Mining reward vesting (anti-dump mechanism)
-mining_reward_lock_percent = 50         # 50% locked
-mining_reward_lock_blocks = 157_680     # 6 months vesting
-
-# Fee distribution
-fee_burn_percent = 70                   # 70% burned (deflationary)
-fee_treasury_percent = 20               # 20% to development
-fee_validator_percent = 10              # 10% to miner
-
-# Blockchain timing
-target_block_time = 10                  # 10 seconds
-difficulty_adjustment_interval = 10     # Adjust every 10 blocks
-
-[metrics]
-enabled = true
-port = 9090
