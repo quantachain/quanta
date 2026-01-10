@@ -1,5 +1,5 @@
 # Dockerfile for QUANTA Blockchain Node
-FROM rust:1.75-slim as builder
+FROM rust:latest as builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -9,23 +9,15 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy manifests
+# Copy all source files
 COPY Cargo.toml Cargo.lock ./
-
-# Create dummy main to cache dependencies
-RUN mkdir src && \
-    echo "fn main() {}" > src/main.rs && \
-    cargo build --release && \
-    rm -rf src
-
-# Copy actual source code
 COPY src ./src
 
 # Build for release
 RUN cargo build --release
 
 # Runtime stage
-FROM debian:bookworm-slim
+FROM debian:sid-slim
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
@@ -40,10 +32,14 @@ WORKDIR /home/quanta
 # Copy binary from builder
 COPY --from=builder /app/target/release/quanta /usr/local/bin/quanta
 COPY --chown=quanta:quanta quanta.toml /home/quanta/quanta.toml
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# Create data directory
-RUN mkdir -p /home/quanta/data && \
-    chown -R quanta:quanta /home/quanta
+# Create data directories and set permissions
+RUN mkdir -p /home/quanta/quanta_data_node1 \
+             /home/quanta/quanta_data_node2 \
+             /home/quanta/quanta_data_node3 && \
+    chown -R quanta:quanta /home/quanta && \
+    chmod +x /usr/local/bin/entrypoint.sh
 
 USER quanta
 
@@ -54,6 +50,9 @@ EXPOSE 3000 3001 3002 8333 8334 8335 7782 7783 7784 9090 9091 9092
 # Health check (dynamic port based on config)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:${API_PORT:-3000}/health || exit 1
+
+# Set entrypoint
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 
 # Default command
 CMD ["quanta", "start", "-c", "/home/quanta/quanta.toml"]
