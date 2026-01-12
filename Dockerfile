@@ -32,6 +32,7 @@ WORKDIR /home/quanta
 # Copy binary from builder
 COPY --from=builder /app/target/release/quanta /usr/local/bin/quanta
 COPY --chown=quanta:quanta quanta.toml /home/quanta/quanta.toml
+COPY --chown=quanta:quanta server-config-testnet.toml /home/quanta/server-config-testnet.toml
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY testnet_entrypoint.sh /usr/local/bin/testnet_entrypoint.sh
 
@@ -44,6 +45,7 @@ RUN mkdir -p /home/quanta/quanta_data_node1 \
     /home/quanta/quanta_data_node2 \
     /home/quanta/quanta_data_node3 \
     /home/quanta/quanta_data_testnet \
+    /home/quanta/quanta_data_testnet_node2 \
     /home/quanta/logs && \
     chown -R quanta:quanta /home/quanta && \
     chmod +x /usr/local/bin/entrypoint.sh && \

@@ -39,11 +39,11 @@ services:
       - API_PORT=13001
       - P2P_PORT=18334
       - RPC_PORT=17783
-      - QUANTA_DB_PATH=./quanta_data_testnet
+      - QUANTA_DB_PATH=./quanta_data_testnet_node2
       - BOOTSTRAP_PEER=node1:18333
     volumes:
       - ./testnet_entrypoint.sh:/usr/local/bin/testnet_entrypoint.sh
-      - node2_data:/home/quanta/quanta_data_testnet
+      - node2_data:/home/quanta/quanta_data_testnet_node2
       - node2_logs:/home/quanta/logs
     ports:
       - "13001:13001"

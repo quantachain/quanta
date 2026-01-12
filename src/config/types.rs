@@ -216,7 +216,6 @@ impl QuantaConfig {
                     if config.node.db_path == "./quanta_data" { config.node.db_path = "./quanta_data_testnet".to_string(); }
                     
                     // Add testnet seed
-                    config.network.dns_seeds = vec!["seed.testnet.quantachain.org".to_string()];
                 },
                 "mainnet" => {
                     config.network_type = ChainNetwork::Mainnet;

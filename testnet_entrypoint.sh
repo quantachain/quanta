@@ -41,7 +41,7 @@ echo ""
 # Start Node
 echo "=== Starting QUANTA Node ==="
 # Build command with optional bootstrap
-CMD="/usr/local/bin/quanta start --network testnet --port ${API_PORT} --network-port ${P2P_PORT} --rpc-port ${RPC_PORT} --db ${DATA_DIR}"
+CMD="/usr/local/bin/quanta start --config /home/quanta/server-config-testnet.toml --network testnet --port ${API_PORT} --network-port ${P2P_PORT} --rpc-port ${RPC_PORT} --db ${DATA_DIR}"
 
 if [ ! -z "${BOOTSTRAP_PEER}" ]; then
     echo "Connecting to bootstrap peer: ${BOOTSTRAP_PEER}"
@@ -50,7 +50,7 @@ else
     echo "Running as bootstrap node (no peers specified)"
 fi
 
-CMD="$CMD --detach"
+# CMD="$CMD --detach"  # Temporarily disabled for testing
 
 echo "Executing: $CMD"
 eval $CMD

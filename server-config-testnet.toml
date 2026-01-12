@@ -29,7 +29,8 @@ max_peers = 125
 bootstrap_nodes = []
 
 # DNS seeds for peer discovery
-dns_seeds = ["seed.testnet.quantachain.org"]
+# dns_seeds = ["seed.testnet.quantachain.org"]
+dns_seeds = []
 
 [consensus]
 max_block_transactions = 2000
@@ -43,6 +44,8 @@ max_mempool_size = 5000
 transaction_expiry_seconds = 86400  # 24 hours
 enable_rate_limiting = true
 rate_limit_per_minute = 60
+enable_peer_banning = true
+require_tls = false  # Set true for public nodes
 
 [mining]
 # Year 1 tokenomics
