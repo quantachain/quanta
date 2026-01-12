@@ -17,7 +17,7 @@ pub struct WalletKeys {
 impl WalletKeys {
     #[wasm_bindgen(constructor)]
     pub fn new() -> WalletKeys {
-        // SIMULATION MODE
+        // DEV BUILD: Generating valid-length keys for UI testing
         let mut pk = vec![0u8; FALCON_PK_SIZE];
         let mut sk = vec![0u8; FALCON_SK_SIZE];
         getrandom::getrandom(&mut pk).unwrap_or(());
@@ -32,9 +32,6 @@ impl WalletKeys {
 
     pub fn from_private(secret_hex: &str) -> Result<WalletKeys, JsValue> {
         let sec_key = hex::decode(secret_hex).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        if sec_key.len() != FALCON_SK_SIZE {
-             // Allow flexible size for impact testing if needed, but warn
-        }
         
         let mut hasher = Sha3_256::new();
         hasher.update(&sec_key);
@@ -68,18 +65,15 @@ impl WalletKeys {
     }
 
     pub fn sign_message(&self, message_hex: &str) -> Result<String, JsValue> {
-        // SIMULATION MODE
         let mut sig = vec![0u8; FALCON_SIG_SIZE];
         getrandom::getrandom(&mut sig).unwrap_or(());
         
+        // Make signature dependent on message for Simulation realism
         let message_bytes = hex::decode(message_hex).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let mut hasher = Sha3_256::new();
         hasher.update(&message_bytes);
         let hash = hasher.finalize();
-        
-        for i in 0..32 {
-            sig[i+1] = hash[i]; 
-        }
+        for i in 0..32 { sig[i] = hash[i]; }
         
         Ok(hex::encode(sig))
     }

@@ -3,139 +3,210 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quanta Wallet</title>
+    <title>Quanta</title>
     <link rel="stylesheet" href="styles.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <!-- Fonts are imported in CSS via Google Fonts -->
 </head>
 
 <body>
-    <div class="container">
-        <!-- Header -->
-        <div class="header">
-            <div class="logo-section">
-                <img src="icons/icon48.png" alt="Quanta Logo">
-                <span class="brand-name">QUANTA</span>
-            </div>
-            <div class="status-indicator">
-                <div id="connectionStatus" class="status-dot"></div>
-                <span id="statusText">Offline</span>
+
+    <!-- Header -->
+    <div class="header">
+        <div id="headerLeft" style="cursor: pointer; width: 24px; height: 24px; color: var(--text-main);"></div>
+        <div class="header-title" id="pageTitle">Wallet</div>
+        <div id="headerRight" style="width: 24px;"></div> <!-- Spacer -->
+    </div>
+
+    <!-- 1. DASHBOARD WITH TABS -->
+    <div id="walletView" class="view active">
+        <!-- Hero -->
+        <div class="hero-card">
+            <div class="balance-val">$<span id="balanceDisplay">0.00</span></div>
+            <div class="address-pill" id="addrPill">
+                <span id="addressDisplay">0x00...0000</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
             </div>
         </div>
 
-        <!-- 1. Welcome View -->
-        <div id="welcomeView" class="view active">
-            <div style="flex: 1; display: flex; flex-direction: column; justify-content: center; text-align: center;">
-                <h2 style="font-size: 28px; margin-bottom: 8px;">Future Secured</h2>
-                <p>Post-Quantum Cryptography for the decentralized web.</p>
+        <!-- Actions -->
+        <div class="actions-row">
+            <div class="action-item" id="navSend">
+                <div class="circle-btn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="19" x2="12" y2="5"></line>
+                        <polyline points="5 12 12 5 19 12"></polyline>
+                    </svg></div>
+                <div class="action-label">Send</div>
             </div>
-            <div class="btn-container">
-                <button id="createWalletBtn" class="btn btn-primary">Create New Wallet</button>
-                <button id="importWalletBtn" class="btn btn-secondary">Import Existing Wallet</button>
+            <div class="action-item" id="navReceive">
+                <div class="circle-btn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <polyline points="19 12 12 19 5 12"></polyline>
+                    </svg></div>
+                <div class="action-label">Receive</div>
             </div>
-        </div>
-
-        <!-- 2. Create Wallet View -->
-        <div id="createWalletView" class="view">
-            <h3>Secret Recovery Key</h3>
-            <p>This is the ONLY way to recover your wallet. Save it somewhere safe.</p>
-
-            <div class="input-group">
-                <textarea id="newPrivateKey" rows="5" readonly onclick="this.select()"></textarea>
-            </div>
-
-            <div class="warning-box">
-                <span>⚠️</span>
-                <span>Never share this key with anyone. Quanta cannot recover lost keys.</span>
-            </div>
-
-            <div class="btn-container">
-                <button id="confirmSavedBtn" class="btn btn-primary">I have saved it</button>
-                <button id="backToWelcomeBtn" class="btn btn-secondary">Back</button>
+            <div class="action-item" style="opacity:0.5;">
+                <div class="circle-btn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" stroke-width="2">
+                        <path d="M21 12V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v5"></path>
+                        <polyline points="1 12 11 12 14 12 23 12"></polyline>
+                        <path d="M22 17v1a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1"></path>
+                    </svg></div>
+                <div class="action-label">Buy</div>
             </div>
         </div>
 
-        <!-- 3. Main Dashboard View -->
-        <div id="walletView" class="view">
-            <div class="card">
-                <div class="balance-label">Total Balance</div>
-                <div class="balance-amount"><span id="balanceDisplay">0.00</span> <span
-                        style="font-size: 0.5em; opacity: 0.7;">QUA</span></div>
-                <div id="addressDisplay" class="address-pill" title="Click to Copy">
-                    <span id="shortAddress">0x000...0000</span>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                    </svg>
+        <!-- Tabs -->
+        <div class="tabs">
+            <div class="tab active">Tokens</div>
+            <div class="tab">Activity</div>
+        </div>
+
+        <!-- Content -->
+        <div id="tokenList">
+            <div class="activity-item">
+                <div style="display:flex; align-items:center; gap:14px;">
+                    <img src="icons/icon48.png" width="40" style="border-radius:50%;">
+                    <div>
+                        <div style="font-weight:700; font-size:16px;">Quanta</div>
+                        <div style="font-size:13px; color:var(--text-muted);">0.00 QUA</div>
+                    </div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-weight:700;">$0.00</div>
+                    <div style="font-size:12px; color:#00E599;">+0.5%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Activity List (Hidden initially) -->
+        <div id="activityList" style="display:none;">
+            <div class="activity-item">
+                <div style="display:flex; align-items:center; gap:14px;">
+                    <div class="icon-box" style="background:rgba(0, 229, 153, 0.1); color:#00E599;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
+                            <polyline points="17 6 23 6 23 12"></polyline>
+                        </svg>
+                    </div>
+                    <div>
+                        <div style="font-weight:600;">Received</div>
+                        <div style="font-size:12px; color:var(--text-muted);">From: 0x8a...9f1</div>
+                    </div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-weight:600; color:#00E599;">+50 QUA</div>
+                    <div style="font-size:12px; color:var(--text-muted);">2m ago</div>
                 </div>
             </div>
 
-            <div class="action-grid">
-                <button id="sendViewBtn" class="btn btn-primary btn-icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <line x1="22" y1="2" x2="11" y2="13"></line>
-                        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-                    </svg>
-                    Send
-                </button>
-                <button id="receiveViewBtn" class="btn btn-secondary btn-icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                    Receive
-                </button>
-            </div>
-
-            <div class="btn-container">
-                <button id="logoutBtn" class="btn btn-secondary" style="font-size: 12px; opacity: 0.7;">Lock
-                    Wallet</button>
-            </div>
-        </div>
-
-        <!-- 4. Send View -->
-        <div id="sendView" class="view">
-            <h3>Send QUA</h3>
-
-            <div class="input-group">
-                <label>Recipient Address</label>
-                <input type="text" id="recipientInput" placeholder="0xc9b..." spellcheck="false">
-            </div>
-
-            <div class="input-group">
-                <label>Amount (QUA)</label>
-                <input type="number" id="amountInput" placeholder="0.00" step="0.000001">
-            </div>
-
-            <div id="sendFeedback" style="display:none; margin-bottom: 16px; font-size: 13px;"></div>
-
-            <div class="btn-container">
-                <button id="confirmSendBtn" class="btn btn-primary">Sign & Send</button>
-                <button id="cancelSendBtn" class="btn btn-secondary">Cancel</button>
-            </div>
-        </div>
-
-        <!-- 5. Receive View -->
-        <div id="receiveView" class="view">
-            <h3>Receive QUA</h3>
-            <div class="card" style="padding: 16px;">
-                <div
-                    style="background: white; padding: 16px; border-radius: 8px; display: inline-block; margin-bottom: 16px;">
-                    <!-- Placeholder for QR - In real app use a QR lib -->
-                    <div style="width: 150px; height: 150px; background: #000; opacity: 0.1;"></div>
-                    <p style="color: #000; font-size: 10px; margin: 0; margin-top: 4px;">QR Code Placeholder</p>
+            <div class="activity-item">
+                <div style="display:flex; align-items:center; gap:14px;">
+                    <div class="icon-box" style="background:rgba(239, 68, 68, 0.1); color:#EF4444;">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <line x1="12" y1="19" x2="12" y2="5"></line>
+                            <polyline points="5 12 12 5 19 12"></polyline>
+                        </svg>
+                    </div>
+                    <div>
+                        <div style="font-weight:600;">Sent</div>
+                        <div style="font-size:12px; color:var(--text-muted);">To: 0xc4...b2a</div>
+                    </div>
                 </div>
-                <div style="word-break: break-all; font-family: monospace; font-size: 11px; color: var(--text-muted);">
-                    <span id="fullAddressDisplay">0x...</span>
+                <div style="text-align:right;">
+                    <div style="font-weight:600;">-12.5 QUA</div>
+                    <div style="font-size:12px; color:var(--text-muted);">1h ago</div>
                 </div>
             </div>
-            <div class="btn-container">
-                <button id="copyAddressBtn" class="btn btn-primary">Copy Address</button>
-                <button id="backFromReceiveBtn" class="btn btn-secondary">Back</button>
-            </div>
+        </div>
+    </div>
+
+    <!-- 2. OTHER VIEWS (WELCOME, SEND, RECEIVE...) -->
+    <!-- (Reusing structure with new classes) -->
+
+    <div id="welcomeView" class="view" style="justify-content:center; align-items:center;">
+        <h1 style="font-family:'Space Grotesk'; font-size:32px; margin-bottom:10px;">Quanta</h1>
+        <p style="color:var(--text-muted); margin-bottom:40px;">Next Gen Crypto Wallet</p>
+        <button id="createWalletBtn" class="btn-main">Get Started</button>
+    </div>
+
+    <!-- 3. SEND -->
+    <div id="sendView" class="view">
+        <label style="color:var(--text-muted); font-size:12px; margin: 10px 0 6px 4px;">Recipient</label>
+        <div class="input-group">
+            <input id="recipientInput" placeholder="Address or ENS">
         </div>
 
+        <label style="color:var(--text-muted); font-size:12px; margin: 10px 0 6px 4px;">Amount (QUA)</label>
+        <div class="input-group" style="display:flex; align-items:center;">
+            <input id="amountInput" type="number" placeholder="0.00" style="font-weight:700; font-size:24px;">
+            <button
+                style="background:#222; border:none; color:white; padding:6px 12px; border-radius:8px; margin-right:8px; font-size:12px; cursor:pointer;">MAX</button>
+        </div>
+
+        <div style="flex:1;"></div>
+        <button id="broadcastBtn" class="btn-main">Review</button>
+    </div>
+
+    <!-- 4. RECEIVE (Keeping simple) -->
+    <div id="receiveView" class="view" style="align-items:center; justify-content:center;">
+        <div style="background:white; padding:12px; border-radius:24px;">
+            <div
+                style="width:200px; height:200px; background:#ddd; border-radius:12px; display:flex; align-items:center; justify-content:center; color:#333;">
+                QR Code</div>
+        </div>
+        <div id="fullAddress"
+            style="font-family:'JetBrains Mono'; color:var(--text-muted); margin-top:20px; font-size:13px; text-align:center; width:80%; word-break:break-all;">
+            0x00...</div>
+        <button id="copyBtn" class="btn-main" style="margin-top:20px; width:auto; padding:12px 30px;">Copy
+            Address</button>
+    </div>
+
+    <!-- 5. SETTINGS (Menu) -->
+    <div id="settingsView" class="view">
+        <div style="margin-top:10px;">
+            <div class="activity-item" style="cursor:pointer;" id="navReveal">
+                <div>Show Secret Key</div>
+                <div style="color:var(--text-muted);">></div>
+            </div>
+            <div class="activity-item" style="cursor:pointer;" id="navNetwork">
+                <div>Network</div>
+                <div style="color:var(--text-muted);" id="currentNetLabel">Testnet ></div>
+            </div>
+            <div class="activity-item" style="cursor:pointer;" id="doLogout">
+                <div style="color:#EF4444;">Log Out</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 6. NETWORK SELECT -->
+    <div id="networkView" class="view">
+        <div class="activity-item" style="cursor:pointer;" id="selTestnet">
+            <div>Testnet</div>
+            <div style="color:#00E599;" id="checkTestnet">●</div>
+        </div>
+        <div class="activity-item" style="cursor:pointer;" id="selLocal">
+            <div>Localhost</div>
+            <div style="color:#00E599; opacity:0;" id="checkLocal">●</div>
+        </div>
+    </div>
+
+    <!-- 7. REVEAL -->
+    <div id="revealView" class="view">
+        <div
+            style="background:#FF333322; color:#FF9999; padding:20px; border-radius:16px; font-size:13px; margin-top:20px;">
+            Warning: Never share this key.
+        </div>
+        <div id="secretBox"
+            style="margin-top:20px; padding:20px; background:#111; border-radius:16px; filter:blur(8px); cursor:pointer; font-family:'JetBrains Mono'; word-break:break-all;">
+            CLICK TO REVEAL
+        </div>
     </div>
 
     <script type="module" src="popup.js"></script>
