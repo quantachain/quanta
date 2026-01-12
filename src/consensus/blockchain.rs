@@ -482,7 +482,8 @@ impl Blockchain {
         }
         
         // 3. Difficulty must match expected
-        let expected_difficulty = previous.difficulty; // Should derive from adjustment logic
+        // Calculate expected difficulty considering adjustments
+        let expected_difficulty = self.calculate_next_difficulty();
         if block.difficulty != expected_difficulty {
             return Err(BlockchainError::InvalidDifficulty);
         }
