@@ -1,10 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use config::{Config, ConfigError, File};
+use crate::core::ChainNetwork;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuantaConfig {
     pub version: u32,
+    pub network_type: ChainNetwork,
     pub node: NodeConfig,
     pub network: NetworkConfig,
     pub consensus: ConsensusConfig,
@@ -91,6 +93,7 @@ impl Default for QuantaConfig {
     fn default() -> Self {
         Self {
             version: 1,
+            network_type: ChainNetwork::Mainnet,
             node: NodeConfig {
                 api_port: 3000,
                 network_port: 8333,
@@ -170,6 +173,7 @@ impl QuantaConfig {
         network_port: Option<u16>,
         db_path: Option<String>,
         bootstrap: Option<String>,
+        network_name: Option<String>,
         no_network: bool,
     ) -> Result<Self, ConfigError> {
         let mut config = if let Some(path) = config_file {
@@ -198,6 +202,27 @@ impl QuantaConfig {
         }
         if no_network {
             config.node.no_network = true;
+        }
+        
+        // Handle Network Type Override
+        if let Some(net) = network_name {
+            match net.as_str() {
+                "testnet" => {
+                    config.network_type = ChainNetwork::Testnet;
+                    // Auto-configure testnet defaults if not explicitly set
+                    if config.node.network_port == 8333 { config.node.network_port = 18333; }
+                    if config.node.api_port == 3000 { config.node.api_port = 13000; }
+                    if config.node.rpc_port == 7782 { config.node.rpc_port = 17782; }
+                    if config.node.db_path == "./quanta_data" { config.node.db_path = "./quanta_data_testnet".to_string(); }
+                    
+                    // Add testnet seed
+                    config.network.dns_seeds = vec!["seed.testnet.quantachain.org".to_string()];
+                },
+                "mainnet" => {
+                    config.network_type = ChainNetwork::Mainnet;
+                },
+                _ => {} // Unknown network, keep default or config file value
+            }
         }
 
         Ok(config)

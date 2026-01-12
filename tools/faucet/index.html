@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quanta Testnet Faucet</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            background-color: #0f172a;
+            color: #e2e8f0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            background-color: #1e293b;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+        }
+
+        h1 {
+            color: #38bdf8;
+            margin-bottom: 0.5rem;
+        }
+
+        p {
+            color: #94a3b8;
+            margin-bottom: 2rem;
+        }
+
+        input {
+            width: 100%;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid #334155;
+            background-color: #0f172a;
+            color: #fff;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #38bdf8;
+            box-shadow: 0 0 0 2px #38bdf8;
+        }
+
+        button {
+            width: 100%;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border: none;
+            background-color: #38bdf8;
+            color: #0f172a;
+            font-weight: bold;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        button:hover {
+            background-color: #0ea5e9;
+        }
+
+        button:disabled {
+            background-color: #475569;
+            cursor: not-allowed;
+        }
+
+        #result {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            display: none;
+            word-break: break-all;
+        }
+
+        .success {
+            background-color: #064e3b;
+            color: #6ee7b7;
+            border: 1px solid #059669;
+        }
+
+        .error {
+            background-color: #450a0a;
+            color: #fca5a5;
+            border: 1px solid #dc2626;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Quanta Testnet Faucet</h1>
+        <p>Get 100 Testnet QUA every 24 hours.</p>
+
+        <input type="text" id="address" placeholder="Enter your Quanta wallet address" />
+        <button onclick="requestCoins()" id="btn">Request 100 QUA</button>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function requestCoins() {
+            const address = document.getElementById('address').value.trim();
+            const btn = document.getElementById('btn');
+            const resultDiv = document.getElementById('result');
+
+            if (!address) {
+                showResult('Please enter a wallet address', false);
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Requesting...';
+            resultDiv.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/faucet', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ address })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showResult(`Success! Coins sent.`, true);
+                    console.log(data);
+                } else {
+                    showResult(data.error || 'Failed to request coins', false);
+                }
+            } catch (err) {
+                showResult('Network error. Please try again.', false);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Request 100 QUA';
+            }
+        }
+
+        function showResult(term, isSuccess) {
+            const resultDiv = document.getElementById('result');
+            resultDiv.className = isSuccess ? 'success' : 'error';
+            resultDiv.textContent = term;
+            resultDiv.style.display = 'block';
+        }
+    </script>
+</body>
+
+</html>

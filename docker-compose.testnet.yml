@@ -1,0 +1,68 @@
+services:
+  node1:
+    build: .
+    container_name: quanta-testnet-node1
+    hostname: node1
+    environment:
+      - QUANTA_WALLET_PASSWORD=testnet_insecure_password
+      - ENABLE_MINING=true
+      - API_PORT=13000
+      - P2P_PORT=18333
+      - RPC_PORT=17782
+      - QUANTA_DB_PATH=./quanta_data_testnet
+      - BOOTSTRAP_PEER=
+      - RUST_BACKTRACE=1
+    volumes:
+      - ./testnet_entrypoint.sh:/usr/local/bin/testnet_entrypoint.sh
+      - node1_data:/home/quanta/quanta_data_testnet
+      - node1_logs:/home/quanta/logs
+    ports:
+      - "13000:13000"
+      - "18333:18333"
+      - "17782:17782"
+    entrypoint: [ "/bin/bash", "/usr/local/bin/testnet_entrypoint.sh" ]
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:13000/health" ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  node2:
+    build: .
+    container_name: quanta-testnet-node2
+    hostname: node2
+    environment:
+      - QUANTA_WALLET_PASSWORD=testnet_insecure_password
+      - ENABLE_MINING=false # Just syncs
+      - API_PORT=13001
+      - P2P_PORT=18334
+      - RPC_PORT=17783
+      - QUANTA_DB_PATH=./quanta_data_testnet
+      - BOOTSTRAP_PEER=node1:18333
+    volumes:
+      - ./testnet_entrypoint.sh:/usr/local/bin/testnet_entrypoint.sh
+      - node2_data:/home/quanta/quanta_data_testnet
+      - node2_logs:/home/quanta/logs
+    ports:
+      - "13001:13001"
+      - "18334:18334"
+      - "17783:17783"
+    depends_on:
+      node1:
+        condition: service_healthy
+    entrypoint: [ "/bin/bash", "/usr/local/bin/testnet_entrypoint.sh" ]
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:13001/health" ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  node1_data:
+  node1_logs:
+  node2_data:
+  node2_logs:

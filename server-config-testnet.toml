@@ -3,6 +3,7 @@
 # DNS: api.testnet.quantachain.org, seed.testnet.quantachain.org, testnet.quantachain.org
 
 version = 1
+network_type = "Testnet"
 
 [node]
 # API server port

@@ -1,0 +1,14 @@
+{
+  "name": "quanta-faucet",
+  "version": "1.0.0",
+  "description": "Simple Faucet for Quanta Testnet",
+  "main": "faucet.js",
+  "scripts": {
+    "start": "node faucet.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "rate-limiter-flexible": "^3.0.0",
+    "body-parser": "^1.20.2"
+  }
+}

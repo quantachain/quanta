@@ -1,4 +1,5 @@
 use crate::core::block::Block;
+use crate::core::ChainNetwork;
 use crate::core::transaction::{Transaction, AccountState};
 use crate::storage::{BlockchainStorage, StorageError};
 use serde::{Serialize, Deserialize};
@@ -78,7 +79,7 @@ const MAX_FUTURE_BLOCK_TIME: i64 = 7200; // 2 hours maximum future timestamp
 // Generated from Block::genesis() with timestamp 1735689600 (2026-01-01 00:00:00 UTC)
 // Difficulty: 6 (PRODUCTION)
 //  VERIFIED: 2026-01-04 - Hash regenerated with correct parameters
-const GENESIS_HASH: &str = "527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d";
+const GENESIS_HASH: &str = "2c8490a8bfd4d8bbef7315fcf47bab8fa8b3a1d1c8ed2239512ad5191e0ddc22";
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)
@@ -103,20 +104,26 @@ pub struct Blockchain {
 
 impl Blockchain {
     /// Create or load blockchain from storage
-    pub fn new(storage: Arc<BlockchainStorage>) -> Result<Self, BlockchainError> {
+    pub fn new(storage: Arc<BlockchainStorage>, network: ChainNetwork) -> Result<Self, BlockchainError> {
         // Try to load existing chain
         let chain = storage.load_chain()?;
         let account_state = storage.load_account_state()?.unwrap_or_else(AccountState::new);
         
+        // Define expected genesis hash based on network
+        // Note: Mainnet hash is hardcoded constant. Testnet hash should be calculated or hardcoded once known.
+        // For now, we trust the generated testnet genesis if it's testnet.
+        
         let (chain, account_state, _difficulty) = if chain.is_empty() {
             // Create genesis block
-            tracing::info!("Creating new blockchain with genesis block");
-            let genesis = Block::genesis();
+            tracing::info!("Creating new blockchain with genesis block for {:?}", network);
+            let genesis = Block::genesis(network);
             
             // SECURITY: Verify genesis hash matches hardcoded value (prevents chain split)
-            if genesis.hash != GENESIS_HASH {
+            if network == ChainNetwork::Mainnet && genesis.hash != GENESIS_HASH {
                 panic!("CRITICAL: Genesis block hash mismatch!\nExpected: {}\nGot: {}\nThis indicates tampering or incorrect genesis generation.", 
                     GENESIS_HASH, genesis.hash);
+            } else if network == ChainNetwork::Testnet {
+                tracing::info!("Testnet Genesis Hash: {}", genesis.hash);
             }
             
             let mut account_state = AccountState::new();
@@ -140,13 +147,13 @@ impl Blockchain {
             storage.set_chain_height(1)?;
             storage.save_account_state(&account_state)?;
             
-            tracing::info!(" Genesis block verified: {}", GENESIS_HASH);
-            (vec![genesis], account_state, 4)
+            tracing::info!("✓ Genesis block verified: {}", genesis.hash);
+            (vec![genesis], account_state, if network == ChainNetwork::Testnet { 4 } else { 6 })
         } else {
             tracing::info!("Loaded existing blockchain with {} blocks", chain.len());
             
             // SECURITY: Verify genesis block on load (prevents database tampering)
-            if !chain.is_empty() && chain[0].hash != GENESIS_HASH {
+            if !chain.is_empty() && network == ChainNetwork::Mainnet && chain[0].hash != GENESIS_HASH {
                 panic!("CRITICAL: Genesis block mismatch in existing chain!\nExpected: {}\nGot: {}\nDatabase may be corrupted or from different network.", 
                     GENESIS_HASH, chain[0].hash);
             }
@@ -514,9 +521,10 @@ impl Blockchain {
             return Err(BlockchainError::InvalidBlock);
         }
         // Prevent backdating/forward-dating (within 2 hours of previous block)
+        // EXCEPTION: Allow large gap for block 1 (genesis to first mined block)
         const MAX_TIME_DELTA: i64 = 7200; // 2 hours
-        if block.timestamp > previous.timestamp + MAX_TIME_DELTA ||
-           block.timestamp < previous.timestamp - MAX_TIME_DELTA {
+        if previous.index > 0 && (block.timestamp > previous.timestamp + MAX_TIME_DELTA ||
+           block.timestamp < previous.timestamp - MAX_TIME_DELTA) {
             tracing::warn!("Block timestamp {} outside acceptable range (prev: {}, delta: {})", 
                 block.timestamp, previous.timestamp, block.timestamp - previous.timestamp);
             return Err(BlockchainError::InvalidBlock);

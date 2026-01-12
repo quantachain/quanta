@@ -337,9 +337,8 @@ impl Network {
         if blockchain.add_transaction(tx.clone()).is_ok() {
             info!("Added new transaction to mempool");
             
-            // Broadcast to other peers
-            drop(blockchain);
-            self.broadcast_transaction(tx).await;
+            // NOTE: Do NOT re-broadcast - tx came from peer who already broadcast it
+            // self.broadcast_transaction(tx).await;
         }
         
         Ok(())
@@ -391,9 +390,8 @@ impl Network {
             Ok(_) => {
                 info!("Added new block {} at height {}", &block.hash[..8], block.index);
                 
-                // Broadcast to other peers
-                drop(bc);
-                self.broadcast_block(block).await;
+                // NOTE: Do NOT re-broadcast - block came from peer who already broadcast it
+                // self.broadcast_block(block).await;
                 Ok(())
             }
             Err(e) => Err(format!("Failed to add block: {}", e)),

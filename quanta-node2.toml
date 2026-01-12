@@ -1,5 +1,6 @@
 # QUANTA Node Configuration - NODE 2
 version = 1
+network_type = "Mainnet"
 
 [node]
 # API server port
@@ -22,7 +23,7 @@ no_network = false
 max_peers = 125
 
 # Bootstrap to local node 1
-bootstrap_nodes = ["127.0.0.1:8333"]
+bootstrap_nodes = ["172.20.0.10:8333"]
 
 # DNS seeds for peer discovery
 dns_seeds = ["seed.testnet.quantachain.org"]

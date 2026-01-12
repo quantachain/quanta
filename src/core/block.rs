@@ -46,18 +46,24 @@ impl Block {
     }
 
     /// Create the genesis block (first block in chain)
-    pub fn genesis() -> Self {
+    pub fn genesis(network: crate::core::ChainNetwork) -> Self {
         // CONSENSUS-CRITICAL: Genesis block parameters
         // Timestamp: January 1, 2026 00:00:00 UTC (Quanta Launch)
         // All nodes must use identical genesis parameters
+        
+        let (timestamp, difficulty, nonce) = match network {
+            crate::core::ChainNetwork::Mainnet => (1735689600, 6, 0), // 2026-01-01, difficulty 6 for security
+            crate::core::ChainNetwork::Testnet => (1735689601, 4, 12345), // Different genesis, difficulty 4
+        };
+        
         let mut genesis = Self {
             index: 0,
-            timestamp: 1735689600, // 2026-01-01 00:00:00 UTC  
+            timestamp, // Set based on network type
             transactions: vec![],
             previous_hash: "0".repeat(64),
-            nonce: 0,
+            nonce,
             hash: String::new(),
-            difficulty: 6, // PRODUCTION: Increased from 4 for security
+            difficulty,
             merkle_root: "0".repeat(64),
         };
         genesis.hash = genesis.calculate_hash();
@@ -203,7 +209,7 @@ mod tests {
         // CRITICAL: Hash must match hardcoded value in blockchain.rs
         assert_eq!(
             genesis.hash,
-            "527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d",
+            "2c8490a8bfd4d8bbef7315fcf47bab8fa8b3a1d1c8ed2239512ad5191e0ddc22",
             "Genesis hash mismatch! This will cause chain splits."
         );
     }

@@ -1,5 +1,6 @@
 # QUANTA Node Configuration
 version = 1
+network_type = "Mainnet"
 
 [node]
 # API server port

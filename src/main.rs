@@ -52,6 +52,10 @@ enum Commands {
         #[arg(short = 'c', long)]
         config: Option<String>,
         
+        /// Network type (mainnet or testnet)
+        #[arg(long, default_value = "mainnet")]
+        network: String,
+        
         /// API server port (overrides config)
         #[arg(short, long)]
         port: Option<u16>,
@@ -63,7 +67,7 @@ enum Commands {
         /// RPC server port (overrides config)
         #[arg(short = 'r', long = "rpc-port")]
         rpc_port: Option<u16>,
-        
+
         /// Database path (overrides config)
         #[arg(short, long)]
         db: Option<String>,
@@ -173,6 +177,21 @@ enum Commands {
         /// Wallet file name
         #[arg(short, long, default_value = "wallet.qua")]
         file: String,
+        
+        /// Network type (mainnet or testnet)
+        #[arg(long, default_value = "mainnet")]
+        network: String,
+        
+        /// Database path
+        #[arg(short, long, default_value = "./quanta_data")]
+        db: String,
+    },
+    
+    /// Show wallet address only (no balance check)
+    WalletAddress {
+        /// Wallet file name
+        #[arg(short, long, default_value = "wallet.qua")]
+        file: String,
     },
     
     /// Mine a new block
@@ -234,7 +253,7 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Start { config, port, network_port, rpc_port, db, bootstrap, no_network, detach } => {
+        Commands::Start { config, network, port, network_port, rpc_port, db, bootstrap, no_network, detach } => {
             // Load configuration with RPC port override
             let mut cfg = QuantaConfig::load_with_overrides(
                 config,
@@ -242,6 +261,7 @@ async fn main() {
                 network_port,
                 db.clone(),
                 bootstrap.clone(),
+                Some(network),
                 no_network
             ).expect("Failed to load configuration");
             
@@ -366,7 +386,7 @@ async fn main() {
             tracing::info!("  Database: {}", cfg.node.db_path);
             
             let storage = Arc::new(BlockchainStorage::new(&cfg.node.db_path).expect("Failed to open database"));
-            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
+            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, cfg.network_type).expect("Failed to initialize blockchain")));
             
             let metrics = Arc::new(MetricsCollector::new());
             
@@ -704,11 +724,19 @@ async fn main() {
             
             let wallet = QuantumWallet::new();
             
-            println!("\nEnter password to encrypt wallet:");
-            let password = rpassword::read_password().expect("Failed to read password");
+            let password = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
+                p
+            } else {
+                println!("\nEnter password to encrypt wallet:");
+                rpassword::read_password().expect("Failed to read password")
+            };
             
-            println!("Confirm password:");
-            let password_confirm = rpassword::read_password().expect("Failed to read password");
+            let password_confirm = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
+                p
+            } else {
+                println!("Confirm password:");
+                rpassword::read_password().expect("Failed to read password")
+            };
             
             if password != password_confirm {
                 eprintln!("Passwords don't match!");
@@ -761,9 +789,13 @@ async fn main() {
             println!("Wallet file: {}", file);
         }
 
-        Commands::Wallet { file } => {
-            println!("Enter wallet password:");
-            let password = rpassword::read_password().expect("Failed to read password");
+        Commands::Wallet { file, network, db } => {
+            let password = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
+                p
+            } else {
+                println!("Enter wallet password:");
+                rpassword::read_password().expect("Failed to read password")
+            };
             
             let wallet = match QuantumWallet::load_quantum_safe(&file, &password) {
                 Ok(w) => w,
@@ -773,17 +805,46 @@ async fn main() {
                 }
             };
             
+            // Determine network type
+            let network_type = match network.as_str() {
+                "testnet" => core::ChainNetwork::Testnet,
+                _ => core::ChainNetwork::Mainnet,
+            };
+            
             // Load blockchain to get balance
-            let storage = Arc::new(BlockchainStorage::new("./quanta_data").expect("Failed to open database"));
-            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
+            let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
+            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, network_type).expect("Failed to initialize blockchain")));
             let balance_microunits = blockchain.read().await.get_balance(&wallet.address);
             
             wallet.display_info(microunits_to_qua(balance_microunits));
         }
 
+        Commands::WalletAddress { file } => {
+            let password = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
+                p
+            } else {
+                println!("Enter wallet password:");
+                rpassword::read_password().expect("Failed to read password")
+            };
+            
+            let wallet = match QuantumWallet::load_quantum_safe(&file, &password) {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("Failed to load wallet: {}", e);
+                    return;
+                }
+            };
+            
+            println!("\nWallet Address: {}\n", wallet.address);
+        }
+
         Commands::Mine { wallet: wallet_file, db } => {
-            println!("Enter wallet password:");
-            let password = rpassword::read_password().expect("Failed to read password");
+            let password = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
+                p
+            } else {
+                println!("Enter wallet password:");
+                rpassword::read_password().expect("Failed to read password")
+            };
             
             let wallet = match QuantumWallet::load_quantum_safe(&wallet_file, &password) {
                 Ok(w) => w,
@@ -794,7 +855,7 @@ async fn main() {
             };
             
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
-            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
+            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, core::ChainNetwork::Mainnet).expect("Failed to initialize blockchain")));
             
             println!("  Mining new block...");
             let mine_result = blockchain.write().await.mine_pending_transactions(wallet.address.clone());
@@ -809,8 +870,12 @@ async fn main() {
         }
 
         Commands::Send { wallet: wallet_file, to, amount, db } => {
-            println!("Enter wallet password:");
-            let password = rpassword::read_password().expect("Failed to read password");
+            let password = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
+                p
+            } else {
+                println!("Enter wallet password:");
+                rpassword::read_password().expect("Failed to read password")
+            };
             
             let wallet = match QuantumWallet::load_quantum_safe(&wallet_file, &password) {
                 Ok(w) => w,
@@ -821,7 +886,7 @@ async fn main() {
             };
             
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
-            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
+            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, core::ChainNetwork::Mainnet).expect("Failed to initialize blockchain")));
             
             // Convert QUA to microunits
             let amount_microunits = qua_to_microunits(amount);
@@ -865,7 +930,7 @@ async fn main() {
 
         Commands::Stats { db } => {
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
-            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
+            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, core::ChainNetwork::Mainnet).expect("Failed to initialize blockchain")));
             let stats = blockchain.read().await.get_stats();
             
             let reward_qua = microunits_to_qua(stats.mining_reward);
@@ -892,7 +957,7 @@ async fn main() {
 
         Commands::Validate { db } => {
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
-            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
+            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, core::ChainNetwork::Mainnet).expect("Failed to initialize blockchain")));
             
             println!("Validating blockchain...");
             
@@ -920,7 +985,7 @@ async fn run_demo(db_path: &str) {
     // Clear old demo data
     storage.clear().expect("Failed to clear database");
     
-    let blockchain = Arc::new(RwLock::new(Blockchain::new(storage).expect("Failed to initialize blockchain")));
+    let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, crate::core::ChainNetwork::Mainnet).expect("Failed to initialize blockchain")));
     
     // Create demo wallets
     println!(" Creating quantum-safe encrypted demo wallets...");

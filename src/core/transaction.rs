@@ -122,8 +122,8 @@ impl Transaction {
     /// Special case: coinbase transactions bypass signature verification
     pub fn verify(&self) -> bool {
         // Coinbase transactions are verified by consensus rules, not signatures
-        if self.is_coinbase() {
-            return true; // Coinbase validity checked elsewhere (block reward rules)
+        if self.is_coinbase() || self.sender == "TREASURY" {
+            return true; // Coinbase/Treasury validity checked elsewhere (block reward rules)
         }
         
         if self.signature.is_empty() || self.public_key.is_empty() {

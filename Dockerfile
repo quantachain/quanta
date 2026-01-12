@@ -33,13 +33,21 @@ WORKDIR /home/quanta
 COPY --from=builder /app/target/release/quanta /usr/local/bin/quanta
 COPY --chown=quanta:quanta quanta.toml /home/quanta/quanta.toml
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY testnet_entrypoint.sh /usr/local/bin/testnet_entrypoint.sh
+
+# Fix line endings for scripts (Windows -> Unix)
+RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && \
+    sed -i 's/\r$//' /usr/local/bin/testnet_entrypoint.sh
 
 # Create data directories and set permissions
 RUN mkdir -p /home/quanta/quanta_data_node1 \
-             /home/quanta/quanta_data_node2 \
-             /home/quanta/quanta_data_node3 && \
+    /home/quanta/quanta_data_node2 \
+    /home/quanta/quanta_data_node3 \
+    /home/quanta/quanta_data_testnet \
+    /home/quanta/logs && \
     chown -R quanta:quanta /home/quanta && \
-    chmod +x /usr/local/bin/entrypoint.sh
+    chmod +x /usr/local/bin/entrypoint.sh && \
+    chmod +x /usr/local/bin/testnet_entrypoint.sh
 
 USER quanta
 
