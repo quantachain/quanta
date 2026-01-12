@@ -559,7 +559,8 @@ impl Blockchain {
         let mut temp_state = self.account_state.read().clone();
         
         for tx in &block.transactions {
-            if !tx.is_coinbase() {
+            // Exclude Coinbase AND Treasury (system) transactions
+            if !tx.is_coinbase() && tx.sender != "TREASURY" {
                 if !tx.verify() {
                     return Err(BlockchainError::InvalidSignature);
                 }
@@ -827,7 +828,7 @@ impl Blockchain {
 
         // 5. Apply all transactions
         for tx in &block.transactions {
-            if !tx.is_coinbase() {
+            if !tx.is_coinbase() && tx.sender != "TREASURY" {
                 let total = tx.amount.saturating_add(tx.fee);
                 if !new_state.debit_account(&tx.sender, total) {
                     tracing::warn!("Network block has invalid tx: insufficient balance");
