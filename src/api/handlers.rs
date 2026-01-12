@@ -181,30 +181,61 @@ async fn mine_block(
     State(state): State<Arc<ApiState>>,
     Json(req): Json<MineRequest>,
 ) -> (StatusCode, Json<MineResponse>) {
-    let blockchain = state.blockchain.write().await;
-    match blockchain.mine_pending_transactions(req.miner_address) {
-        Ok(_) => {
-            let stats = blockchain.get_stats();
-            let block = blockchain.get_chain().last().cloned();
-            drop(blockchain);
-            
-            // Get the mined block
-            if let Some(block) = block {
-                
-                // Broadcast to network if available
-                if let Some(ref network) = state.network {
-                    network.broadcast_block(block).await;
-                }
+    // 1. Create template (Lock held briefly)
+    let template_res = state.blockchain.read().await.create_block_template(req.miner_address.clone());
+
+    match template_res {
+        Ok(mut block) => {
+            // 2. Mine (NO LOCK held on blockchain)
+            // Run CPU-intensive mining in a blocking task
+            let mined_block_res = tokio::task::spawn_blocking(move || {
+                block.mine();
+                block
+            }).await;
+
+            if let Ok(mined_block) = mined_block_res {
+                 // 3. Submit (Lock held briefly to commit)
+                 let blockchain = state.blockchain.read().await;
+                 match blockchain.add_network_block(mined_block.clone()) {
+                     Ok(_) => {
+                         let index = mined_block.index;
+                         
+                         // Broadcast to network if available
+                         if let Some(ref network) = state.network {
+                             network.broadcast_block(mined_block).await;
+                         }
+                         drop(blockchain);
+
+                         (
+                             StatusCode::OK,
+                             Json(MineResponse {
+                                 success: true,
+                                 block_index: Some(index),
+                                 error: None,
+                             }),
+                         )
+                     }
+                     Err(e) => {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(MineResponse {
+                                success: false,
+                                block_index: None,
+                                error: Some(format!("Failed to add block: {}", e)),
+                            }),
+                        )
+                     }
+                 }
+            } else {
+                 (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(MineResponse {
+                        success: false,
+                        block_index: None,
+                        error: Some("Mining task panicked".to_string()),
+                    }),
+                )
             }
-            
-            (
-                StatusCode::OK,
-                Json(MineResponse {
-                    success: true,
-                    block_index: Some(stats.chain_length as u64 - 1),
-                    error: None,
-                }),
-            )
         }
         Err(e) => {
             (
@@ -212,7 +243,7 @@ async fn mine_block(
                 Json(MineResponse {
                     success: false,
                     block_index: None,
-                    error: Some(format!("Mining failed: {}", e)),
+                    error: Some(format!("Failed to create template: {}", e)),
                 }),
             )
         }
@@ -252,21 +283,41 @@ async fn start_continuous_mining(
                 continue;
             }
             
-            let bc = blockchain.write().await;
-            match bc.mine_pending_transactions(miner_address.clone()) {
-                Ok(_) => {
-                    let block = bc.get_chain().last().cloned();
-                    drop(bc);
+            // 1. Create template
+            let template_res = blockchain.read().await.create_block_template(miner_address.clone());
+            
+            match template_res {
+                Ok(mut block) => {
+                    // 2. Mine (NO LOCK)
+                    let mined_block_res = tokio::task::spawn_blocking(move || {
+                        block.mine();
+                        block
+                    }).await;
                     
-                    if let Some(block) = block {
-                        if let Some(ref net) = network {
-                            net.broadcast_block(block).await;
+                    if let Ok(mined_block) = mined_block_res {
+                        // Check if still active
+                        if !mining_active.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        
+                        // 3. Submit
+                        let bc = blockchain.read().await;
+                        match bc.add_network_block(mined_block.clone()) {
+                            Ok(_) => {
+                                if let Some(ref net) = network {
+                                    net.broadcast_block(mined_block).await;
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to submit mined block: {}", e);
+                            }
                         }
                     }
                 }
                 Err(e) => {
-                    tracing::error!("Continuous mining error: {}", e);
-                    break;
+                    tracing::error!("Continuous mining error (create template): {}", e);
+                    // Sleep to avoid tight loop on error
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
             }
             

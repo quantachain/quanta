@@ -1,5 +1,6 @@
 use super::types::*;
 use crate::consensus::Blockchain;
+use crate::core::block::Block;
 use crate::network::Network;
 use axum::{
     extract::State,
@@ -220,22 +221,53 @@ async fn handle_start_mining(state: &AppState, params: &serde_json::Value) -> Js
             }
             
             // Mine a block
-            match blockchain.write().await.mine_pending_transactions(mining_address.clone()) {
-                Ok(_) => {
-                    consecutive_failures = 0; // Reset on success
-                    let mut count = blocks_mined.write().await;
-                    *count += 1;
-                    tracing::info!("Successfully mined block #{}", *count);
+            // 1. Create template (Lock held briefly)
+            let template_result = blockchain.read().await.create_block_template(mining_address.clone());
+            
+            match template_result {
+                Ok(mut block) => {
+                    // 2. Mine (NO LOCK held on blockchain)
+                    // Run CPU-intensive mining in a blocking task to avoid starving async runtime
                     
-                    // Broadcast block to network
-                    if let Some(ref net) = network {
-                        let latest_block = blockchain.read().await.get_latest_block();
-                        net.broadcast_block(latest_block).await;
+                    let mined_block_res = tokio::task::spawn_blocking(move || {
+                        block.mine();
+                        block
+                    }).await;
+                    
+                    if let Ok(mined_block) = mined_block_res {
+                        // Check cancellation again before submitting
+                        if cancel_token.is_cancelled() {
+                            break;
+                        }
+
+                        // 3. Submit (Lock held briefly to commit)
+                        // add_network_block handles validation and saving
+                        match blockchain.read().await.add_network_block(mined_block.clone()) {
+                            Ok(_) => {
+                                consecutive_failures = 0; // Reset on success
+                                let mut count = blocks_mined.write().await;
+                                *count += 1;
+                                tracing::info!("Successfully mined block #{}", *count);
+                                
+                                // Broadcast block to network
+                                if let Some(ref net) = network {
+                                    // We can just broadcast the block we mined
+                                    net.broadcast_block(mined_block).await;
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to add mined block: {}", e);
+                                consecutive_failures += 1;
+                            }
+                        }
+                    } else {
+                        tracing::error!("Mining task panicked");
+                        break;
                     }
                 }
                 Err(e) => {
                     consecutive_failures += 1;
-                    tracing::warn!("Mining attempt failed ({}): {}", consecutive_failures, e);
+                    tracing::warn!("Failed to create block template ({}): {}", consecutive_failures, e);
                     
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
                         tracing::error!(

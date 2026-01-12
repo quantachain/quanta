@@ -400,10 +400,21 @@ async fn main() {
             
             let network = if !cfg.node.no_network {
                 // Parse bootstrap nodes
-                let bootstrap_nodes: Vec<std::net::SocketAddr> = cfg.network.bootstrap_nodes
-                    .iter()
-                    .filter_map(|s| s.parse().ok())
-                    .collect();
+                // Parse bootstrap nodes (support DNS/hostnames)
+                let mut bootstrap_nodes = Vec::new();
+                for s in &cfg.network.bootstrap_nodes {
+                    use std::net::ToSocketAddrs;
+                    match s.to_socket_addrs() {
+                        Ok(addrs) => {
+                            for addr in addrs {
+                                bootstrap_nodes.push(addr);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to resolve bootstrap node '{}': {}", s, e);
+                        }
+                    }
+                }
                 
                 let listen_addr = format!("0.0.0.0:{}", cfg.node.network_port).parse().unwrap();
                 

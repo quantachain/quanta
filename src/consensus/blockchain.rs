@@ -281,8 +281,8 @@ impl Blockchain {
         Ok(())
     }
 
-    /// Mine a new block with pending transactions
-    pub fn mine_pending_transactions(&self, miner_address: String) -> Result<(), BlockchainError> {
+    /// Create a block template for mining (does not mine or save)
+    pub fn create_block_template(&self, miner_address: String) -> Result<Block, BlockchainError> {
         let reward = self.get_mining_reward();
         let difficulty = self.calculate_next_difficulty();
         
@@ -367,70 +367,21 @@ impl Blockchain {
         
         all_transactions.extend(transactions);
 
-        // CRITICAL: Clone state for transactional update
-        let mut new_state = self.account_state.read().clone();
-        
-        // Unlock any mature coinbase rewards at current height
-        let current_height = self.chain.read().len() as u64;
-        new_state.unlock_mature_coinbase(current_height);
-        
-        // Apply transactions to cloned state
-        for tx in &all_transactions {
-            if !tx.is_coinbase() && tx.sender != "TREASURY" {
-                let total = tx.amount.saturating_add(tx.fee);
-                if !new_state.debit_account(&tx.sender, total) {
-                    tracing::warn!("Failed to spend for {} - skipping tx", tx.sender);
-                    continue;
-                }
-            }
-            new_state.credit_account(tx, current_height, COINBASE_MATURITY);
-        }
-        
-        // ANTI-DUMP: Add locked mining reward (50% vested over 6 months)
-        if locked_reward > 0 {
-            let unlock_height = current_height + MINING_REWARD_LOCK_BLOCKS;
-            new_state.add_locked_balance(&miner_address, locked_reward, unlock_height);
-            tracing::info!(
-                "Locked {} QUA for miner {} until block {}",
-                locked_reward / 1_000_000, miner_address, unlock_height
-            );
-        }
-
-        // Create and mine new block
+        // Create new block (unmined)
         let previous_hash = self.get_latest_block().hash.clone();
         let index = self.chain.read().len() as u64;
-        let mut new_block = Block::new(index, all_transactions, previous_hash, difficulty);
+        let new_block = Block::new(index, all_transactions, previous_hash, difficulty);
         
-        new_block.mine();
-        
-        // Validate block before committing (paranoid but correct)
-        let latest = self.get_latest_block();
-        if !new_block.is_valid(Some(&latest)) {
-            return Err(BlockchainError::InvalidBlock);
-        }
+        // Don't mine or save here. Just return the template.
+        Ok(new_block)
+    }
 
-        // COMMIT: Save to disk first (durability)
-        self.storage.save_block(&new_block)?;
-        self.storage.set_chain_height(index + 1)?;
-        self.storage.save_account_state(&new_state)?;
-
-        // COMMIT: Update in-memory state (atomicity)
-        *self.account_state.write() = new_state;
-        self.chain.write().push(new_block.clone());
-        
-        // Remove only mined transactions from mempool
-        pending_txs.retain(|tx| !new_block.transactions.iter().any(|btx| btx.hash() == tx.hash()));
-        drop(pending_txs);
-        
-        // Clear pending nonces for mined txs (DashMap - no lock needed)
-        for tx in &new_block.transactions {
-            if !tx.is_coinbase() {
-                self.pending_nonces.remove(&tx.sender);
-            }
-        }
-        
-        tracing::info!(" Block {} mined: {} txs, reward {} microunits", index, new_block.transactions.len(), reward);
-        Ok(())
+    /// Mine a new block with pending transactions (BLOCKING - for CLI use)
+    pub fn mine_pending_transactions(&self, miner_address: String) -> Result<(), BlockchainError> {
+        // Create template and mine synchronously
+        let mut block = self.create_block_template(miner_address)?;
+        block.mine(); 
+        self.add_network_block(block)
     }
 
     /// Get current mining reward with adaptive model (u64 microunits)
