@@ -17,12 +17,17 @@ pub struct WalletKeys {
 impl WalletKeys {
     #[wasm_bindgen(constructor)]
     pub fn new() -> WalletKeys {
-        // DEV BUILD: Generating valid-length keys for UI testing
+        // SIMULATION MODE (High Fidelity)
+        // We generate random bytes of the EXACT Falcon-512 lengths.
         let mut pk = vec![0u8; FALCON_PK_SIZE];
         let mut sk = vec![0u8; FALCON_SK_SIZE];
+        
+        // Fill with random data
         getrandom::getrandom(&mut pk).unwrap_or(());
         getrandom::getrandom(&mut sk).unwrap_or(());
-        pk[0] = 0x00; 
+        
+        // Ensure first byte is 0x00/0x50 header for realism if needed, 
+        // but for now random is fine.
         
         WalletKeys {
             pub_key: pk,
@@ -33,6 +38,8 @@ impl WalletKeys {
     pub fn from_private(secret_hex: &str) -> Result<WalletKeys, JsValue> {
         let sec_key = hex::decode(secret_hex).map_err(|e| JsValue::from_str(&e.to_string()))?;
         
+        // Mock Public Key derivation
+        // In simulation, we just hash the SK to get a "consistent" PK
         let mut hasher = Sha3_256::new();
         hasher.update(&sec_key);
         let hash = hasher.finalize();
@@ -66,14 +73,20 @@ impl WalletKeys {
 
     pub fn sign_message(&self, message_hex: &str) -> Result<String, JsValue> {
         let mut sig = vec![0u8; FALCON_SIG_SIZE];
-        getrandom::getrandom(&mut sig).unwrap_or(());
-        
-        // Make signature dependent on message for Simulation realism
+        // Make signature deterministic based on message for realism
         let message_bytes = hex::decode(message_hex).map_err(|e| JsValue::from_str(&e.to_string()))?;
         let mut hasher = Sha3_256::new();
         hasher.update(&message_bytes);
+        hasher.update(&self.sec_key); // Bind to key
         let hash = hasher.finalize();
-        for i in 0..32 { sig[i] = hash[i]; }
+        
+        for i in 0..32 {
+            sig[i+1] = hash[i]; // Embed hash into sig
+        }
+        // Fill rest with pseudo-random pattern
+        for i in 33..FALCON_SIG_SIZE {
+            sig[i] = (sig[i-1] as u16 + 7) as u8; 
+        }
         
         Ok(hex::encode(sig))
     }
