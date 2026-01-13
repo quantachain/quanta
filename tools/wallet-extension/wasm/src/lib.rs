@@ -1,11 +1,6 @@
 use wasm_bindgen::prelude::*;
 use sha3::{Digest, Sha3_256};
-use serde::{Serialize, Deserialize};
-
-// Falcon-512 Constants
-const FALCON_PK_SIZE: usize = 897;
-const FALCON_SK_SIZE: usize = 1281;
-const FALCON_SIG_SIZE: usize = 666;
+use falcon_rust::falcon512;
 
 #[wasm_bindgen]
 pub struct WalletKeys {
@@ -17,42 +12,34 @@ pub struct WalletKeys {
 impl WalletKeys {
     #[wasm_bindgen(constructor)]
     pub fn new() -> WalletKeys {
-        // SIMULATION MODE (High Fidelity)
-        // We generate random bytes of the EXACT Falcon-512 lengths.
-        let mut pk = vec![0u8; FALCON_PK_SIZE];
-        let mut sk = vec![0u8; FALCON_SK_SIZE];
+        // Generate real Falcon-512 keypair using pure Rust implementation
+        let mut seed = [0u8; 32];
+        getrandom::getrandom(&mut seed).unwrap_or_else(|_| {
+            // Fallback for extreme cases, though getrandom should work in WASM with 'js' feature
+            for i in 0..32 { seed[i] = i as u8; }
+        });
         
-        // Fill with random data
-        getrandom::getrandom(&mut pk).unwrap_or(());
-        getrandom::getrandom(&mut sk).unwrap_or(());
-        
-        // Ensure first byte is 0x00/0x50 header for realism if needed, 
-        // but for now random is fine.
-        
+        let (sk, pk) = falcon512::keygen(seed);
         WalletKeys {
-            pub_key: pk,
-            sec_key: sk,
+            pub_key: pk.to_bytes(),
+            sec_key: sk.to_bytes(),
         }
     }
 
-    pub fn from_private(secret_hex: &str) -> Result<WalletKeys, JsValue> {
-        let sec_key = hex::decode(secret_hex).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        
-        // Mock Public Key derivation
-        // In simulation, we just hash the SK to get a "consistent" PK
-        let mut hasher = Sha3_256::new();
-        hasher.update(&sec_key);
-        let hash = hasher.finalize();
-        
-        let mut pk = Vec::with_capacity(FALCON_PK_SIZE);
-        while pk.len() < FALCON_PK_SIZE {
-            pk.extend_from_slice(&hash);
-        }
-        pk.truncate(FALCON_PK_SIZE);
+    pub fn from_keypair(pk_hex: &str, sk_hex: &str) -> Result<WalletKeys, JsValue> {
+        let pk_bytes = hex::decode(pk_hex).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        let sk_bytes = hex::decode(sk_hex).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+        // We can validate by trying to parse
+        // Verify key integrity by attempting to load
+        let _ = falcon512::SecretKey::from_bytes(&sk_bytes)
+            .map_err(|_| JsValue::from_str("Invalid secret key bytes"))?;
+        let _ = falcon512::PublicKey::from_bytes(&pk_bytes)
+            .map_err(|_| JsValue::from_str("Invalid public key bytes"))?;
 
         Ok(WalletKeys {
-            pub_key: pk,
-            sec_key: sec_key,
+            pub_key: pk_bytes,
+            sec_key: sk_bytes,
         })
     }
     
@@ -65,6 +52,7 @@ impl WalletKeys {
     }
 
     pub fn get_address(&self) -> String {
+        // Address is usually last 20 bytes of hash of public key
         let mut hasher = Sha3_256::new();
         hasher.update(&self.pub_key);
         let hash = hasher.finalize();
@@ -72,23 +60,14 @@ impl WalletKeys {
     }
 
     pub fn sign_message(&self, message_hex: &str) -> Result<String, JsValue> {
-        let mut sig = vec![0u8; FALCON_SIG_SIZE];
-        // Make signature deterministic based on message for realism
         let message_bytes = hex::decode(message_hex).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        let mut hasher = Sha3_256::new();
-        hasher.update(&message_bytes);
-        hasher.update(&self.sec_key); // Bind to key
-        let hash = hasher.finalize();
         
-        for i in 0..32 {
-            sig[i+1] = hash[i]; // Embed hash into sig
-        }
-        // Fill rest with pseudo-random pattern
-        for i in 33..FALCON_SIG_SIZE {
-            sig[i] = (sig[i-1] as u16 + 7) as u8; 
-        }
-        
-        Ok(hex::encode(sig))
+        // Reconstruct SecretKey object from bytes
+        let sk = falcon512::SecretKey::from_bytes(&self.sec_key)
+             .map_err(|_| JsValue::from_str("Invalid secret key"))?;
+            
+        let sig = falcon512::sign(&message_bytes, &sk);
+        Ok(hex::encode(sig.to_bytes()))
     }
     
     pub fn sign_transaction_hash(&self, hash_hex: &str) -> Result<String, JsValue> {

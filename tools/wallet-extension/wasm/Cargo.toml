@@ -13,3 +13,4 @@ hex = "0.4"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 getrandom = { version = "0.2", features = ["js"] }
+falcon-rust = "0.1.2"

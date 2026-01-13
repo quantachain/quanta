@@ -130,10 +130,66 @@
     <!-- 2. OTHER VIEWS (WELCOME, SEND, RECEIVE...) -->
     <!-- (Reusing structure with new classes) -->
 
-    <div id="welcomeView" class="view" style="justify-content:center; align-items:center;">
+    <!-- 2. ONBOARDING & AUTH FLOW -->
+
+    <!-- A. ONBOARDING START -->
+    <div id="onboardingView" class="view" style="justify-content:center; align-items:center;">
+        <div
+            style="width: 80px; height: 80px; background:var(--card-bg); border-radius:24px; display:flex; align-items:center; justify-content:center; margin-bottom:24px;">
+            <img src="icons/icon48.png" width="48">
+        </div>
         <h1 style="font-family:'Space Grotesk'; font-size:32px; margin-bottom:10px;">Quanta</h1>
-        <p style="color:var(--text-muted); margin-bottom:40px;">Next Gen Crypto Wallet</p>
-        <button id="createWalletBtn" class="btn-main">Get Started</button>
+        <p style="color:var(--text-muted); margin-bottom:40px; text-align:center; padding:0 20px;">
+            The next generation quantum-resistant wallet.
+        </p>
+        <button id="startSetupBtn" class="btn-main">Create a new wallet</button>
+        <button id="importWalletBtn" class="btn-sub" style="margin-top:12px;">I already have a wallet</button>
+    </div>
+
+    <!-- B. CREATE PASSWORD -->
+    <div id="createPasswordView" class="view">
+        <h2 style="font-size:24px; margin-bottom:8px;">Create Password</h2>
+        <p style="color:var(--text-muted); font-size:14px; margin-bottom:24px;">This password will unlock your Quanta
+            wallet only on this device.</p>
+
+        <label class="input-label">New Password</label>
+        <div class="input-group">
+            <input id="newPasswordInput" type="password" placeholder="Min 8 chars">
+        </div>
+
+        <label class="input-label">Confirm Password</label>
+        <div class="input-group">
+            <input id="confirmPasswordInput" type="password" placeholder="Confirm password">
+        </div>
+
+        <div style="flex:1;"></div>
+        <div style="display:flex; gap:12px; align-items:flex-start;">
+            <input type="checkbox" id="termsCheck" style="width:20px; height:20px;">
+            <div style="font-size:12px; color:var(--text-muted); line-height:1.4;">
+                I understand that Quanta cannot recover this password for me.
+            </div>
+        </div>
+        <button id="savePasswordBtn" class="btn-main" disabled style="opacity:0.5; margin-top:20px;">Create
+            Password</button>
+    </div>
+
+    <!-- C. LOGIN (UNLOCK) -->
+    <div id="loginView" class="view" style="justify-content:center; align-items:center;">
+        <img src="icons/icon48.png" width="40" style="margin-bottom:24px; border-radius:50%;">
+        <h2 style="font-size:24px; margin-bottom:32px;">Welcome back!</h2>
+
+        <div class="input-group" style="width:100%;">
+            <input id="loginPasswordInput" type="password" placeholder="Enter password">
+        </div>
+
+        <button id="unlockBtn" class="btn-main" style="margin-top:16px;">Unlock</button>
+        <div id="loginError" style="color:#EF4444; font-size:13px; margin-top:16px; opacity:0;">Incorrect password</div>
+
+        <div style="margin-top:32px; font-size:13px;">
+            <span style="color:var(--text-muted);">Forgot password?</span>
+            <span id="resetWalletLink" style="color:var(--primary); cursor:pointer; text-decoration:underline;">Reset
+                wallet</span>
+        </div>
     </div>
 
     <!-- 3. SEND -->
