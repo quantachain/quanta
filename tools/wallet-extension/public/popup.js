@@ -64,7 +64,7 @@ const router = {
         if (this.history.length === 1 && viewId === 'walletView') {
             leftBtn.innerHTML = ICONS.settings;
             leftBtn.onclick = () => router.push('settingsView', 'Settings');
-            $('headerRight').innerHTML = ICONS.scan; // Example: Scan/Connect icon
+            $('headerRight').innerHTML = ''; // No right icon
         } else {
             // Sub-pages: Show Back Button
             leftBtn.innerHTML = ICONS.back;
@@ -257,16 +257,77 @@ $('copyBtn').onclick = () => {
     setTimeout(() => $('copyBtn').innerText = "Copy Address", 1000);
 };
 
-// Settings
+// Settings - Main Menu
+$('navAccounts').onclick = () => router.push('accountsView', 'Manage Accounts');
+
 $('navReveal').onclick = () => {
     $('secretBox').style.filter = "blur(8px)";
     $('secretBox').innerText = "CLICK TO REVEAL";
     router.push('revealView', 'Secret Key');
 };
+
 $('navNetwork').onclick = () => router.push('networkView', 'Network');
+
+$('navChangePassword').onclick = () => router.push('securityView', 'Security & Privacy');
+
+$('navQuantumInfo').onclick = () => {
+    alert("Quantum Security Info\n\nQuanta uses Falcon-512 post-quantum cryptography to protect your assets against future quantum computer attacks.");
+};
+
+$('navAbout').onclick = () => router.push('aboutView', 'About Quanta');
+
+$('navPreferences').onclick = () => router.push('preferencesView', 'Preferences');
+
+$('navDeveloper').onclick = () => router.push('developerView', 'Developer Settings');
+
 $('doLogout').onclick = () => {
     wallet = null;
     location.reload();
+};
+
+// Accounts Page
+$('addAccountBtn').onclick = () => {
+    alert("Add Account - Coming soon in v1.1\n\nMultiple account support will be available in the next release.");
+};
+
+// Security & Privacy Page
+$('navChangePasswordDetail').onclick = () => {
+    alert("Change Password - Coming soon in v1.1");
+};
+
+$('navAutoLock').onclick = () => {
+    alert("Auto-Lock Timer - Coming soon in v1.1\n\nConfigure automatic wallet locking after inactivity.");
+};
+
+$('navShowRecovery').onclick = () => {
+    $('secretBox').style.filter = "blur(8px)";
+    $('secretBox').innerText = "CLICK TO REVEAL";
+    router.push('revealView', 'Recovery Phrase');
+};
+
+// Preferences Page
+$('navLanguage').onclick = () => {
+    alert("Display Language - Coming soon in v1.1\n\nMulti-language support will be available soon.");
+};
+
+$('navCurrency').onclick = () => {
+    alert("Currency - Coming soon in v1.1\n\nChoose your preferred display currency.");
+};
+
+// Developer Settings Page
+$('navQuantaNetwork').onclick = () => router.push('networkView', 'Network');
+
+// About Quanta Page
+$('navTerms').onclick = () => {
+    window.open('https://quanta.network/terms', '_blank');
+};
+
+$('navPrivacy').onclick = () => {
+    window.open('https://quanta.network/privacy', '_blank');
+};
+
+$('navWebsite').onclick = () => {
+    window.open('https://quanta.network', '_blank');
 };
 
 // Reveal
@@ -285,8 +346,8 @@ function updateData() {
     const addr = wallet.get_address();
     $('addressDisplay').innerText = addr.substring(0, 6) + "..." + addr.substring(addr.length - 4);
     $('fullAddress').innerText = addr;
-    // Mock Balance for UI
-    $('balanceDisplay').innerText = "1,240.50";
+    // Real Balance - will be fetched from blockchain later
+    $('balanceDisplay').innerText = "0.00";
 }
 
 

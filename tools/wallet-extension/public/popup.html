@@ -14,7 +14,7 @@
     <div class="header">
         <div id="headerLeft" style="cursor: pointer; width: 24px; height: 24px; color: var(--text-main);"></div>
         <div class="header-title" id="pageTitle">Wallet</div>
-        <div id="headerRight" style="width: 24px;"></div> <!-- Spacer -->
+        <div id="headerRight" style="width: 24px;"></div>
     </div>
 
     <!-- 1. DASHBOARD WITH TABS -->
@@ -34,28 +34,12 @@
         <!-- Actions -->
         <div class="actions-row">
             <div class="action-item" id="navSend">
-                <div class="circle-btn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="19" x2="12" y2="5"></line>
-                        <polyline points="5 12 12 5 19 12"></polyline>
-                    </svg></div>
                 <div class="action-label">Send</div>
             </div>
             <div class="action-item" id="navReceive">
-                <div class="circle-btn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2">
-                        <line x1="12" y1="5" x2="12" y2="19"></line>
-                        <polyline points="19 12 12 19 5 12"></polyline>
-                    </svg></div>
                 <div class="action-label">Receive</div>
             </div>
             <div class="action-item" style="opacity:0.5;">
-                <div class="circle-btn"><svg width="24" height="24" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="2">
-                        <path d="M21 12V7a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v5"></path>
-                        <polyline points="1 12 11 12 14 12 23 12"></polyline>
-                        <path d="M22 17v1a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1"></path>
-                    </svg></div>
                 <div class="action-label">Buy</div>
             </div>
         </div>
@@ -226,18 +210,154 @@
 
     <!-- 5. SETTINGS (Menu) -->
     <div id="settingsView" class="view">
-        <div style="margin-top:10px;">
-            <div class="activity-item" style="cursor:pointer;" id="navReveal">
-                <div>Show Secret Key</div>
-                <div style="color:var(--text-muted);">></div>
+        <!-- Search -->
+        <div class="search-input">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"></circle>
+                <path d="m21 21-4.35-4.35"></path>
+            </svg>
+            <input type="text" placeholder="Search...">
+        </div>
+
+        <!-- General Section -->
+        <div class="settings-section">
+            <div class="settings-section-title">General</div>
+
+            <div class="settings-item" id="navAccounts">
+                <div class="settings-item-left">
+                    <svg class="settings-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                    <div class="settings-item-label">Manage Accounts</div>
+                </div>
+                <div class="settings-item-value">></div>
             </div>
-            <div class="activity-item" style="cursor:pointer;" id="navNetwork">
-                <div>Network</div>
-                <div style="color:var(--text-muted);" id="currentNetLabel">Testnet ></div>
+
+            <div class="settings-item" id="navNetwork">
+                <div class="settings-item-left">
+                    <svg class="settings-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="2" y1="12" x2="22" y2="12"></line>
+                        <path
+                            d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
+                        </path>
+                    </svg>
+                    <div class="settings-item-label">Active Networks</div>
+                </div>
+                <div class="settings-item-value" id="currentNetLabel">Testnet ></div>
             </div>
-            <div class="activity-item" style="cursor:pointer;" id="doLogout">
-                <div style="color:#EF4444;">Log Out</div>
+        </div>
+
+        <!-- Security Section -->
+        <div class="settings-section">
+            <div class="settings-section-title">Security & Privacy</div>
+
+            <div class="settings-item" id="navReveal">
+                <div class="settings-item-left">
+                    <svg class="settings-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                    </svg>
+                    <div class="settings-item-label">Show Secret Key</div>
+                </div>
+                <div class="settings-item-value">></div>
             </div>
+
+            <div class="settings-item" id="navChangePassword">
+                <div class="settings-item-left">
+                    <svg class="settings-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    </svg>
+                    <div class="settings-item-label">Change Password</div>
+                </div>
+                <div class="settings-item-value">></div>
+            </div>
+        </div>
+
+        <!-- Quanta Specific -->
+        <div class="settings-section">
+            <div class="settings-section-title">Quanta</div>
+
+            <div class="settings-item" id="navQuantumInfo">
+                <div class="settings-item-left">
+                    <svg class="settings-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                    </svg>
+                    <div class="settings-item-label">Quantum Security Info</div>
+                </div>
+                <div class="settings-item-value">></div>
+            </div>
+
+            <div class="settings-item" id="navAbout">
+                <div class="settings-item-left">
+                    <svg class="settings-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <path d="M12 16v-4"></path>
+                        <path d="M12 8h.01"></path>
+                    </svg>
+                    <div class="settings-item-label">About Quanta</div>
+                </div>
+                <div class="settings-item-value">v1.0.0 ></div>
+            </div>
+        </div>
+
+        <!-- Advanced Section -->
+        <div class="settings-section">
+            <div class="settings-section-title">Advanced</div>
+
+            <div class="settings-item" id="navPreferences">
+                <div class="settings-item-left">
+                    <svg class="settings-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <path
+                            d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83">
+                        </path>
+                    </svg>
+                    <div class="settings-item-label">Preferences</div>
+                </div>
+                <div class="settings-item-value">></div>
+            </div>
+
+            <div class="settings-item" id="navDeveloper">
+                <div class="settings-item-left">
+                    <svg class="settings-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2">
+                        <polyline points="16 18 22 12 16 6"></polyline>
+                        <polyline points="8 6 2 12 8 18"></polyline>
+                    </svg>
+                    <div class="settings-item-label">Developer Settings</div>
+                </div>
+                <div class="settings-item-value">></div>
+            </div>
+        </div>
+
+        <!-- Danger Zone -->
+        <div class="settings-section">
+            <div class="settings-item" id="doLogout">
+                <div class="settings-item-left">
+                    <svg class="settings-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2" style="color: var(--error);">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                        <polyline points="16 17 21 12 16 7"></polyline>
+                        <line x1="21" y1="12" x2="9" y2="12"></line>
+                    </svg>
+                    <div class="settings-item-label settings-item-danger">Lock Wallet</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="version-info">
+            Quanta Wallet Extension v1.0.0<br>
+            Quantum-Resistant Security
         </div>
     </div>
 
@@ -262,6 +382,163 @@
         <div id="secretBox"
             style="margin-top:20px; padding:20px; background:#111; border-radius:16px; filter:blur(8px); cursor:pointer; font-family:'JetBrains Mono'; word-break:break-all;">
             CLICK TO REVEAL
+        </div>
+    </div>
+
+    <!-- 8. MANAGE ACCOUNTS -->
+    <div id="accountsView" class="view">
+        <div class="settings-section">
+            <div class="activity-item" id="account1">
+                <div style="display:flex; align-items:center; gap:12px;">
+                    <div
+                        style="width:40px; height:40px; background:var(--primary); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700;">
+                        A1</div>
+                    <div class="settings-item-label">Account 1</div>
+                </div>
+                <div style="color:var(--text-muted);">⋮</div>
+            </div>
+        </div>
+
+        <button class="btn-main" id="addAccountBtn" style="margin-top:auto;">Add Account</button>
+    </div>
+
+    <!-- 9. SECURITY & PRIVACY -->
+    <div id="securityView" class="view">
+        <div class="settings-section">
+            <div class="settings-item" id="navChangePasswordDetail">
+                <div class="settings-item-label">Change Password</div>
+                <div class="settings-item-value">></div>
+            </div>
+
+            <div class="settings-item" id="navAutoLock">
+                <div class="settings-item-label">Auto-Lock Timer</div>
+                <div class="settings-item-value">15 minutes ></div>
+            </div>
+
+            <div class="settings-item" id="navShowRecovery">
+                <div class="settings-item-label">Show Recovery Phrase</div>
+                <div class="settings-item-value">></div>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <div class="settings-section-title">Privacy</div>
+
+            <div class="settings-item" style="cursor:default;">
+                <div class="settings-item-label">Show Wallet Shortcuts</div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="toggleShortcuts">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- 10. PREFERENCES -->
+    <div id="preferencesView" class="view">
+        <div class="settings-section">
+            <div class="settings-item" id="navLanguage">
+                <div class="settings-item-label">Display Language</div>
+                <div class="settings-item-value">English ></div>
+            </div>
+
+            <div class="settings-item" id="navCurrency">
+                <div class="settings-item-label">Currency</div>
+                <div class="settings-item-value">United States Dollar ></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 11. DEVELOPER SETTINGS -->
+    <div id="developerView" class="view">
+        <div class="settings-section">
+            <div class="settings-item" style="cursor:default;">
+                <div>
+                    <div class="settings-item-label">Testnet Mode</div>
+                    <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Applies to balances and app
+                        connections</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="toggleTestnet" checked>
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <div class="settings-section-title">Networks</div>
+
+            <div class="settings-item" id="navQuantaNetwork">
+                <div class="settings-item-left">
+                    <img src="icons/icon48.png" width="24" style="border-radius:4px;">
+                    <div class="settings-item-label">Quanta</div>
+                </div>
+                <div class="settings-item-value">Quanta Testnet ></div>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <div class="settings-item" style="cursor:default;">
+                <div>
+                    <div class="settings-item-label">Enable Copy Transaction</div>
+                    <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Copy serialized transaction
+                        data to clipboard</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="toggleCopyTx">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="settings-item" style="cursor:default;">
+                <div>
+                    <div class="settings-item-label">Auto-Confirm on localhost</div>
+                    <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">Allows using auto-confirm on
+                        localhost</div>
+                </div>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="toggleAutoConfirm">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- 12. ABOUT QUANTA -->
+    <div id="aboutView" class="view" style="align-items:center;">
+        <div style="margin-top:40px; text-align:center;">
+            <img src="icons/icon48.png" width="80" style="border-radius:16px; margin-bottom:16px;">
+            <h2 style="font-family:'Space Grotesk'; font-size:32px; margin-bottom:8px;">Quanta</h2>
+            <div style="color:var(--text-muted); font-size:14px; margin-bottom:40px;">Version 1.0.0</div>
+        </div>
+
+        <div class="settings-section" style="width:100%;">
+            <div class="settings-item" id="navTerms">
+                <div class="settings-item-label" style="color:var(--primary);">Terms of Service</div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                    <polyline points="15 3 21 3 21 9"></polyline>
+                    <line x1="10" y1="14" x2="21" y2="3"></line>
+                </svg>
+            </div>
+
+            <div class="settings-item" id="navPrivacy">
+                <div class="settings-item-label" style="color:var(--primary);">Privacy Policy</div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                    <polyline points="15 3 21 3 21 9"></polyline>
+                    <line x1="10" y1="14" x2="21" y2="3"></line>
+                </svg>
+            </div>
+
+            <div class="settings-item" id="navWebsite">
+                <div class="settings-item-label" style="color:var(--primary);">Visit Website</div>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                    <polyline points="15 3 21 3 21 9"></polyline>
+                    <line x1="10" y1="14" x2="21" y2="3"></line>
+                </svg>
+            </div>
         </div>
     </div>
 
