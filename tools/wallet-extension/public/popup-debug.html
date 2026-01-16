@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Quanta Wallet - Debug</title>
+    <style>
+        body {
+            width: 360px;
+            height: 600px;
+            background: #0A0A0F;
+            color: white;
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+
+        button {
+            background: linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 10px 0;
+            width: 100%;
+        }
+
+        .error {
+            background: #EF4444;
+            padding: 10px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+
+        .success {
+            background: #10B981;
+            padding: 10px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>🔮 Quanta Wallet</h1>
+    <p>Debug Mode</p>
+
+    <div id="status"></div>
+
+    <button onclick="testClick()">Test Click</button>
+    <button onclick="testWASM()">Test WASM</button>
+    <button onclick="testAPI()">Test API</button>
+
+    <div id="output" style="margin-top: 20px; font-size: 12px; font-family: monospace;"></div>
+
+    <script>
+        function log(msg, type = 'info') {
+            const output = document.getElementById('output');
+            const div = document.createElement('div');
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            div.style.color = type === 'error' ? '#EF4444' : type === 'success' ? '#10B981' : '#3B82F6';
+            output.appendChild(div);
+            console.log(msg);
+        }
+
+        function testClick() {
+            log('✅ Click is working!', 'success');
+            document.getElementById('status').innerHTML = '<div class="success">Clicks are working!</div>';
+        }
+
+        async function testWASM() {
+            try {
+                log('Testing WASM module...', 'info');
+                const init = await import('./pkg/quanta_wallet_wasm.js');
+                await init.default();
+                log('✅ WASM loaded successfully!', 'success');
+                document.getElementById('status').innerHTML = '<div class="success">WASM is working!</div>';
+            } catch (error) {
+                log(`❌ WASM Error: ${error.message}`, 'error');
+                document.getElementById('status').innerHTML = `<div class="error">WASM Error: ${error.message}</div>`;
+            }
+        }
+
+        async function testAPI() {
+            try {
+                log('Testing API connection...', 'info');
+                const response = await fetch('http://localhost:3000/health');
+                const data = await response.json();
+                log(`✅ API connected! Status: ${data.status}`, 'success');
+                document.getElementById('status').innerHTML = '<div class="success">API is working!</div>';
+            } catch (error) {
+                log(`❌ API Error: ${error.message}`, 'error');
+                document.getElementById('status').innerHTML = `<div class="error">API Error: ${error.message}</div>`;
+            }
+        }
+
+        // Auto-run diagnostics
+        window.addEventListener('DOMContentLoaded', () => {
+            log('🔍 Running diagnostics...', 'info');
+            log('DOM loaded successfully', 'success');
+
+            // Check if we can access elements
+            const buttons = document.querySelectorAll('button');
+            log(`Found ${buttons.length} buttons`, 'info');
+
+            // Check localStorage
+            try {
+                localStorage.setItem('test', 'value');
+                localStorage.removeItem('test');
+                log('✅ localStorage is working', 'success');
+            } catch (e) {
+                log('❌ localStorage error: ' + e.message, 'error');
+            }
+        });
+    </script>
+</body>
+
+</html>

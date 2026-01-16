@@ -1,9 +1,166 @@
-import init, { WalletKeys } from './pkg/quanta_wallet_wasm.js';
+// WASM will be loaded dynamically to avoid blocking UI
+let WalletKeys = null;
+let wasmReady = false;
+
+// Quanta Blockchain API Service (inline to avoid module issues)
+class QuantaAPI {
+    constructor(baseURL = 'http://localhost:3000') {
+        this.baseURL = baseURL;
+        this.testnetURL = 'http://testnet.quantachain.org:3000';
+        this.currentNetwork = 'localhost';
+    }
+
+    setNetwork(network) {
+        this.currentNetwork = network;
+        if (network === 'testnet') {
+            this.baseURL = this.testnetURL;
+        } else {
+            this.baseURL = 'http://localhost:3000';
+        }
+    }
+
+    async request(endpoint, options = {}) {
+        const url = `${this.baseURL}${endpoint}`;
+
+        try {
+            const response = await fetch(url, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers,
+                },
+                ...options,
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error(`API Request failed: ${endpoint}`, error);
+            throw error;
+        }
+    }
+
+    async getBalance(address) {
+        try {
+            const data = await this.request('/api/balance', {
+                method: 'POST',
+                body: JSON.stringify({ address }),
+            });
+            return data.balance_microunits;
+        } catch (error) {
+            console.error('Failed to fetch balance:', error);
+            return 0;
+        }
+    }
+
+    async getStats() {
+        try {
+            return await this.request('/api/stats');
+        } catch (error) {
+            console.error('Failed to fetch stats:', error);
+            return null;
+        }
+    }
+
+    async healthCheck() {
+        try {
+            return await this.request('/health');
+        } catch (error) {
+            console.error('Health check failed:', error);
+            return { status: 'offline' };
+        }
+    }
+
+    microunitsToQUA(microunits) {
+        return (microunits / 1_000_000).toFixed(6);
+    }
+
+    quaToMicrounits(qua) {
+        return Math.floor(parseFloat(qua) * 1_000_000);
+    }
+}
+
+// --- TOAST NOTIFICATION ---
+function showToast(message, duration = 3000) {
+    const toast = document.getElementById('toast');
+    toast.innerText = message;
+    toast.classList.add('show');
+
+    setTimeout(() => {
+        toast.classList.remove('show');
+    }, duration);
+}
 
 // --- STATE ---
 let wallet = null;
 let tempPassword = null; // Store temporarily during creation
 let encryptedVault = null;
+let api = new QuantaAPI(); // Initialize API service
+let currentNetwork = localStorage.getItem('network') || 'localhost';
+
+// --- AUTO-LOCK TIMER ---
+let autoLockMinutes = parseInt(localStorage.getItem('autoLockMinutes') || '15');
+let autoLockTimer = null;
+
+function updateAutoLockDisplay() {
+    const minutes = autoLockMinutes;
+    let displayText;
+
+    if (minutes === 0) {
+        displayText = "Never";
+    } else if (minutes === 60) {
+        displayText = "1 hr";
+    } else if (minutes === 1) {
+        displayText = "1 min";
+    } else {
+        displayText = `${minutes} min`;
+    }
+
+    if ($('autoLockDisplay')) {
+        $('autoLockDisplay').innerText = displayText;
+    }
+
+    // Update checkmarks
+    ['1', '5', '15', '30', '60', 'Never'].forEach(id => {
+        const checkEl = $('check' + id);
+        if (checkEl) {
+            const itemMinutes = id === 'Never' ? 0 : parseInt(id);
+            checkEl.innerText = itemMinutes === minutes ? '●' : '';
+        }
+    });
+}
+
+function resetAutoLockTimer() {
+    if (autoLockTimer) {
+        clearTimeout(autoLockTimer);
+    }
+
+    if (autoLockMinutes > 0 && wallet) {
+        autoLockTimer = setTimeout(() => {
+            // Lock wallet
+            wallet = null;
+            location.reload();
+        }, autoLockMinutes * 60 * 1000);
+    }
+}
+
+function setAutoLockTime(minutes) {
+    autoLockMinutes = minutes;
+    localStorage.setItem('autoLockMinutes', minutes.toString());
+    updateAutoLockDisplay();
+    resetAutoLockTimer();
+}
+
+// Track user activity to reset auto-lock timer
+document.addEventListener('click', () => {
+    if (wallet) resetAutoLockTimer();
+});
+
+document.addEventListener('keydown', () => {
+    if (wallet) resetAutoLockTimer();
+});
 
 // --- ICONS ---
 const ICONS = {
@@ -129,7 +286,35 @@ function fromHex(hexString) {
 
 // --- LOGIC ---
 document.addEventListener('DOMContentLoaded', async () => {
-    await init();
+    console.log('🔮 Quanta Wallet Loading...');
+
+    // Load WASM dynamically (non-blocking)
+    try {
+        console.log('Loading WASM module...');
+        const wasmModule = await import('./pkg/quanta_wallet_wasm.js');
+        await wasmModule.default();
+        WalletKeys = wasmModule.WalletKeys;
+        wasmReady = true;
+        console.log('✅ WASM loaded successfully!');
+    } catch (error) {
+        console.error('❌ WASM loading failed:', error);
+        console.warn('⚠️ Wallet will run in limited mode');
+        // Don't block - UI will still work
+    }
+
+    // Initialize network from storage
+    api.setNetwork(currentNetwork);
+
+    // Update network UI
+    if (currentNetwork === 'testnet') {
+        $('checkTestnet').style.opacity = 1;
+        $('checkLocal').style.opacity = 0;
+        $('currentNetLabel').innerText = "Testnet >";
+    } else {
+        $('checkTestnet').style.opacity = 0;
+        $('checkLocal').style.opacity = 1;
+        $('currentNetLabel').innerText = "Localhost >";
+    }
 
     // Check if wallet exists
     const storedVault = localStorage.getItem('qua_vault');
@@ -139,215 +324,546 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
         router.replace('onboardingView', 'Welcome');
     }
+
+    // Setup all event handlers AFTER DOM is loaded
+    setupEventHandlers();
+
+    console.log('✅ Wallet UI initialized');
 });
 
-// --- ONBOARDING FLOW ---
-$('startSetupBtn').onclick = () => router.push('createPasswordView', 'Setup');
-$('importWalletBtn').onclick = () => alert("Import feature coming soon!");
+// --- SETUP ALL EVENT HANDLERS ---
+function setupEventHandlers() {
+    console.log('Setting up event handlers...');
 
-// Password Creation
-const checkPasswordForm = () => {
-    const p1 = $('newPasswordInput').value;
-    const p2 = $('confirmPasswordInput').value;
-    const term = $('termsCheck').checked;
-    const btn = $('savePasswordBtn');
+    // --- ONBOARDING FLOW ---
+    $('startSetupBtn').onclick = () => router.push('createPasswordView', 'Setup');
+    $('importWalletBtn').onclick = () => showToast("Import feature coming soon!");
 
-    if (p1.length >= 8 && p1 === p2 && term) {
-        btn.disabled = false;
-        btn.style.opacity = 1;
-    } else {
+    // Password Creation
+    const checkPasswordForm = () => {
+        const p1 = $('newPasswordInput').value;
+        const p2 = $('confirmPasswordInput').value;
+        const term = $('termsCheck').checked;
+        const btn = $('savePasswordBtn');
+
+        if (p1.length >= 8 && p1 === p2 && term) {
+            btn.disabled = false;
+            btn.style.opacity = 1;
+        } else {
+            btn.disabled = true;
+            btn.style.opacity = 0.5;
+        }
+    };
+    $('newPasswordInput').oninput = checkPasswordForm;
+    $('confirmPasswordInput').oninput = checkPasswordForm;
+    $('termsCheck').onchange = checkPasswordForm;
+
+    $('savePasswordBtn').onclick = async () => {
+        const password = $('newPasswordInput').value;
+        const btn = $('savePasswordBtn');
+        // Check if WASM is ready
+        if (!wasmReady || !WalletKeys) {
+            showToast('Wallet module is still loading. Please wait...', 3000);
+            return;
+        }
+
+        btn.innerText = "Generating Keys...";
+
+        // 1. Generate new keys
+        setTimeout(async () => {
+            wallet = new WalletKeys();
+            const keys = { pk: wallet.get_public_key_hex(), sk: wallet.get_private_key_hex() };
+
+            // 2. Encrypt keys with password
+            const vault = await encryptVault(keys, password);
+            localStorage.setItem('qua_vault', JSON.stringify(vault));
+
+            // 3. Enter wallet
+            updateData();
+            router.replace('walletView'); // Replace history so back doesn't go to setup
+        }, 100);
+    };
+
+    // Login
+    $('unlockBtn').onclick = async () => {
+        const password = $('loginPasswordInput').value;
+        const err = $('loginError');
+        const btn = $('unlockBtn');
+
+        if (!encryptedVault) return;
+
+        btn.innerText = "Unlocking...";
+
+        try {
+            const keys = await decryptVault(encryptedVault, password);
+            wallet = WalletKeys.from_keypair(keys.pk, keys.sk);
+            updateData();
+            router.replace('walletView');
+        } catch (e) {
+            btn.innerText = "Unlock";
+            err.style.opacity = 1;
+            // Shake animation
+            $('loginPasswordInput').parentElement.style.borderColor = '#EF4444';
+            setTimeout(() => $('loginPasswordInput').parentElement.style.borderColor = 'var(--border)', 2000);
+        }
+    };
+
+    $('loginPasswordInput').onkeydown = (e) => {
+        if (e.key === 'Enter') $('unlockBtn').click();
+    };
+
+    $('resetWalletLink').onclick = () => {
+        if (confirm("Are you sure? This will maintain the current wallet encrypted but start a new setup. If you lost your password, your old wallet is lost.")) {
+            localStorage.removeItem('qua_vault');
+            location.reload();
+        }
+    };
+
+
+    // --- WALLET VIEWS ---
+    // Tab Logic
+    const tabs = document.querySelectorAll('.tab');
+    tabs[0].onclick = () => {
+        tabs[0].classList.add('active'); tabs[1].classList.remove('active');
+        $('tokenList').style.display = 'block'; $('activityList').style.display = 'none';
+    };
+    tabs[1].onclick = () => {
+        tabs[1].classList.add('active'); tabs[0].classList.remove('active');
+        $('tokenList').style.display = 'none'; $('activityList').style.display = 'block';
+    };
+
+    $('navSend').onclick = () => router.push('sendView', 'Send QUA');
+
+    $('navReceive').onclick = () => {
+        router.push('receiveView', 'Receive QUA');
+        // Generate QR code when opening receive view
+        if (wallet) {
+            setTimeout(() => generateQRCode(wallet.get_address()), 100);
+        }
+    };
+
+    // Send Flow
+    $('broadcastBtn').onclick = async () => {
+        const recipient = $('recipientInput').value;
+        const amount = $('amountInput').value;
+
+        if (!recipient || !amount || parseFloat(amount) <= 0) {
+            showToast("Please enter a valid recipient address and amount");
+            return;
+        }
+
+        const btn = $('broadcastBtn');
+        btn.innerText = "Signing...";
         btn.disabled = true;
-        btn.style.opacity = 0.5;
+
+        await new Promise(r => setTimeout(r, 800));
+        // Here we would actually use wallet.sign_transaction_hash()
+        btn.innerText = "Sent!";
+        btn.style.background = "#FFFFFF";
+        btn.style.color = "#000000";
+
+        setTimeout(() => {
+            btn.innerText = "Review";
+            btn.style.background = "#FFFFFF";
+            btn.style.color = "#000000";
+            btn.disabled = false;
+            // Clear inputs
+            $('recipientInput').value = '';
+            $('amountInput').value = '';
+            router.pop(); // Go back to wallet
+        }, 1200);
+    };
+
+    // Receive - Generate QR Code
+    let qrCodeInstance = null;
+    function generateQRCode(address) {
+        const qrContainer = $('qrcode');
+        // Clear previous QR code
+        qrContainer.innerHTML = '';
+
+        // Generate new QR code
+        if (typeof QRCode !== 'undefined') {
+            qrCodeInstance = new QRCode(qrContainer, {
+                text: address,
+                width: 200,
+                height: 200,
+                colorDark: "#000000",
+                colorLight: "#ffffff",
+                correctLevel: QRCode.CorrectLevel.H
+            });
+        }
     }
-};
-$('newPasswordInput').oninput = checkPasswordForm;
-$('confirmPasswordInput').oninput = checkPasswordForm;
-$('termsCheck').onchange = checkPasswordForm;
 
-$('savePasswordBtn').onclick = async () => {
-    const password = $('newPasswordInput').value;
-    const btn = $('savePasswordBtn');
-    btn.innerText = "Generating Keys...";
+    // Copy Address
+    $('copyBtn').onclick = () => {
+        if (!wallet) return;
+        const address = wallet.get_address();
+        navigator.clipboard.writeText(address).then(() => {
+            $('copyBtn').innerText = "Copied!";
+            setTimeout(() => $('copyBtn').innerText = "Copy Address", 1500);
+        }).catch(err => {
+            console.error('Failed to copy:', err);
+            showToast('Failed to copy address');
+        });
+    };
 
-    // 1. Generate new keys
-    setTimeout(async () => {
-        wallet = new WalletKeys();
-        const keys = { pk: wallet.get_public_key_hex(), sk: wallet.get_private_key_hex() };
+    // Address pill copy
+    $('addrPill').onclick = () => {
+        if (!wallet) return;
+        const address = wallet.get_address();
+        navigator.clipboard.writeText(address).then(() => {
+            const originalText = $('addressDisplay').innerText;
+            $('addressDisplay').innerText = "Copied!";
+            setTimeout(() => {
+                const addr = wallet.get_address();
+                $('addressDisplay').innerText = addr.substring(0, 6) + "..." + addr.substring(addr.length - 4);
+            }, 1500);
+        });
+    };
 
-        // 2. Encrypt keys with password
-        const vault = await encryptVault(keys, password);
-        localStorage.setItem('qua_vault', JSON.stringify(vault));
+    // Settings - Main Menu
+    $('navAccounts').onclick = () => router.push('accountsView', 'Manage Accounts');
 
-        // 3. Enter wallet
-        updateData();
-        router.replace('walletView'); // Replace history so back doesn't go to setup
-    }, 100);
-};
+    // Password Modal Functions
+    let pendingRevealAction = null;
 
-// Login
-$('unlockBtn').onclick = async () => {
-    const password = $('loginPasswordInput').value;
-    const err = $('loginError');
-    const btn = $('unlockBtn');
-
-    if (!encryptedVault) return;
-
-    btn.innerText = "Unlocking...";
-
-    try {
-        const keys = await decryptVault(encryptedVault, password);
-        wallet = WalletKeys.from_keypair(keys.pk, keys.sk);
-        updateData();
-        router.replace('walletView');
-    } catch (e) {
-        btn.innerText = "Unlock";
-        err.style.opacity = 1;
-        // Shake animation
-        $('loginPasswordInput').parentElement.style.borderColor = '#EF4444';
-        setTimeout(() => $('loginPasswordInput').parentElement.style.borderColor = 'var(--border)', 2000);
+    function showPasswordModal(callback) {
+        pendingRevealAction = callback;
+        $('passwordModal').classList.add('active');
+        $('confirmPasswordInput').value = '';
+        $('passwordError').style.opacity = 0;
+        $('confirmPasswordInput').focus();
     }
-};
 
-$('loginPasswordInput').onkeydown = (e) => {
-    if (e.key === 'Enter') $('unlockBtn').click();
-};
-
-$('resetWalletLink').onclick = () => {
-    if (confirm("Are you sure? This will maintain the current wallet encrypted but start a new setup. If you lost your password, your old wallet is lost.")) {
-        localStorage.removeItem('qua_vault');
-        location.reload();
+    function hidePasswordModal() {
+        $('passwordModal').classList.remove('active');
+        pendingRevealAction = null;
+        $('confirmPasswordInput').value = '';
+        $('passwordError').style.opacity = 0;
     }
-};
+
+    $('cancelPasswordBtn').onclick = hidePasswordModal;
+
+    $('confirmPasswordBtn').onclick = async () => {
+        const password = $('confirmPasswordInput').value;
+        const btn = $('confirmPasswordBtn');
+
+        if (!password) {
+            $('passwordError').innerText = "Please enter your password";
+            $('passwordError').style.opacity = 1;
+            return;
+        }
+
+        btn.innerText = "Verifying...";
+        btn.disabled = true;
+
+        try {
+            // Verify password by trying to decrypt the vault
+            await decryptVault(encryptedVault, password);
+
+            // Password correct
+            hidePasswordModal();
+            if (pendingRevealAction) {
+                pendingRevealAction();
+            }
+        } catch (e) {
+            // Password incorrect
+            $('passwordError').innerText = "Incorrect password";
+            $('passwordError').style.opacity = 1;
+            $('confirmPasswordInput').value = '';
+            $('confirmPasswordInput').focus();
+        } finally {
+            btn.innerText = "Confirm";
+            btn.disabled = false;
+        }
+    };
+
+    // Allow Enter key to confirm password
+    $('confirmPasswordInput').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            $('confirmPasswordBtn').click();
+        }
+    });
+
+    // Reveal Secret Key (with password protection)
+    $('navReveal').onclick = () => {
+        showPasswordModal(() => {
+            $('secretBox').style.filter = "blur(8px)";
+            $('secretBox').innerText = "CLICK TO REVEAL";
+            router.push('revealView', 'Secret Key');
+        });
+    };
+
+    $('navNetwork').onclick = () => router.push('networkView', 'Network');
+
+    $('navChangePassword').onclick = () => router.push('changePasswordView', 'Change Password');
+
+    $('navQuantumInfo').onclick = () => {
+        showToast("Quanta uses Falcon-512 post-quantum cryptography to protect your assets against future quantum computer attacks.", 4000);
+    };
+
+    $('navAbout').onclick = () => router.push('aboutView', 'About Quanta');
+
+    $('navPreferences').onclick = () => router.push('preferencesView', 'Preferences');
+
+    $('navDeveloper').onclick = () => router.push('developerView', 'Developer Settings');
+
+    $('doLogout').onclick = () => {
+        if (confirm("Are you sure you want to lock your wallet?")) {
+            wallet = null;
+            location.reload();
+        }
+    };
+
+    // Accounts Page
+    $('addAccountBtn').onclick = () => {
+        showToast("Add Account - Coming soon in v1.1");
+    };
+
+    // Security & Privacy Page
+    $('navChangePasswordDetail').onclick = () => {
+        router.push('changePasswordView', 'Change Password');
+    };
+
+    $('navAutoLock').onclick = () => {
+        router.push('autoLockView', 'Auto-Lock');
+        updateAutoLockDisplay();
+    };
 
 
-// --- WALLET VIEWS ---
-// Tab Logic
-const tabs = document.querySelectorAll('.tab');
-tabs[0].onclick = () => {
-    tabs[0].classList.add('active'); tabs[1].classList.remove('active');
-    $('tokenList').style.display = 'block'; $('activityList').style.display = 'none';
-};
-tabs[1].onclick = () => {
-    tabs[1].classList.add('active'); tabs[0].classList.remove('active');
-    $('tokenList').style.display = 'none'; $('activityList').style.display = 'block';
-};
 
-$('navSend').onclick = () => router.push('sendView', 'Send QUA');
-$('navReceive').onclick = () => router.push('receiveView', 'Receive QUA');
+    // Change Password Implementation
+    $('changePasswordBtn').onclick = async () => {
+        const currentPwd = $('currentPasswordInput').value;
+        const newPwd = $('newPasswordChangeInput').value;
+        const confirmPwd = $('confirmNewPasswordInput').value;
+        const errorEl = $('changePasswordError');
+        const btn = $('changePasswordBtn');
 
-// Send Flow
-$('broadcastBtn').onclick = async () => {
-    const btn = $('broadcastBtn');
-    btn.innerText = "Signing...";
-    await new Promise(r => setTimeout(r, 800));
-    // Here we would actually use wallet.sign_transaction_hash()
-    btn.innerText = "Sent!";
-    btn.style.background = "#14F195";
-    setTimeout(() => {
-        btn.innerText = "Review";
-        btn.style.background = "#00E599";
-        router.pop(); // Go back to wallet
-    }, 1200);
-};
+        // Validation
+        if (!currentPwd || !newPwd || !confirmPwd) {
+            errorEl.innerText = "Please fill all fields";
+            errorEl.style.opacity = 1;
+            return;
+        }
 
-// Copy
-$('copyBtn').onclick = () => {
-    navigator.clipboard.writeText(wallet.get_address());
-    $('copyBtn').innerText = "Copied!";
-    setTimeout(() => $('copyBtn').innerText = "Copy Address", 1000);
-};
+        if (newPwd.length < 8) {
+            errorEl.innerText = "New password must be at least 8 characters";
+            errorEl.style.opacity = 1;
+            return;
+        }
 
-// Settings - Main Menu
-$('navAccounts').onclick = () => router.push('accountsView', 'Manage Accounts');
+        if (newPwd !== confirmPwd) {
+            errorEl.innerText = "New passwords do not match";
+            errorEl.style.opacity = 1;
+            return;
+        }
 
-$('navReveal').onclick = () => {
-    $('secretBox').style.filter = "blur(8px)";
-    $('secretBox').innerText = "CLICK TO REVEAL";
-    router.push('revealView', 'Secret Key');
-};
+        btn.innerText = "Changing...";
+        btn.disabled = true;
+        errorEl.style.opacity = 0;
 
-$('navNetwork').onclick = () => router.push('networkView', 'Network');
+        try {
+            // Verify current password
+            const keys = await decryptVault(encryptedVault, currentPwd);
 
-$('navChangePassword').onclick = () => router.push('securityView', 'Security & Privacy');
+            // Re-encrypt with new password
+            const newVault = await encryptVault(keys, newPwd);
+            localStorage.setItem('qua_vault', JSON.stringify(newVault));
+            encryptedVault = newVault;
 
-$('navQuantumInfo').onclick = () => {
-    alert("Quantum Security Info\n\nQuanta uses Falcon-512 post-quantum cryptography to protect your assets against future quantum computer attacks.");
-};
+            // Success
+            showToast("Password changed successfully!");
 
-$('navAbout').onclick = () => router.push('aboutView', 'About Quanta');
+            // Clear inputs
+            $('currentPasswordInput').value = '';
+            $('newPasswordChangeInput').value = '';
+            $('confirmNewPasswordInput').value = '';
 
-$('navPreferences').onclick = () => router.push('preferencesView', 'Preferences');
-
-$('navDeveloper').onclick = () => router.push('developerView', 'Developer Settings');
-
-$('doLogout').onclick = () => {
-    wallet = null;
-    location.reload();
-};
-
-// Accounts Page
-$('addAccountBtn').onclick = () => {
-    alert("Add Account - Coming soon in v1.1\n\nMultiple account support will be available in the next release.");
-};
-
-// Security & Privacy Page
-$('navChangePasswordDetail').onclick = () => {
-    alert("Change Password - Coming soon in v1.1");
-};
-
-$('navAutoLock').onclick = () => {
-    alert("Auto-Lock Timer - Coming soon in v1.1\n\nConfigure automatic wallet locking after inactivity.");
-};
-
-$('navShowRecovery').onclick = () => {
-    $('secretBox').style.filter = "blur(8px)";
-    $('secretBox').innerText = "CLICK TO REVEAL";
-    router.push('revealView', 'Recovery Phrase');
-};
-
-// Preferences Page
-$('navLanguage').onclick = () => {
-    alert("Display Language - Coming soon in v1.1\n\nMulti-language support will be available soon.");
-};
-
-$('navCurrency').onclick = () => {
-    alert("Currency - Coming soon in v1.1\n\nChoose your preferred display currency.");
-};
-
-// Developer Settings Page
-$('navQuantaNetwork').onclick = () => router.push('networkView', 'Network');
-
-// About Quanta Page
-$('navTerms').onclick = () => {
-    window.open('https://quanta.network/terms', '_blank');
-};
-
-$('navPrivacy').onclick = () => {
-    window.open('https://quanta.network/privacy', '_blank');
-};
-
-$('navWebsite').onclick = () => {
-    window.open('https://quanta.network', '_blank');
-};
-
-// Reveal
-$('secretBox').onclick = () => {
-    $('secretBox').style.filter = "none";
-    $('secretBox').innerText = wallet.get_private_key_hex();
-};
-
-// Network
-$('selTestnet').onclick = () => { $('checkTestnet').style.opacity = 1; $('checkLocal').style.opacity = 0; $('currentNetLabel').innerText = "Testnet >"; };
-$('selLocal').onclick = () => { $('checkTestnet').style.opacity = 0; $('checkLocal').style.opacity = 1; $('currentNetLabel').innerText = "Localhost >"; };
+            router.pop();
+        } catch (e) {
+            errorEl.innerText = "Current password is incorrect";
+            errorEl.style.opacity = 1;
+            $('currentPasswordInput').value = '';
+            $('currentPasswordInput').focus();
+        } finally {
+            btn.innerText = "Change Password";
+            btn.disabled = false;
+        }
+    };
 
 
-function updateData() {
-    if (!wallet) return;
-    const addr = wallet.get_address();
-    $('addressDisplay').innerText = addr.substring(0, 6) + "..." + addr.substring(addr.length - 4);
-    $('fullAddress').innerText = addr;
-    // Real Balance - will be fetched from blockchain later
-    $('balanceDisplay').innerText = "0.00";
-}
+
+    function updateAutoLockDisplay() {
+        const minutes = autoLockMinutes;
+        let displayText;
+
+        if (minutes === 0) {
+            displayText = "Never >";
+        } else if (minutes === 60) {
+            displayText = "1 hour >";
+        } else if (minutes === 1) {
+            displayText = "1 minute >";
+        } else {
+            displayText = `${minutes} minutes >`;
+        }
+
+        if ($('autoLockDisplay')) {
+            $('autoLockDisplay').innerText = displayText;
+        }
+
+        // Update checkmarks
+        ['1', '5', '15', '30', '60', 'Never'].forEach(id => {
+            const checkEl = $('check' + id);
+            if (checkEl) {
+                const itemMinutes = id === 'Never' ? 0 : parseInt(id);
+                checkEl.innerText = itemMinutes === minutes ? '●' : '';
+            }
+        });
+    }
+
+    function resetAutoLockTimer() {
+        if (autoLockTimer) {
+            clearTimeout(autoLockTimer);
+        }
+
+        if (autoLockMinutes > 0) {
+            autoLockTimer = setTimeout(() => {
+                // Lock wallet
+                wallet = null;
+                location.reload();
+            }, autoLockMinutes * 60 * 1000);
+        }
+    }
+
+    function setAutoLockTime(minutes) {
+        autoLockMinutes = minutes;
+        localStorage.setItem('autoLockMinutes', minutes.toString());
+        updateAutoLockDisplay();
+        resetAutoLockTimer();
+    }
+
+    // Auto-lock timer options
+    ['1', '5', '15', '30', '60'].forEach(time => {
+        $('lockTime' + time).onclick = () => setAutoLockTime(parseInt(time));
+    });
+
+    $('lockTimeNever').onclick = () => setAutoLockTime(0);
+
+    // Preferences Page
+    $('navLanguage').onclick = () => {
+        showToast("Display Language - Coming soon in v1.1");
+    };
+
+    $('navCurrency').onclick = () => {
+        showToast("Currency - Coming soon in v1.1");
+    };
+
+    // Developer Settings Page
+    $('navQuantaNetwork').onclick = () => router.push('networkView', 'Network');
+
+    // About Quanta Page
+    $('navTerms').onclick = () => {
+        window.open('https://quantachain.org/terms', '_blank');
+    };
+
+    $('navPrivacy').onclick = () => {
+        window.open('https://quantachain.org/privacy', '_blank');
+    };
+
+    $('navWebsite').onclick = () => {
+        window.open('https://quantachain.org', '_blank');
+    };
+
+    // Reveal
+    $('secretBox').onclick = () => {
+        $('secretBox').style.filter = "none";
+        $('secretBox').innerText = wallet.get_private_key_hex();
+    };
+
+    // Network switching
+    $('selTestnet').onclick = () => {
+        $('checkTestnet').style.opacity = 1;
+        $('checkLocal').style.opacity = 0;
+        $('currentNetLabel').innerText = "Testnet >";
+        api.setNetwork('testnet');
+        currentNetwork = 'testnet';
+        localStorage.setItem('network', 'testnet');
+        if (wallet) updateData();
+        showToast('Switched to Testnet');
+    };
+
+    $('selLocal').onclick = () => {
+        $('checkTestnet').style.opacity = 0;
+        $('checkLocal').style.opacity = 1;
+        $('currentNetLabel').innerText = "Localhost >";
+        api.setNetwork('localhost');
+        currentNetwork = 'localhost';
+        localStorage.setItem('network', 'localhost');
+        if (wallet) updateData();
+        showToast('Switched to Localhost');
+    };
 
 
+    async function updateData() {
+        if (!wallet) return;
+        const addr = wallet.get_address();
+        $('addressDisplay').innerText = addr.substring(0, 6) + "..." + addr.substring(addr.length - 4);
+        $('fullAddress').innerText = addr;
+
+        // Fetch real balance from blockchain
+        try {
+            const balanceMicrounits = await api.getBalance(addr);
+            const balanceQUA = api.microunitsToQUA(balanceMicrounits);
+            $('balanceDisplay').innerText = balanceQUA;
+
+            // Update token list
+            const tokenAmount = document.querySelector('#tokenList .activity-item div[style*="font-size:13px"]');
+            if (tokenAmount) {
+                tokenAmount.innerText = `${balanceQUA} QUA`;
+            }
+
+            // Update USD value (placeholder - would need price API)
+            const tokenValue = document.querySelector('#tokenList .activity-item div[style*="font-weight:700"]');
+            if (tokenValue) {
+                const usdValue = (parseFloat(balanceQUA) * 0.10).toFixed(2); // Placeholder price
+                tokenValue.innerText = `$${usdValue}`;
+            }
+        } catch (error) {
+            console.error('Failed to fetch balance:', error);
+            $('balanceDisplay').innerText = "0.00";
+            showToast('Failed to connect to blockchain', 3000);
+        }
+
+        // Initialize auto-lock timer
+        updateAutoLockDisplay();
+        resetAutoLockTimer();
+
+        // Check network health
+        checkNetworkHealth();
+    }
+
+    // Check network connectivity
+    async function checkNetworkHealth() {
+        try {
+            const health = await api.healthCheck();
+            if (health.status === 'healthy') {
+                console.log('✅ Connected to Quanta network');
+            }
+        } catch (error) {
+            console.warn('⚠️ Network connection issue:', error);
+        }
+    }
+
+    // Track user activity to reset auto-lock timer
+    document.addEventListener('click', () => {
+        if (wallet) resetAutoLockTimer();
+    });
+
+    document.addEventListener('keydown', () => {
+        if (wallet) resetAutoLockTimer();
+    });
+
+
+} // End of setupEventHandlers()

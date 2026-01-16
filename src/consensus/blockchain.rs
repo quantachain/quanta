@@ -147,7 +147,7 @@ impl Blockchain {
             storage.set_chain_height(1)?;
             storage.save_account_state(&account_state)?;
             
-            tracing::info!("✓ Genesis block verified: {}", genesis.hash);
+            tracing::info!(" Genesis block verified: {}", genesis.hash);
             (vec![genesis], account_state, if network == ChainNetwork::Testnet { 4 } else { 6 })
         } else {
             tracing::info!("Loaded existing blockchain with {} blocks", chain.len());

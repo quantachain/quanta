@@ -143,23 +143,23 @@ I've created 13 markdown files in the `gitbook` folder, ready for import into Gi
 
 ```
 Documentation
-├── Getting Started
-│   ├── Installation
-│   └── Quick Start
-├── User Guides
-│   ├── Wallet Operations
-│   └── Configuration
-├── Node Operators
-│   ├── Node Operator Guide
-│   └── Mining Guide
-├── Technical Reference
-│   ├── API Reference
-│   ├── Technical Specs
-│   ├── P2P Networking
-│   └── Quantum Resistance
-└── Community
-    ├── Security
-    └── Contributing
+ Getting Started
+    Installation
+    Quick Start
+ User Guides
+    Wallet Operations
+    Configuration
+ Node Operators
+    Node Operator Guide
+    Mining Guide
+ Technical Reference
+    API Reference
+    Technical Specs
+    P2P Networking
+    Quantum Resistance
+ Community
+     Security
+     Contributing
 ```
 
 ## Notes

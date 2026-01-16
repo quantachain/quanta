@@ -40,23 +40,23 @@ The documentation is organized into the following sections:
 
 ```
 Documentation
-├── Getting Started
-│   ├── Installation
-│   └── Quick Start
-├── User Guides
-│   ├── Wallet Operations
-│   └── Configuration
-├── Node Operators
-│   ├── Node Operator Guide
-│   └── Mining Guide
-├── Technical Reference
-│   ├── API Reference
-│   ├── Technical Specs
-│   ├── P2P Networking
-│   └── Quantum Resistance
-└── Community
-    ├── Security
-    └── Contributing
+ Getting Started
+    Installation
+    Quick Start
+ User Guides
+    Wallet Operations
+    Configuration
+ Node Operators
+    Node Operator Guide
+    Mining Guide
+ Technical Reference
+    API Reference
+    Technical Specs
+    P2P Networking
+    Quantum Resistance
+ Community
+     Security
+     Contributing
 ```
 
 ## Customization

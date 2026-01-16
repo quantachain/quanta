@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quanta Wallet Test Page</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0A0A0F 0%, #1A1A2E 100%);
+            color: #FFFFFF;
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 48px;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: #8B8B9E;
+            margin-bottom: 40px;
+            font-size: 18px;
+        }
+
+        .card {
+            background: rgba(19, 19, 26, 0.8);
+            border: 1px solid #1F1F2E;
+            border-radius: 16px;
+            padding: 32px;
+            margin-bottom: 24px;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 24px;
+        }
+
+        .status.connected {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10B981;
+            border: 1px solid #10B981;
+        }
+
+        .status.disconnected {
+            background: rgba(239, 68, 68, 0.2);
+            color: #EF4444;
+            border: 1px solid #EF4444;
+        }
+
+        button {
+            background: linear-gradient(135deg, #7C3AED 0%, #3B82F6 100%);
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-right: 12px;
+            margin-bottom: 12px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(124, 58, 237, 0.4);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .info {
+            background: rgba(124, 58, 237, 0.1);
+            border: 1px solid #7C3AED;
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
+        }
+
+        .info-label {
+            color: #8B8B9E;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            margin-bottom: 8px;
+        }
+
+        .info-value {
+            font-family: 'SF Mono', monospace;
+            font-size: 14px;
+            word-break: break-all;
+        }
+
+        .log {
+            background: #000000;
+            border: 1px solid #1F1F2E;
+            border-radius: 8px;
+            padding: 16px;
+            font-family: 'SF Mono', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 16px;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 4px 0;
+        }
+
+        .log-time {
+            color: #8B8B9E;
+        }
+
+        .log-success {
+            color: #10B981;
+        }
+
+        .log-error {
+            color: #EF4444;
+        }
+
+        .log-info {
+            color: #3B82F6;
+        }
+
+        input {
+            background: rgba(19, 19, 26, 0.8);
+            border: 1px solid #1F1F2E;
+            border-radius: 8px;
+            padding: 12px 16px;
+            color: white;
+            font-size: 14px;
+            width: 100%;
+            margin-bottom: 12px;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #7C3AED;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🔮 Quanta Wallet Test</h1>
+        <p class="subtitle">Test dApp integration with the Quanta Wallet extension</p>
+
+        <div class="card">
+            <h2>Connection Status</h2>
+            <div id="status" class="status disconnected">Not Connected</div>
+
+            <div>
+                <button id="connectBtn">Connect Wallet</button>
+                <button id="disconnectBtn" disabled>Disconnect</button>
+            </div>
+
+            <div id="accountInfo" style="display: none;">
+                <div class="info">
+                    <div class="info-label">Connected Account</div>
+                    <div class="info-value" id="accountAddress">-</div>
+                </div>
+                <div class="info">
+                    <div class="info-label">Balance</div>
+                    <div class="info-value" id="accountBalance">- QUA</div>
+                </div>
+                <div class="info">
+                    <div class="info-label">Network</div>
+                    <div class="info-value" id="networkInfo">-</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Send Transaction</h2>
+            <input type="text" id="recipientInput" placeholder="Recipient Address" />
+            <input type="number" id="amountInput" placeholder="Amount (QUA)" step="0.000001" />
+            <button id="sendBtn" disabled>Send Transaction</button>
+        </div>
+
+        <div class="card">
+            <h2>Sign Message</h2>
+            <input type="text" id="messageInput" placeholder="Message to sign" />
+            <button id="signBtn" disabled>Sign Message</button>
+            <div id="signatureOutput" style="display: none;">
+                <div class="info">
+                    <div class="info-label">Signature</div>
+                    <div class="info-value" id="signatureValue">-</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Activity Log</h2>
+            <div id="log" class="log">
+                <div class="log-entry log-info">
+                    <span class="log-time">[Ready]</span> Waiting for wallet connection...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Logging utility
+        function log(message, type = 'info') {
+            const logEl = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.innerHTML = `<span class="log-time">[${time}]</span> ${message}`;
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        // Check if Quanta wallet is available
+        if (window.quanta) {
+            log('✅ Quanta Wallet detected!', 'success');
+        } else {
+            log('❌ Quanta Wallet not found. Please install the extension.', 'error');
+        }
+
+        // UI Elements
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const sendBtn = document.getElementById('sendBtn');
+        const signBtn = document.getElementById('signBtn');
+        const statusEl = document.getElementById('status');
+        const accountInfo = document.getElementById('accountInfo');
+
+        // Connect wallet
+        connectBtn.addEventListener('click', async () => {
+            if (!window.quanta) {
+                log('❌ Quanta Wallet not available', 'error');
+                return;
+            }
+
+            try {
+                log('🔄 Requesting wallet connection...', 'info');
+                const result = await window.quanta.connect();
+
+                log(`✅ Connected to account: ${result.account}`, 'success');
+                log(`📡 Network: ${result.network}`, 'info');
+
+                // Update UI
+                statusEl.textContent = 'Connected';
+                statusEl.className = 'status connected';
+                document.getElementById('accountAddress').textContent = result.account;
+                document.getElementById('networkInfo').textContent = result.network;
+                accountInfo.style.display = 'block';
+
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                sendBtn.disabled = false;
+                signBtn.disabled = false;
+
+                // Fetch balance
+                try {
+                    const balance = await window.quanta.getBalance();
+                    document.getElementById('accountBalance').textContent = `${balance} QUA`;
+                    log(`💰 Balance: ${balance} QUA`, 'success');
+                } catch (error) {
+                    log(`⚠️ Failed to fetch balance: ${error.message}`, 'error');
+                }
+            } catch (error) {
+                log(`❌ Connection failed: ${error.message}`, 'error');
+            }
+        });
+
+        // Disconnect wallet
+        disconnectBtn.addEventListener('click', () => {
+            if (window.quanta) {
+                window.quanta.disconnect();
+                log('🔌 Disconnected from wallet', 'info');
+
+                statusEl.textContent = 'Not Connected';
+                statusEl.className = 'status disconnected';
+                accountInfo.style.display = 'none';
+
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+                sendBtn.disabled = true;
+                signBtn.disabled = true;
+            }
+        });
+
+        // Send transaction
+        sendBtn.addEventListener('click', async () => {
+            const recipient = document.getElementById('recipientInput').value;
+            const amount = document.getElementById('amountInput').value;
+
+            if (!recipient || !amount) {
+                log('❌ Please enter recipient and amount', 'error');
+                return;
+            }
+
+            try {
+                log(`🔄 Sending ${amount} QUA to ${recipient}...`, 'info');
+                const txHash = await window.quanta.sendTransaction(recipient, amount);
+                log(`✅ Transaction sent! Hash: ${txHash}`, 'success');
+
+                // Clear inputs
+                document.getElementById('recipientInput').value = '';
+                document.getElementById('amountInput').value = '';
+            } catch (error) {
+                log(`❌ Transaction failed: ${error.message}`, 'error');
+            }
+        });
+
+        // Sign message
+        signBtn.addEventListener('click', async () => {
+            const message = document.getElementById('messageInput').value;
+
+            if (!message) {
+                log('❌ Please enter a message to sign', 'error');
+                return;
+            }
+
+            try {
+                log(`🔄 Signing message: "${message}"...`, 'info');
+                const signature = await window.quanta.signMessage(message);
+                log(`✅ Message signed!`, 'success');
+
+                document.getElementById('signatureValue').textContent = signature;
+                document.getElementById('signatureOutput').style.display = 'block';
+            } catch (error) {
+                log(`❌ Signing failed: ${error.message}`, 'error');
+            }
+        });
+
+        // Listen for account changes
+        if (window.quanta) {
+            window.quanta.on('accountsChanged', (accounts) => {
+                log(`🔄 Account changed: ${accounts[0]}`, 'info');
+                document.getElementById('accountAddress').textContent = accounts[0];
+            });
+
+            window.quanta.on('networkChanged', (network) => {
+                log(`🔄 Network changed: ${network}`, 'info');
+                document.getElementById('networkInfo').textContent = network;
+            });
+        }
+    </script>
+</body>
+
+</html>

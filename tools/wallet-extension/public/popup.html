@@ -5,7 +5,8 @@
     <meta charset="UTF-8">
     <title>Quanta</title>
     <link rel="stylesheet" href="styles.css">
-    <!-- Fonts are imported in CSS via Google Fonts -->
+    <!-- QR Code Library -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 </head>
 
 <body>
@@ -54,7 +55,9 @@
         <div id="tokenList">
             <div class="activity-item">
                 <div style="display:flex; align-items:center; gap:14px;">
-                    <img src="icons/icon48.png" width="40" style="border-radius:50%;">
+                    <div
+                        style="width:40px; height:40px; background:var(--primary); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:18px; color:#000;">
+                        Q</div>
                     <div>
                         <div style="font-weight:700; font-size:16px;">Quanta</div>
                         <div style="font-size:13px; color:var(--text-muted);">0.00 QUA</div>
@@ -119,12 +122,13 @@
     <!-- A. ONBOARDING START -->
     <div id="onboardingView" class="view" style="justify-content:center; align-items:center;">
         <div
-            style="width: 80px; height: 80px; background:var(--card-bg); border-radius:24px; display:flex; align-items:center; justify-content:center; margin-bottom:24px;">
-            <img src="icons/icon48.png" width="48">
+            style="width:80px; height:80px; background:var(--primary); border-radius:50%; display:flex; align-items:center; justify-content:center; margin-bottom:32px;">
+            <span style="font-size:48px; font-weight:700; color:#000;">Q</span>
         </div>
-        <h1 style="font-family:'Space Grotesk'; font-size:32px; margin-bottom:10px;">Quanta</h1>
-        <p style="color:var(--text-muted); margin-bottom:40px; text-align:center; padding:0 20px;">
-            The next generation quantum-resistant wallet.
+        <h1 style="font-family:'Inter'; font-size:28px; font-weight:700; margin-bottom:12px;">Quanta Wallet</h1>
+        <p
+            style="color:var(--text-secondary); margin-bottom:40px; text-align:center; padding:0 40px; font-size:15px; line-height:1.5;">
+            Quantum-resistant security for your digital assets
         </p>
         <button id="startSetupBtn" class="btn-main">Create a new wallet</button>
         <button id="importWalletBtn" class="btn-sub" style="margin-top:12px;">I already have a wallet</button>
@@ -159,7 +163,10 @@
 
     <!-- C. LOGIN (UNLOCK) -->
     <div id="loginView" class="view" style="justify-content:center; align-items:center;">
-        <img src="icons/icon48.png" width="40" style="margin-bottom:24px; border-radius:50%;">
+        <div
+            style="width:60px; height:60px; background:var(--primary); border-radius:50%; display:flex; align-items:center; justify-content:center; margin-bottom:24px;">
+            <span style="font-size:32px; font-weight:700; color:#000;">Q</span>
+        </div>
         <h2 style="font-size:24px; margin-bottom:32px;">Welcome back!</h2>
 
         <div class="input-group" style="width:100%;">
@@ -194,34 +201,22 @@
         <button id="broadcastBtn" class="btn-main">Review</button>
     </div>
 
-    <!-- 4. RECEIVE (Keeping simple) -->
+    <!-- 4. RECEIVE -->
     <div id="receiveView" class="view" style="align-items:center; justify-content:center;">
-        <div style="background:white; padding:12px; border-radius:24px;">
-            <div
-                style="width:200px; height:200px; background:#ddd; border-radius:12px; display:flex; align-items:center; justify-content:center; color:#333;">
-                QR Code</div>
+        <div style="background:white; padding:16px; border-radius:16px; margin-bottom:24px;">
+            <div id="qrcode" style="width:200px; height:200px;"></div>
         </div>
         <div id="fullAddress"
-            style="font-family:'JetBrains Mono'; color:var(--text-muted); margin-top:20px; font-size:13px; text-align:center; width:80%; word-break:break-all;">
+            style="font-family:'SF Mono', monospace; color:var(--text-muted); margin-bottom:20px; font-size:12px; text-align:center; width:80%; word-break:break-all;">
             0x00...</div>
-        <button id="copyBtn" class="btn-main" style="margin-top:20px; width:auto; padding:12px 30px;">Copy
-            Address</button>
+        <button id="copyBtn" class="btn-main" style="width:auto; padding:12px 30px;">Copy Address</button>
     </div>
 
     <!-- 5. SETTINGS (Menu) -->
     <div id="settingsView" class="view">
-        <!-- Search -->
-        <div class="search-input">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="11" cy="11" r="8"></circle>
-                <path d="m21 21-4.35-4.35"></path>
-            </svg>
-            <input type="text" placeholder="Search...">
-        </div>
-
-        <!-- General Section -->
+        <!-- Wallet Section -->
         <div class="settings-section">
-            <div class="settings-section-title">General</div>
+            <div class="settings-section-title">Wallet</div>
 
             <div class="settings-item" id="navAccounts">
                 <div class="settings-item-left">
@@ -230,9 +225,11 @@
                         <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                         <circle cx="12" cy="7" r="4"></circle>
                     </svg>
-                    <div class="settings-item-label">Manage Accounts</div>
+                    <div class="settings-item-label">Accounts</div>
                 </div>
-                <div class="settings-item-value">></div>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
             </div>
 
             <div class="settings-item" id="navNetwork">
@@ -245,15 +242,21 @@
                             d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z">
                         </path>
                     </svg>
-                    <div class="settings-item-label">Active Networks</div>
+                    <div class="settings-item-label">Network</div>
                 </div>
-                <div class="settings-item-value" id="currentNetLabel">Testnet ></div>
+                <div style="display:flex; align-items:center; gap:8px; color:var(--text-secondary);">
+                    <span id="currentNetLabel" style="font-size:13px;">Testnet</span>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                </div>
             </div>
         </div>
 
         <!-- Security Section -->
         <div class="settings-section">
-            <div class="settings-section-title">Security & Privacy</div>
+            <div class="settings-section-title">Security</div>
 
             <div class="settings-item" id="navReveal">
                 <div class="settings-item-left">
@@ -262,9 +265,11 @@
                         <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
                         <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
                     </svg>
-                    <div class="settings-item-label">Show Secret Key</div>
+                    <div class="settings-item-label">Show Private Key</div>
                 </div>
-                <div class="settings-item-value">></div>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
             </div>
 
             <div class="settings-item" id="navChangePassword">
@@ -275,26 +280,33 @@
                     </svg>
                     <div class="settings-item-label">Change Password</div>
                 </div>
-                <div class="settings-item-value">></div>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
             </div>
-        </div>
 
-        <!-- Quanta Specific -->
-        <div class="settings-section">
-            <div class="settings-section-title">Quanta</div>
-
-            <div class="settings-item" id="navQuantumInfo">
+            <div class="settings-item" id="navAutoLock">
                 <div class="settings-item-left">
                     <svg class="settings-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                         stroke-width="2">
                         <circle cx="12" cy="12" r="10"></circle>
-                        <line x1="12" y1="16" x2="12" y2="12"></line>
-                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                        <polyline points="12 6 12 12 16 14"></polyline>
                     </svg>
-                    <div class="settings-item-label">Quantum Security Info</div>
+                    <div class="settings-item-label">Auto-Lock</div>
                 </div>
-                <div class="settings-item-value">></div>
+                <div style="display:flex; align-items:center; gap:8px; color:var(--text-secondary);">
+                    <span id="autoLockDisplay" style="font-size:13px;">15 min</span>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                </div>
             </div>
+        </div>
+
+        <!-- About Section -->
+        <div class="settings-section">
+            <div class="settings-section-title">About</div>
 
             <div class="settings-item" id="navAbout">
                 <div class="settings-item-left">
@@ -306,41 +318,17 @@
                     </svg>
                     <div class="settings-item-label">About Quanta</div>
                 </div>
-                <div class="settings-item-value">v1.0.0 ></div>
+                <div style="display:flex; align-items:center; gap:8px; color:var(--text-secondary);">
+                    <span style="font-size:13px;">v1.0.0</span>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        stroke-width="2.5">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                </div>
             </div>
         </div>
 
-        <!-- Advanced Section -->
-        <div class="settings-section">
-            <div class="settings-section-title">Advanced</div>
-
-            <div class="settings-item" id="navPreferences">
-                <div class="settings-item-left">
-                    <svg class="settings-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                        stroke-width="2">
-                        <path
-                            d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83">
-                        </path>
-                    </svg>
-                    <div class="settings-item-label">Preferences</div>
-                </div>
-                <div class="settings-item-value">></div>
-            </div>
-
-            <div class="settings-item" id="navDeveloper">
-                <div class="settings-item-left">
-                    <svg class="settings-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                        stroke-width="2">
-                        <polyline points="16 18 22 12 16 6"></polyline>
-                        <polyline points="8 6 2 12 8 18"></polyline>
-                    </svg>
-                    <div class="settings-item-label">Developer Settings</div>
-                </div>
-                <div class="settings-item-value">></div>
-            </div>
-        </div>
-
-        <!-- Danger Zone -->
+        <!-- Lock Wallet -->
         <div class="settings-section">
             <div class="settings-item" id="doLogout">
                 <div class="settings-item-left">
@@ -350,13 +338,13 @@
                         <polyline points="16 17 21 12 16 7"></polyline>
                         <line x1="21" y1="12" x2="9" y2="12"></line>
                     </svg>
-                    <div class="settings-item-label settings-item-danger">Lock Wallet</div>
+                    <div class="settings-item-label" style="color: var(--error);">Lock Wallet</div>
                 </div>
             </div>
         </div>
 
         <div class="version-info">
-            Quanta Wallet Extension v1.0.0<br>
+            Quanta Wallet v1.0.0<br>
             Quantum-Resistant Security
         </div>
     </div>
@@ -402,38 +390,6 @@
         <button class="btn-main" id="addAccountBtn" style="margin-top:auto;">Add Account</button>
     </div>
 
-    <!-- 9. SECURITY & PRIVACY -->
-    <div id="securityView" class="view">
-        <div class="settings-section">
-            <div class="settings-item" id="navChangePasswordDetail">
-                <div class="settings-item-label">Change Password</div>
-                <div class="settings-item-value">></div>
-            </div>
-
-            <div class="settings-item" id="navAutoLock">
-                <div class="settings-item-label">Auto-Lock Timer</div>
-                <div class="settings-item-value">15 minutes ></div>
-            </div>
-
-            <div class="settings-item" id="navShowRecovery">
-                <div class="settings-item-label">Show Recovery Phrase</div>
-                <div class="settings-item-value">></div>
-            </div>
-        </div>
-
-        <div class="settings-section">
-            <div class="settings-section-title">Privacy</div>
-
-            <div class="settings-item" style="cursor:default;">
-                <div class="settings-item-label">Show Wallet Shortcuts</div>
-                <label class="toggle-switch">
-                    <input type="checkbox" id="toggleShortcuts">
-                    <span class="toggle-slider"></span>
-                </label>
-            </div>
-        </div>
-    </div>
-
     <!-- 10. PREFERENCES -->
     <div id="preferencesView" class="view">
         <div class="settings-section">
@@ -470,7 +426,7 @@
 
             <div class="settings-item" id="navQuantaNetwork">
                 <div class="settings-item-left">
-                    <img src="icons/icon48.png" width="24" style="border-radius:4px;">
+                    <img src="assets/quanta-white.png" width="24" style="border-radius:4px;">
                     <div class="settings-item-label">Quanta</div>
                 </div>
                 <div class="settings-item-value">Quanta Testnet ></div>
@@ -507,7 +463,7 @@
     <!-- 12. ABOUT QUANTA -->
     <div id="aboutView" class="view" style="align-items:center;">
         <div style="margin-top:40px; text-align:center;">
-            <img src="icons/icon48.png" width="80" style="border-radius:16px; margin-bottom:16px;">
+            <img src="assets/quanta-white.png" width="80" style="border-radius:16px; margin-bottom:16px;">
             <h2 style="font-family:'Space Grotesk'; font-size:32px; margin-bottom:8px;">Quanta</h2>
             <div style="color:var(--text-muted); font-size:14px; margin-bottom:40px;">Version 1.0.0</div>
         </div>
@@ -538,6 +494,94 @@
                     <polyline points="15 3 21 3 21 9"></polyline>
                     <line x1="10" y1="14" x2="21" y2="3"></line>
                 </svg>
+            </div>
+        </div>
+    </div>
+
+    <!-- 13. CHANGE PASSWORD -->
+    <div id="changePasswordView" class="view">
+        <p style="color:var(--text-muted); font-size:13px; margin-bottom:24px;">Change your wallet password. You'll need
+            your current password to proceed.</p>
+
+        <label class="input-label">Current Password</label>
+        <div class="input-group">
+            <input id="currentPasswordInput" type="password" placeholder="Enter current password">
+        </div>
+
+        <label class="input-label">New Password</label>
+        <div class="input-group">
+            <input id="newPasswordChangeInput" type="password" placeholder="Min 8 characters">
+        </div>
+
+        <label class="input-label">Confirm New Password</label>
+        <div class="input-group">
+            <input id="confirmNewPasswordInput" type="password" placeholder="Confirm new password">
+        </div>
+
+        <div id="changePasswordError" style="color:#FF6B6B; font-size:12px; margin-bottom:16px; opacity:0;">Error
+            message</div>
+
+        <button id="changePasswordBtn" class="btn-main" style="margin-top:auto;">Change Password</button>
+    </div>
+
+    <!-- 14. AUTO-LOCK TIMER -->
+    <div id="autoLockView" class="view">
+        <p style="color:var(--text-muted); font-size:13px; margin-bottom:24px;">Set how long the wallet stays unlocked
+            when idle</p>
+
+        <div class="settings-section">
+            <div class="settings-item" id="lockTime1" data-minutes="1">
+                <div class="settings-item-label">1 minute</div>
+                <div class="settings-item-value" id="check1"></div>
+            </div>
+
+            <div class="settings-item" id="lockTime5" data-minutes="5">
+                <div class="settings-item-label">5 minutes</div>
+                <div class="settings-item-value" id="check5"></div>
+            </div>
+
+            <div class="settings-item" id="lockTime15" data-minutes="15">
+                <div class="settings-item-label">15 minutes</div>
+                <div class="settings-item-value" id="check15">●</div>
+            </div>
+
+            <div class="settings-item" id="lockTime30" data-minutes="30">
+                <div class="settings-item-label">30 minutes</div>
+                <div class="settings-item-value" id="check30"></div>
+            </div>
+
+            <div class="settings-item" id="lockTime60" data-minutes="60">
+                <div class="settings-item-label">1 hour</div>
+                <div class="settings-item-value" id="check60"></div>
+            </div>
+
+            <div class="settings-item" id="lockTimeNever" data-minutes="0">
+                <div class="settings-item-label">Never</div>
+                <div class="settings-item-value" id="checkNever"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast" class="toast"></div>
+
+    <!-- PASSWORD CONFIRMATION MODAL -->
+    <div id="passwordModal" class="modal">
+        <div class="modal-content">
+            <h3 style="font-size:18px; margin-bottom:8px;">Confirm Password</h3>
+            <p style="color:var(--text-muted); font-size:13px; margin-bottom:24px;">Enter your password to view your
+                secret key</p>
+
+            <div class="input-group">
+                <input id="confirmPasswordInput" type="password" placeholder="Enter password">
+            </div>
+
+            <div id="passwordError" style="color:#FF6B6B; font-size:12px; margin-bottom:16px; opacity:0;">Incorrect
+                password</div>
+
+            <div style="display:flex; gap:12px;">
+                <button id="cancelPasswordBtn" class="btn-sub" style="flex:1;">Cancel</button>
+                <button id="confirmPasswordBtn" class="btn-main" style="flex:1;">Confirm</button>
             </div>
         </div>
     </div>
