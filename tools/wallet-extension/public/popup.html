@@ -35,83 +35,60 @@
         <!-- Actions -->
         <div class="actions-row">
             <div class="action-item" id="navSend">
+                <div class="action-icon-circle">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="19" x2="12" y2="5"></line>
+                        <polyline points="5 12 12 5 19 12"></polyline>
+                    </svg>
+                </div>
                 <div class="action-label">Send</div>
             </div>
             <div class="action-item" id="navReceive">
+                <div class="action-icon-circle">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <polyline points="19 12 12 19 5 12"></polyline>
+                    </svg>
+                </div>
                 <div class="action-label">Receive</div>
             </div>
-            <div class="action-item" style="opacity:0.5;">
-                <div class="action-label">Buy</div>
-            </div>
         </div>
 
-        <!-- Tabs -->
-        <div class="tabs">
-            <div class="tab active">Tokens</div>
-            <div class="tab">Activity</div>
-        </div>
+        <!-- Network Status / Recent Activity -->
+        <div style="margin-top: 32px;">
+            <div
+                style="font-size: 13px; font-weight: 600; color: var(--text-muted); margin-bottom: 12px; padding-left: 4px; text-transform: uppercase; letter-spacing: 0.05em;">
+                NETWORK STATUS</div>
 
-        <!-- Content -->
-        <div id="tokenList">
-            <div class="activity-item">
+            <div id="networkHealthItem" class="activity-item" style="cursor: default;">
                 <div style="display:flex; align-items:center; gap:14px;">
-                    <div
-                        style="width:40px; height:40px; background:var(--primary); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:18px; color:#000;">
-                        Q</div>
+                    <div class="icon-box" style="color: var(--primary);">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                        </svg>
+                    </div>
                     <div>
-                        <div style="font-weight:700; font-size:16px;">Quanta</div>
-                        <div style="font-size:13px; color:var(--text-muted);">0.00 QUA</div>
+                        <div style="font-weight:600; font-size:14px;">Quanta Network</div>
+                        <div style="font-size:12px; color:var(--text-muted);">Healthy • Height <span
+                                id="blockHeightDisplay">0</span></div>
                     </div>
                 </div>
                 <div style="text-align:right;">
-                    <div style="font-weight:700;">$0.00</div>
-                    <div style="font-size:12px; color:#00E599;">+0.5%</div>
+                    <div
+                        style="width: 8px; height: 8px; background: var(--success); border-radius: 50%; box-shadow: 0 0 8px var(--success);">
+                    </div>
                 </div>
+            </div>
+
+            <!-- Activity List (Simplified) -->
+            <div id="activityList">
+                <!-- Activity will be injected here via JS if any -->
             </div>
         </div>
 
         <!-- Activity List (Hidden initially) -->
-        <div id="activityList" style="display:none;">
-            <div class="activity-item">
-                <div style="display:flex; align-items:center; gap:14px;">
-                    <div class="icon-box" style="background:rgba(0, 229, 153, 0.1); color:#00E599;">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline>
-                            <polyline points="17 6 23 6 23 12"></polyline>
-                        </svg>
-                    </div>
-                    <div>
-                        <div style="font-weight:600;">Received</div>
-                        <div style="font-size:12px; color:var(--text-muted);">From: 0x8a...9f1</div>
-                    </div>
-                </div>
-                <div style="text-align:right;">
-                    <div style="font-weight:600; color:#00E599;">+50 QUA</div>
-                    <div style="font-size:12px; color:var(--text-muted);">2m ago</div>
-                </div>
-            </div>
 
-            <div class="activity-item">
-                <div style="display:flex; align-items:center; gap:14px;">
-                    <div class="icon-box" style="background:rgba(239, 68, 68, 0.1); color:#EF4444;">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                            stroke-width="2">
-                            <line x1="12" y1="19" x2="12" y2="5"></line>
-                            <polyline points="5 12 12 5 19 12"></polyline>
-                        </svg>
-                    </div>
-                    <div>
-                        <div style="font-weight:600;">Sent</div>
-                        <div style="font-size:12px; color:var(--text-muted);">To: 0xc4...b2a</div>
-                    </div>
-                </div>
-                <div style="text-align:right;">
-                    <div style="font-weight:600;">-12.5 QUA</div>
-                    <div style="font-size:12px; color:var(--text-muted);">1h ago</div>
-                </div>
-            </div>
-        </div>
     </div>
 
     <!-- 2. OTHER VIEWS (WELCOME, SEND, RECEIVE...) -->
@@ -121,10 +98,7 @@
 
     <!-- A. ONBOARDING START -->
     <div id="onboardingView" class="view" style="justify-content:center; align-items:center;">
-        <div
-            style="width:80px; height:80px; background:var(--primary); border-radius:50%; display:flex; align-items:center; justify-content:center; margin-bottom:32px;">
-            <span style="font-size:48px; font-weight:700; color:#000;">Q</span>
-        </div>
+        <img src="assets/quanta-transparent-bg-logo.svg" width="100" style="margin-bottom:32px;">
         <h1 style="font-family:'Inter'; font-size:28px; font-weight:700; margin-bottom:12px;">Quanta Wallet</h1>
         <p
             style="color:var(--text-secondary); margin-bottom:40px; text-align:center; padding:0 40px; font-size:15px; line-height:1.5;">
@@ -163,10 +137,7 @@
 
     <!-- C. LOGIN (UNLOCK) -->
     <div id="loginView" class="view" style="justify-content:center; align-items:center;">
-        <div
-            style="width:60px; height:60px; background:var(--primary); border-radius:50%; display:flex; align-items:center; justify-content:center; margin-bottom:24px;">
-            <span style="font-size:32px; font-weight:700; color:#000;">Q</span>
-        </div>
+        <img src="assets/quanta-transparent-bg-logo.svg" width="80" style="margin-bottom:24px;">
         <h2 style="font-size:24px; margin-bottom:32px;">Welcome back!</h2>
 
         <div class="input-group" style="width:100%;">
@@ -187,7 +158,7 @@
     <div id="sendView" class="view">
         <label style="color:var(--text-muted); font-size:12px; margin: 10px 0 6px 4px;">Recipient</label>
         <div class="input-group">
-            <input id="recipientInput" placeholder="Address or ENS">
+            <input id="recipientInput" placeholder="Address">
         </div>
 
         <label style="color:var(--text-muted); font-size:12px; margin: 10px 0 6px 4px;">Amount (QUA)</label>
@@ -426,7 +397,7 @@
 
             <div class="settings-item" id="navQuantaNetwork">
                 <div class="settings-item-left">
-                    <img src="assets/quanta-white.png" width="24" style="border-radius:4px;">
+                    <img src="assets/quanta-transparent-bg-logo.svg" width="24" style="border-radius:4px;">
                     <div class="settings-item-label">Quanta</div>
                 </div>
                 <div class="settings-item-value">Quanta Testnet ></div>
@@ -463,7 +434,7 @@
     <!-- 12. ABOUT QUANTA -->
     <div id="aboutView" class="view" style="align-items:center;">
         <div style="margin-top:40px; text-align:center;">
-            <img src="assets/quanta-white.png" width="80" style="border-radius:16px; margin-bottom:16px;">
+            <img src="assets/quanta-transparent-bg-logo.svg" width="100" style="margin-bottom:16px;">
             <h2 style="font-family:'Space Grotesk'; font-size:32px; margin-bottom:8px;">Quanta</h2>
             <div style="color:var(--text-muted); font-size:14px; margin-bottom:40px;">Version 1.0.0</div>
         </div>

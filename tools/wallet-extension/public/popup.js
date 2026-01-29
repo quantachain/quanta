@@ -421,16 +421,8 @@ function setupEventHandlers() {
 
 
     // --- WALLET VIEWS ---
-    // Tab Logic
-    const tabs = document.querySelectorAll('.tab');
-    tabs[0].onclick = () => {
-        tabs[0].classList.add('active'); tabs[1].classList.remove('active');
-        $('tokenList').style.display = 'block'; $('activityList').style.display = 'none';
-    };
-    tabs[1].onclick = () => {
-        tabs[1].classList.add('active'); tabs[0].classList.remove('active');
-        $('tokenList').style.display = 'none'; $('activityList').style.display = 'block';
-    };
+    // Tabs removed
+
 
     $('navSend').onclick = () => router.push('sendView', 'Send QUA');
 
@@ -817,19 +809,6 @@ function setupEventHandlers() {
             const balanceMicrounits = await api.getBalance(addr);
             const balanceQUA = api.microunitsToQUA(balanceMicrounits);
             $('balanceDisplay').innerText = balanceQUA;
-
-            // Update token list
-            const tokenAmount = document.querySelector('#tokenList .activity-item div[style*="font-size:13px"]');
-            if (tokenAmount) {
-                tokenAmount.innerText = `${balanceQUA} QUA`;
-            }
-
-            // Update USD value (placeholder - would need price API)
-            const tokenValue = document.querySelector('#tokenList .activity-item div[style*="font-weight:700"]');
-            if (tokenValue) {
-                const usdValue = (parseFloat(balanceQUA) * 0.10).toFixed(2); // Placeholder price
-                tokenValue.innerText = `$${usdValue}`;
-            }
         } catch (error) {
             console.error('Failed to fetch balance:', error);
             $('balanceDisplay').innerText = "0.00";
@@ -848,11 +827,19 @@ function setupEventHandlers() {
     async function checkNetworkHealth() {
         try {
             const health = await api.healthCheck();
-            if (health.status === 'healthy') {
+            if (health && health.chain_height !== undefined) {
                 console.log('✅ Connected to Quanta network');
+                const heightEl = $('blockHeightDisplay');
+                if (heightEl) heightEl.innerText = health.chain_height;
+
+                // Update indicator if we have one
+                const indicator = document.querySelector('#networkHealthItem .activity-item-right div');
+                if (indicator) indicator.style.background = 'var(--success)';
             }
         } catch (error) {
             console.warn('⚠️ Network connection issue:', error);
+            const heightEl = $('blockHeightDisplay');
+            if (heightEl) heightEl.innerText = "OFFLINE";
         }
     }
 
