@@ -10,7 +10,7 @@ use crate::core::block::Block;
 use rayon::prelude::*;
 use lru::LruCache;
 use std::sync::Mutex;
-use std::num::NonZeroUsize;
+// use std::num::NonZeroUsize;
 
 /// Verify multiple transactions in parallel
 /// 

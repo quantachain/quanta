@@ -336,7 +336,7 @@ impl Blockchain {
         let difficulty = self.calculate_next_difficulty();
         
         // Get pending transactions sorted by fee (highest first) with size limits
-        let mut pending_txs = self.pending_transactions.write();
+        let pending_txs = self.pending_transactions.read();
         
         // Sort by fee descending (highest fee first)
         let mut sorted_txs = pending_txs.clone();
@@ -661,17 +661,22 @@ impl Blockchain {
     
     /// Get median timestamp from last N blocks (prevents timestamp manipulation)
     /// SECURITY FIX (HIGH-1): Median-time-past for difficulty adjustment
-    fn get_median_time_past(&self, end_index: usize, window: usize) -> i64 {
-        let chain = self.chain.read();
-        if end_index == 0 || chain.is_empty() {
+    /// Get median timestamp from last N blocks (prevents timestamp manipulation)
+    /// SECURITY FIX (HIGH-1): Median-time-past for difficulty adjustment
+    fn get_median_time_past(&self, end_index: u64, window: u64) -> i64 {
+        if end_index == 0 {
             return 0;
         }
         
         let start = end_index.saturating_sub(window);
-        let mut timestamps: Vec<i64> = chain[start..=end_index.min(chain.len()-1)]
-            .iter()
-            .map(|b| b.timestamp)
-            .collect();
+        let mut timestamps = Vec::new();
+
+        // Load blocks from storage
+        for i in start..=end_index {
+            if let Ok(block) = self.storage.load_block(i) {
+                timestamps.push(block.timestamp);
+            }
+        }
         
         if timestamps.is_empty() {
             return 0;
@@ -682,23 +687,34 @@ impl Blockchain {
     }
 
     /// Calculate next difficulty (pure function, deterministic)
+    /// Calculate next difficulty (pure function, deterministic)
     fn calculate_next_difficulty(&self) -> u32 {
-        let chain = self.chain.read();
-        let chain_len = chain.len();
+        let chain_len = self.get_height();
         
         // Not enough blocks yet - use initial difficulty
-        if chain_len < DIFFICULTY_ADJUSTMENT_INTERVAL as usize {
-            return chain.last().unwrap().difficulty;
+        if chain_len < DIFFICULTY_ADJUSTMENT_INTERVAL {
+            // Get latest block difficulty
+            return match self.storage.load_block(chain_len - 1) {
+                Ok(b) => b.difficulty,
+                Err(_) => Block::genesis(crate::core::ChainNetwork::Mainnet).difficulty,
+            };
         }
         
         // Only adjust at intervals
-        if chain_len % DIFFICULTY_ADJUSTMENT_INTERVAL as usize != 0 {
-            return chain.last().unwrap().difficulty;
+        if chain_len % DIFFICULTY_ADJUSTMENT_INTERVAL != 0 {
+             return match self.storage.load_block(chain_len - 1) {
+                Ok(b) => b.difficulty,
+                Err(_) => 6, // Fallback
+            };
         }
         
-        let latest_block = chain.last().unwrap();
-        let adjustment_start = chain_len.saturating_sub(DIFFICULTY_ADJUSTMENT_INTERVAL as usize);
-        let start_block = &chain[adjustment_start];
+        let latest_block = match self.storage.load_block(chain_len - 1) {
+            Ok(b) => b,
+            Err(_) => return 6,
+        };
+        
+        let adjustment_start = chain_len.saturating_sub(DIFFICULTY_ADJUSTMENT_INTERVAL);
+        // Note: we don't strictly need start_block object if we rely on median time
         
         // Calculate actual time taken for last N blocks
         // SECURITY FIX (HIGH-1): Use median-time-past to prevent timestamp manipulation
@@ -729,20 +745,37 @@ impl Blockchain {
     }
 
     /// Validate the entire blockchain
+    /// Validate the entire blockchain
     pub fn is_valid(&self) -> bool {
-        let chain = self.chain.read();
+        let chain_len = self.get_height();
         
-        if chain[0].index != 0 {
-            tracing::error!("Invalid genesis block");
-            return false;
+        tracing::info!("Validating chain from storage (height: {})", chain_len);
+        
+        // Validate genesis
+        if let Ok(genesis) = self.storage.load_block(0) {
+            if genesis.index != 0 {
+                tracing::error!("Invalid genesis block index");
+                return false;
+            }
+        } else {
+             tracing::error!("Could not load genesis block");
+             return false;
         }
 
-        for i in 1..chain.len() {
-            let current_block = &chain[i];
-            let previous_block = &chain[i - 1];
+        // Validate rest
+        for i in 1..chain_len {
+            let current = match self.storage.load_block(i) {
+                Ok(b) => b,
+                Err(_) => return false,
+            };
+            
+            let prev = match self.storage.load_block(i-1) {
+                Ok(b) => b,
+                Err(_) => return false,
+            };
 
-            if !current_block.is_valid(Some(previous_block)) {
-                tracing::error!("Block {} is invalid", i);
+            if !current.is_valid(Some(&prev)) {
+                tracing::error!("Invalid block at height {}", i);
                 return false;
             }
         }
