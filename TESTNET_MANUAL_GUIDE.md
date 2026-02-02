@@ -1,67 +1,84 @@
-# Quanta Testnet Manual Verification Guide
+# Quanta Node - Manual Verification Guide
 
-This guide provides the commands to manually verify the Quanta Testnet fixes, including mining, synchronization, and node management.
+This guide provides instructions to run and verify a single Quanta node using Docker or CLI.
 
-## 1. Build and Start the Testnet
-Rebuild the docker images and start the nodes in the background.
+## 1. Run via Docker (Recommended)
 
-```powershell
-docker-compose -f docker-compose.testnet.yml up --build -d
+Start the node and monitoring stack (Prometheus/Grafana):
+
+```bash
+docker-compose up --build -d
 ```
 
-## 2. Get Mining Wallet Address
-Retrieve the wallet address automatically generated inside the Node 1 container.
+### Check Logs
+```bash
+docker logs -f quanta-node
+```
 
-```powershell
-docker exec -e QUANTA_WALLET_PASSWORD=testnet_insecure_password quanta-testnet-node1 /usr/local/bin/quanta wallet_address --file wallet.qua | Select-String "0x[a-fA-F0-9]{40}"
+### Check Status
+```bash
+curl -s http://localhost:3000/api/stats | jq
+```
+
+## 2. Wallet Management
+
+You need a wallet to mine. Create one inside the container:
+
+```bash
+# Create wallet (password: test123)
+docker exec -it quanta-node quanta new-wallet --file /home/quanta/quanta_data/wallet.qua --password test123
+
+# View Address
+docker exec -it quanta-node quanta wallet --file /home/quanta/quanta_data/wallet.qua --password test123
 ```
 
 ## 3. Start Mining
-Start the miner on Node 1 using the address retrieved in the previous step.
-**Important:** Replace `<WALLET_ADDRESS>` with the actual address from step 2.
 
-```powershell
-docker exec quanta-testnet-node1 /usr/local/bin/quanta start_mining <WALLET_ADDRESS> --rpc-port 17782
+Start the built-in miner using your wallet address:
+
+```bash
+# Replace <ADDRESS> with your wallet address
+docker exec -d quanta-node quanta start_mining <ADDRESS> --rpc-port 7782
 ```
 
-## 4. Verify Sync and Chain Growth
-Check the chain height on both nodes. You should see the `chain_length` increasing on both nodes, confirming that Node 1 is mining and Node 2 is synchronizing.
+## 4. Monitor Mining
 
-**Single Check:**
-```powershell
-curl -s http://localhost:13000/api/stats
-curl -s http://localhost:13001/api/stats
+Check stats again to see block height increasing:
+
+```bash
+watch -n 5 "curl -s http://localhost:3000/api/stats"
 ```
 
-**Continuous Watch (Powershell):**
-```powershell
-while ($true) { 
-    curl.exe -s http://localhost:13000/api/stats; 
-    echo ""; 
-    curl.exe -s http://localhost:13001/api/stats; 
-    echo "---"; 
-    Start-Sleep -Seconds 5 
-}
-```
-*(Press Ctrl+C to stop the loop)*
+You can also view metrics in Grafana:
+- URL: http://localhost:3030
+- Login: admin / quanta2026
 
-## 5. Stop Mining
-To stop the mining process on Node 1:
+## 5. Stop Mining & Shutdown
 
-```powershell
-docker exec quanta-testnet-node1 /usr/local/bin/quanta stop_mining --rpc-port 17782
+Stop miner:
+```bash
+docker exec quanta-node quanta stop_mining --rpc-port 7782
 ```
 
-## 6. Shutdown Testnet
-To stop and remove the containers:
-
-```powershell
-docker-compose -f docker-compose.testnet.yml down
+Shutdown node:
+```bash
+docker-compose down
 ```
 
-## 7. Shutdown and Wipe Data (Clean Start)
-To stop containers and remove all blockchain data volumes for a fresh start:
+## 6. Run via CLI (Alternative)
 
-```powershell
-docker-compose -f docker-compose.testnet.yml down -v
+If you prefer running without Docker:
+
+```bash
+# Build
+cargo build --release
+
+# Start Node
+./target/release/quanta start --port 3000 --network-port 8333 --rpc-port 7782
+
+# (In new terminal) Create Wallet
+./target/release/quanta new-wallet --file wallet.qua
+
+# Mine
+./target/release/quanta start_mining <ADDRESS> --rpc-port 7782
 ```

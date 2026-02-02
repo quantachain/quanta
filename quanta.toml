@@ -1,6 +1,6 @@
 # QUANTA Node Configuration
 version = 1
-network_type = "Mainnet"
+network_type = "Testnet"
 
 [node]
 # API server port
@@ -44,7 +44,7 @@ bootstrap_nodes = [
 
 # DNS seeds for peer discovery (domain names that resolve to peer IPs)
 # These will return multiple IP addresses for decentralized discovery
-   dns_seeds = ["seed.testnet.quantachain.org"]
+dns_seeds = ["seed.testnet.quantachain.org"]
 
 # Mainnet bootstrap nodes (planned for Q1 2027)
 # Uncomment for mainnet:
