@@ -30,6 +30,16 @@ RUN useradd -m -u 1000 quanta
 WORKDIR /home/quanta
 
 # Copy binary from builder
+COPY --from=builder /app/target/release/quanta /usr/local/bin/quanta
+COPY --chown=quanta:quanta quanta.toml /home/quanta/quanta.toml
+
+# Create data directories and set permissions
+RUN mkdir -p /home/quanta/quanta_data \
+    /home/quanta/logs && \
+    chown -R quanta:quanta /home/quanta
+
+USER quanta
+
 # Expose ports
 # API: 3000, P2P: 8333, RPC: 7782, Metrics: 9090
 EXPOSE 3000 8333 7782 9090
@@ -39,4 +49,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:${API_PORT:-3000}/health || exit 1
 
 # Default command
-CMD ["quanta", "start", "-c", "/home/quanta/quanta.toml"]
+CMD ["/usr/local/bin/quanta", "start", "-c", "/home/quanta/quanta.toml"]

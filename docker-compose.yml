@@ -19,7 +19,7 @@ services:
     environment:
       - RUST_LOG=info
       - QUANTA_NODE_NAME=quanta-node
-    command: [ "quanta", "start", "-c", "/home/quanta/quanta.toml" ]
+    command: [ "/usr/local/bin/quanta", "start", "-c", "/home/quanta/quanta.toml" ]
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:3000/health" ]
       interval: 30s
