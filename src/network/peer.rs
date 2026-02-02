@@ -1,4 +1,4 @@
-use crate::network::protocol::{P2PMessage, serialize_message, deserialize_message};
+use crate::network::protocol::{P2PMessage, serialize_message, deserialize_message, MAX_MESSAGE_SIZE};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
@@ -112,8 +112,8 @@ impl Peer {
         
         let len = u32::from_be_bytes(len_bytes) as usize;
         
-        if len > 10 * 1024 * 1024 {
-            return Err("Message too large".to_string());
+        if len > MAX_MESSAGE_SIZE {
+            return Err(format!("Message too large: {} > {}", len, MAX_MESSAGE_SIZE));
         }
         
         // Read message data
