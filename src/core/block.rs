@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn verify_genesis_hash() {
-        let genesis = Block::genesis();
+        let genesis = Block::genesis(crate::core::ChainNetwork::Mainnet);
         
         // CONSENSUS-CRITICAL: Genesis block must have these exact parameters
         assert_eq!(genesis.index, 0);
@@ -228,7 +228,7 @@ mod tests {
 
     #[test]
     fn genesis_hash_recalculation() {
-        let genesis = Block::genesis();
+        let genesis = Block::genesis(crate::core::ChainNetwork::Mainnet);
         let recalculated = genesis.calculate_hash();
         
         assert_eq!(
