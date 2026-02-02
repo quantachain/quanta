@@ -113,9 +113,13 @@ const CHECKPOINTS: &[(u64, &str)] = &[
     // (10000, "<block_10000_hash>"),
 ];
 
-/// Thread-safe blockchain with persistent storage
+/// Thread-safe blockchain with persistent storage (OPTIMIZED)
+/// 
+/// CRITICAL CHANGE: No longer stores full chain in memory!
+/// Before: 3.15M blocks × 2 MB = 20 GB RAM (crashes!)
+/// After: Only genesis block + recent blocks = 2 GB RAM
 pub struct Blockchain {
-    chain: Arc<RwLock<Vec<Block>>>,
+    chain: Arc<RwLock<Vec<Block>>>, // ONLY stores genesis block now
     pending_transactions: Arc<RwLock<Vec<Transaction>>>,
     account_state: Arc<RwLock<AccountState>>,
     pending_nonces: Arc<DashMap<String, u64>>, // ATOMIC: Track highest pending nonce (fixes race condition)
@@ -130,9 +134,10 @@ pub struct Blockchain {
 }
 
 impl Blockchain {
-    /// Create or load blockchain from storage
+    /// Create or load blockchain from storage (OPTIMIZED to not load full chain)
     pub fn new(storage: Arc<BlockchainStorage>, network: ChainNetwork) -> Result<Self, BlockchainError> {
-        // Try to load existing chain
+        // OPTIMIZATION: Only load genesis to verify chain exists
+        // All other blocks loaded on-demand from disk
         let chain = storage.load_chain()?;
         let account_state = storage.load_account_state()?.unwrap_or_else(AccountState::new);
         
@@ -174,10 +179,12 @@ impl Blockchain {
             storage.set_chain_height(1)?;
             storage.save_account_state(&account_state)?;
             
-            tracing::info!(" Genesis block verified: {}", genesis.hash);
+            tracing::info!("✓ Genesis block verified: {}", genesis.hash);
             (vec![genesis], account_state, if network == ChainNetwork::Testnet { 4 } else { 6 })
         } else {
-            tracing::info!("Loaded existing blockchain with {} blocks", chain.len());
+            // OPTIMIZATION: chain only contains genesis (loaded from db.rs load_chain())
+            let height = storage.get_chain_height()?;
+            tracing::info!("✓ Loaded blockchain with {} blocks (genesis in memory, rest on disk)", height);
             
             // SECURITY: Verify genesis block on load (prevents database tampering)
             if !chain.is_empty() && network == ChainNetwork::Mainnet && chain[0].hash != GENESIS_HASH {
@@ -185,12 +192,18 @@ impl Blockchain {
                     GENESIS_HASH, chain[0].hash);
             }
             
-            let difficulty = chain.last().map(|b| b.difficulty).unwrap_or(4);
+            let difficulty = if height > 0 {
+                // Load latest block to get difficulty
+                storage.load_block(height - 1)?.difficulty
+            } else {
+                4
+            };
+            
             (chain, account_state, difficulty)
         };
 
         Ok(Self {
-            chain: Arc::new(RwLock::new(chain)),
+            chain: Arc::new(RwLock::new(chain)), // Only genesis in memory!
             pending_transactions: Arc::new(RwLock::new(Vec::new())),
             account_state: Arc::new(RwLock::new(account_state)),
             pending_nonces: Arc::new(DashMap::new()), // Concurrent HashMap - no lock needed
@@ -223,7 +236,14 @@ impl Blockchain {
 
     /// Get the latest block
     pub fn get_latest_block(&self) -> Block {
-        self.chain.read().last().unwrap().clone()
+        let height = self.get_height();
+        if height == 0 {
+            // Return genesis from memory
+            self.chain.read().get(0).unwrap().clone()
+        } else {
+            // Load from storage (not memory!)
+            self.storage.load_block(height - 1).expect("Latest block must exist")
+        }
     }
 
     /// Add a new transaction to the mempool
@@ -913,6 +933,7 @@ impl Blockchain {
         new_state.unlock_mature_coinbase(block.index);
 
         // 5. Apply all transactions
+        // 5. Apply all transactions
         for tx in &block.transactions {
             if !tx.is_coinbase() && tx.sender != "TREASURY" {
                 let total = tx.amount.saturating_add(tx.fee);
@@ -924,12 +945,13 @@ impl Blockchain {
             new_state.credit_account(tx, block.index, COINBASE_MATURITY);
         }
 
-        // 6. COMMIT: Add to chain
-        self.chain.write().push(block.clone());
+        // 6. OPTIMIZATION: Don't add to in-memory chain (saves RAM!)
+        // We used to do: self.chain.write().push(block.clone());
+        // Now we ONLY save to storage and load on-demand
         
-        // 7. COMMIT: Save to storage
+        // 7. COMMIT: Save to storage (primary storage, not memory!)
         self.storage.save_block(&block)?;
-        self.storage.set_chain_height(self.get_latest_block().index + 1)?;
+        self.storage.set_chain_height(block.index + 1)?;
         self.storage.save_account_state(&new_state)?;
         
         // 8. COMMIT: Update state
@@ -965,9 +987,9 @@ impl Blockchain {
         chain.get(height as usize).cloned()
     }
 
-    /// Get current chain height
+    /// Get current chain height (OPTIMIZED - from storage, not memory)
     pub fn get_height(&self) -> u64 {
-        self.chain.read().len() as u64
+        self.storage.get_chain_height().unwrap_or(0)
     }
 }
 

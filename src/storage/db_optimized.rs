@@ -58,13 +58,8 @@ pub struct BlockchainStorage {
 }
 
 impl BlockchainStorage {
-    /// Open or create blockchain database with default optimizations (Archive, Compressed)
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, StorageError> {
-        Self::with_options(path, PruneMode::ArchiveFull, true)
-    }
-
-    /// Open or create blockchain database with custom options
-    pub fn with_options<P: AsRef<Path>>(
+    /// Open or create blockchain database with optimizations
+    pub fn new<P: AsRef<Path>>(
         path: P,
         prune_mode: PruneMode,
         compression: bool
@@ -109,7 +104,7 @@ impl BlockchainStorage {
         
         // 3. Save block
         let block_key = format!("block:{}", block.index);
-        self.db.insert(block_key.as_bytes(), data.clone())?;
+        self.db.insert(block_key.as_bytes(), data)?;
         
         // 4. Index transactions (for O(1) lookup)
         for (tx_index, tx) in block.transactions.iter().enumerate() {
@@ -236,7 +231,7 @@ impl BlockchainStorage {
             serialized
         };
         
-        self.db.insert(key, data.clone())?;
+        self.db.insert(key, data)?;
         self.db.flush()?;
         
         tracing::debug!("Account state saved ({} bytes)", data.len());
@@ -390,7 +385,11 @@ mod tests {
     #[test]
     fn test_optimized_storage() {
         let dir = tempdir().unwrap();
-        let storage = BlockchainStorage::new(dir.path()).unwrap();
+        let storage = BlockchainStorage::new(
+            dir.path(),
+            PruneMode::ArchiveFull,
+            true // Enable compression
+        ).unwrap();
         
         // Storage starts empty
         assert_eq!(storage.get_chain_height().unwrap(), 0);
