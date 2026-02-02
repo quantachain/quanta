@@ -192,15 +192,22 @@ impl Transaction {
     }
 }
 
+/// Locked balance entry for vesting
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LockedBalance {
+    pub amount: u64,
+    pub unlock_height: u64,
+}
+
 /// Account balance tracking (account-based model, not UTXO)
 /// This is simpler and works better with smart contracts
+/// SECURITY FIX (HIGH-4): Support multiple locked balances with different unlock times
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AccountBalance {
     pub address: String,
-    pub balance: u64,        // in microunits (spendable)
-    pub nonce: u64,          // for replay protection
-    pub locked_balance: u64, // coinbase rewards locked until maturity
-    pub unlock_height: u64,  // block height when locked_balance becomes spendable
+    pub balance: u64,                    // in microunits (spendable)
+    pub nonce: u64,                      // for replay protection
+    pub locked_balances: Vec<LockedBalance>, // Multiple locks with different unlock heights
 }
 
 /// Account state database (account-based model, NOT UTXO)
@@ -229,14 +236,15 @@ impl AccountState {
             address: tx.recipient.clone(),
             balance: 0,
             nonce: 0,
-            locked_balance: 0,
-            unlock_height: 0,
+            locked_balances: Vec::new(),
         });
         
         if tx.is_coinbase() {
             // Coinbase rewards are locked until maturity
-            account.locked_balance = account.locked_balance.saturating_add(tx.amount);
-            account.unlock_height = current_height + coinbase_maturity;
+            account.locked_balances.push(LockedBalance {
+                amount: tx.amount,
+                unlock_height: current_height + coinbase_maturity,
+            });
         } else {
             // Regular transactions are immediately spendable
             account.balance = account.balance.saturating_add(tx.amount);
@@ -245,11 +253,12 @@ impl AccountState {
 
     /// Debit account (spend balance + fee)
     /// Returns true if successful, false if insufficient funds
+    /// SECURITY FIX (HIGH-3): Removed automatic nonce increment - caller handles it explicitly
     pub fn debit_account(&mut self, address: &str, total_amount: u64) -> bool {
         if let Some(account) = self.accounts.get_mut(address) {
             if account.balance >= total_amount {
                 account.balance -= total_amount;
-                account.nonce += 1; // Increment nonce on spend
+                // Nonce increment removed - caller must call increment_nonce() explicitly
                 true
             } else {
                 false
@@ -260,30 +269,38 @@ impl AccountState {
     }
     
     /// Unlock mature coinbase rewards (called at each new block)
+    /// SECURITY FIX (HIGH-4): Properly handle multiple locks with different unlock times
     pub fn unlock_mature_coinbase(&mut self, current_height: u64) {
         for account in self.accounts.values_mut() {
-            if account.locked_balance > 0 && current_height >= account.unlock_height {
-                account.balance = account.balance.saturating_add(account.locked_balance);
-                account.locked_balance = 0;
-                account.unlock_height = 0;
-            }
+            let mut unlocked_total = 0u64;
+            account.locked_balances.retain(|lock| {
+                if current_height >= lock.unlock_height {
+                    unlocked_total += lock.amount;
+                    false  // Remove this lock
+                } else {
+                    true  // Keep locked
+                }
+            });
+            account.balance = account.balance.saturating_add(unlocked_total);
         }
     }
     
     /// Add locked balance for mining reward vesting (ANTI-DUMP mechanism)
     /// Used for 50% of mining rewards locked for 6 months
+    /// SECURITY FIX (HIGH-4): Adds new locked entry instead of merging
     pub fn add_locked_balance(&mut self, address: &str, amount: u64, unlock_height: u64) {
         let account = self.accounts.entry(address.to_string()).or_insert(AccountBalance {
             address: address.to_string(),
             balance: 0,
             nonce: 0,
-            locked_balance: 0,
-            unlock_height: 0,
+            locked_balances: Vec::new(),
         });
         
-        // Add to locked balance with max unlock height
-        account.locked_balance = account.locked_balance.saturating_add(amount);
-        account.unlock_height = account.unlock_height.max(unlock_height);
+        // Add new locked balance entry
+        account.locked_balances.push(LockedBalance {
+            amount,
+            unlock_height,
+        });
     }
 
     /// Get balance for an address (spendable only)
@@ -293,7 +310,10 @@ impl AccountState {
     
     /// Get total balance (spendable + locked)
     pub fn get_total_balance(&self, address: &str) -> u64 {
-        self.accounts.get(address).map(|acc| acc.balance + acc.locked_balance).unwrap_or(0)
+        self.accounts.get(address).map(|acc| {
+            let total_locked: u64 = acc.locked_balances.iter().map(|l| l.amount).sum();
+            acc.balance + total_locked
+        }).unwrap_or(0)
     }
     
     /// Get account nonce
@@ -311,8 +331,7 @@ impl AccountState {
                 address: address.to_string(),
                 balance: 0,
                 nonce: 1,
-                locked_balance: 0,
-                unlock_height: 0,
+                locked_balances: Vec::new(),
             });
         }
     }

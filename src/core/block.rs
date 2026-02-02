@@ -166,6 +166,18 @@ impl Block {
                 println!("Invalid block index");
                 return false;
             }
+            
+            // SECURITY FIX (MEDIUM): Validate timestamp is reasonable
+            if self.timestamp <= prev.timestamp {
+                println!("Block timestamp must be after previous block");
+                return false;
+            }
+            
+            let current_time = chrono::Utc::now().timestamp();
+            if self.timestamp > current_time + 7200 {
+                println!("Block timestamp too far in future (>2h)");
+                return false;
+            }
         }
 
         // Verify all transaction signatures

@@ -37,7 +37,17 @@ pub enum BlockchainError {
 }
 
 const TARGET_BLOCK_TIME: u64 = 10; // 10 seconds
-const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = 10; // Adjust every 10 blocks
+// SECURITY FIX (External Audit): Increased from 10 to 2016 for stability
+// 2016 blocks = ~5.6 hours (prevents rapid oscillation)
+const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = 2016;
+
+// SECURITY FIX (External Audit): Difficulty bounds
+// Tightened from 2x/0.5x to 1.15x/0.85x (prevents wild swings)
+const MAX_DIFFICULTY_ADJUSTMENT_UP: f64 = 1.15;   // Max 15% increase per adjustment
+const MAX_DIFFICULTY_ADJUSTMENT_DOWN: f64 = 0.85; // Max 15% decrease per adjustment
+const MIN_DIFFICULTY: u32 = 4;
+// Increased from 256 to 2^31-1 for long-term security (prevents maxing out)
+const MAX_DIFFICULTY: u32 = 2_147_483_647; // Can support massive hashrate growth
 
 // MODERN ADAPTIVE TOKENOMICS (Option 3 - Solana-style)
 const YEAR_1_REWARD: u64 = 100_000_000; // 100 QUA in microunits
@@ -65,7 +75,10 @@ const MINING_REWARD_LOCK_BLOCKS: u64 = 157_680; // 6 months vesting (182.5 days)
 // Security limits
 const MAX_MEMPOOL_SIZE: usize = 5000; // Maximum pending transactions
 const MAX_BLOCK_TRANSACTIONS: usize = 2000; // Maximum transactions per block
-const MAX_BLOCK_SIZE_BYTES: usize = 1_048_576; // 1 MB max block size
+// SECURITY FIX (External Audit): Increased from 1MB to 2MB
+// Falcon-512 signatures are 666 bytes each, so 2000 tx = ~1.73MB
+// Previous 1MB limit could only support ~1154 transactions
+const MAX_BLOCK_SIZE_BYTES: usize = 2_097_152; // 2 MB max block size
 const MAX_ORPHAN_BLOCKS: usize = 100; // Maximum orphaned blocks (prevents memory exhaustion)
 const MAX_TRANSACTION_SIZE_BYTES: usize = 102400; // 100KB max per transaction (prevents DOS)
 const MIN_TRANSACTION_FEE: u64 = 100; // 0.0001 QUA in microunits
@@ -229,13 +242,10 @@ impl Blockchain {
         // Validate nonce (account-based model) - ATOMIC OPERATION (no race condition)
         let chain_nonce = self.account_state.read().get_nonce(&transaction.sender);
         
-        // CRITICAL FIX: Atomic check-and-increment using DashMap
-        // This prevents two parallel txs from using the same nonce
-        let expected_nonce = self.pending_nonces
-            .entry(transaction.sender.clone())
-            .or_insert(chain_nonce)
-            .value()
-            .max(&chain_nonce) + 1;
+        // SECURITY FIX (CRITICAL-4): Atomic nonce validation with duplicate check
+        // We need to hold the nonce entry lock during the entire validation + addition
+        let mut nonce_entry = self.pending_nonces.entry(transaction.sender.clone()).or_insert(chain_nonce);
+        let expected_nonce = (*nonce_entry).max(chain_nonce) + 1;
         
         if transaction.nonce != expected_nonce {
             return Err(BlockchainError::InvalidNonce {
@@ -244,13 +254,10 @@ impl Blockchain {
             });
         }
         
-        // ATOMIC: Update pending nonce (no race - single map entry lock)
-        self.pending_nonces.insert(transaction.sender.clone(), transaction.nonce);
-
         // Check transaction size limit (DOS protection - prevents huge DeployContract)
         let tx_size = bincode::serialize(&transaction).map_err(|_| BlockchainError::InvalidBlock)?.len();
         if tx_size > MAX_TRANSACTION_SIZE_BYTES {
-            return Err(BlockchainError::BlockTooLarge { size: tx_size }); // Reuse error type
+            return Err(BlockchainError::BlockTooLarge { size: tx_size });
         }
 
         // Check sender has sufficient balance (amount + fee)
@@ -263,8 +270,9 @@ impl Blockchain {
                 available,
             });
         }
-
-        // Check for duplicate by hash (not sender - multiple txs from same sender OK if nonces differ)
+        
+        // Check for duplicate by hash BEFORE updating nonce
+        // This prevents race where two txs pass validation before either updates nonce
         let tx_hash = transaction.hash();
         let pending = self.pending_transactions.read();
         for pending_tx in pending.iter() {
@@ -274,7 +282,10 @@ impl Blockchain {
         }
         drop(pending);
 
+        // ATOMIC: Update nonce AND add transaction together (no window for races)
+        *nonce_entry = transaction.nonce;
         self.pending_transactions.write().push(transaction);
+        
         tracing::info!("Transaction added to mempool");
         Ok(())
     }
@@ -313,9 +324,10 @@ impl Blockchain {
         let total_fees: u64 = transactions.iter().map(|tx| tx.fee).sum();
         
         // FEE DISTRIBUTION (70% burn, 20% treasury, 10% miner)
+        // SECURITY FIX (HIGH-2): Prevent rounding loss - give remainder to miner
         let fee_burned = (total_fees * FEE_BURN_PERCENT) / 100;
         let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100;
-        let fee_to_miner = (total_fees * FEE_VALIDATOR_PERCENT) / 100;
+        let fee_to_miner = total_fees - fee_burned - fee_to_treasury; // Remainder goes to miner
         
         // TREASURY ALLOCATION (5% of block rewards)
         let treasury_allocation = (reward * TREASURY_ALLOCATION_PERCENT) / 100;
@@ -391,50 +403,12 @@ impl Blockchain {
         let reduction_factor = (100 - ANNUAL_REDUCTION_PERCENT) as f64 / 100.0;
         let base_reward = (YEAR_1_REWARD as f64 * reduction_factor.powi(years_elapsed as i32)).round() as u64;
         
-        // Apply minimum floor
-        let base_reward = base_reward.max(MIN_REWARD);
-        
-        // Network usage adjustment during bootstrap phase
-        let final_reward = if chain_len < BOOTSTRAP_PHASE_BLOCKS {
-            // During bootstrap, adjust based on transaction activity
-            let usage_factor = self.get_usage_factor();
-            let adjusted = (base_reward as f64 * usage_factor).round() as u64;
-            // Clamp between base and 2x base (encourages transaction activity)
-            adjusted.clamp(base_reward, base_reward * 2)
-        } else {
-            base_reward
-        };
-        
-        final_reward
+        // Apply minimum floor and return
+        // SECURITY: Removed usage multiplier to prevent gaming attacks (see SECURITY_AUDIT.md)
+        base_reward.max(MIN_REWARD)
     }
     
-    /// Calculate network usage factor (1.0 = baseline, up to 2.0 during high activity)
-    /// ANTI-SPAM: Weighted by TOTAL FEES PAID, not transaction count
-    fn get_usage_factor(&self) -> f64 {
-        let recent_blocks = 100.min(self.chain.read().len());
-        if recent_blocks < 10 {
-            return 1.0; // Not enough data
-        }
-        
-        let chain = self.chain.read();
-        let start_idx = chain.len().saturating_sub(recent_blocks);
-        let recent = &chain[start_idx..];
-        
-        // Sum total fees paid in recent blocks (excludes coinbase which has 0 fee)
-        let total_fees: u64 = recent.iter()
-            .flat_map(|b| b.transactions.iter())
-            .filter(|tx| tx.sender != "COINBASE") // Exclude coinbase
-            .map(|tx| tx.fee)
-            .sum();
-        
-        // Average fees per block (in QUA)
-        let avg_fees_per_block = (total_fees as f64 / recent_blocks as f64) / 1_000_000.0; // Convert to QUA
-        
-        // Factor based on economic activity (fee spending), not spam count
-        // 0 fees → 1.0x, 50 QUA avg fees/block → 2.0x
-        // This makes spam UNPROFITABLE (must pay real fees to boost rewards)
-        (1.0 + (avg_fees_per_block / 50.0).min(1.0)).min(2.0)
-    }
+
     
     /// Get current difficulty (DERIVED FROM CHAIN, not local memory)
     fn get_current_difficulty(&self) -> u32 {
@@ -612,6 +586,28 @@ impl Blockchain {
         base_reward
         // Note: Usage factor not included here since it's dynamic and based on recent blocks
     }
+    
+    /// Get median timestamp from last N blocks (prevents timestamp manipulation)
+    /// SECURITY FIX (HIGH-1): Median-time-past for difficulty adjustment
+    fn get_median_time_past(&self, end_index: usize, window: usize) -> i64 {
+        let chain = self.chain.read();
+        if end_index == 0 || chain.is_empty() {
+            return 0;
+        }
+        
+        let start = end_index.saturating_sub(window);
+        let mut timestamps: Vec<i64> = chain[start..=end_index.min(chain.len()-1)]
+            .iter()
+            .map(|b| b.timestamp)
+            .collect();
+        
+        if timestamps.is_empty() {
+            return 0;
+        }
+        
+        timestamps.sort_unstable();
+        timestamps[timestamps.len() / 2]  // Return median
+    }
 
     /// Calculate next difficulty (pure function, deterministic)
     fn calculate_next_difficulty(&self) -> u32 {
@@ -633,24 +629,29 @@ impl Blockchain {
         let start_block = &chain[adjustment_start];
         
         // Calculate actual time taken for last N blocks
-        let actual_time = latest_block.timestamp - start_block.timestamp;
+        // SECURITY FIX (HIGH-1): Use median-time-past to prevent timestamp manipulation
+        let latest_median = self.get_median_time_past(chain_len - 1, 11);
+        let start_median = self.get_median_time_past(adjustment_start, 11);
+        let actual_time = latest_median - start_median;
         let expected_time = (TARGET_BLOCK_TIME * DIFFICULTY_ADJUSTMENT_INTERVAL) as i64;
         
         // Calculate actual time taken, clamp to prevent extreme adjustments (4x bounds)
         let actual_time_clamped = actual_time.max(expected_time / 4).min(expected_time * 4);
         
-        let current_difficulty = latest_block.difficulty as i64;
+        // SECURITY FIX (CRITICAL-2): Use floating point to prevent integer division rounding errors
+        let current_difficulty_f64 = latest_block.difficulty as f64;
+        let new_difficulty_f64 = current_difficulty_f64 * (expected_time as f64 / actual_time_clamped as f64);
         
-        // Adjust difficulty proportionally with bounds
-        let new_difficulty_raw = (current_difficulty * expected_time) / actual_time_clamped;
-        let new_difficulty = new_difficulty_raw
-            .max(current_difficulty / 2)      // Max decrease 50% (0.5x)
-            .min(current_difficulty * 2)      // Max increase 100% (2x)
-            .max(4)                           // Minimum difficulty
-            .min(256) as u32;                 // Maximum difficulty (increased cap for network scaling)
+        // SECURITY FIX (External Audit): Apply tighter bounds (15% max change per adjustment)
+        let new_difficulty = new_difficulty_f64.round() as i64;
+        let new_difficulty = new_difficulty
+            .max((current_difficulty_f64 * MAX_DIFFICULTY_ADJUSTMENT_DOWN).round() as i64) // Max decrease 15%
+            .min((current_difficulty_f64 * MAX_DIFFICULTY_ADJUSTMENT_UP).round() as i64)   // Max increase 15%
+            .max(MIN_DIFFICULTY as i64)          // Minimum difficulty = 4
+            .min(MAX_DIFFICULTY as i64) as u32;  // Maximum difficulty = 2^31-1
         
         tracing::info!("Difficulty adjustment: {} -> {} (actual time: {}s, expected: {}s)",
-            current_difficulty, new_difficulty, actual_time, expected_time);
+            latest_block.difficulty, new_difficulty, actual_time, expected_time);
         
         new_difficulty
     }
@@ -695,14 +696,31 @@ impl Blockchain {
     }
 
     /// Calculate total coin supply (u64 microunits)
+    /// SECURITY FIX (CRITICAL-3): Accounts for burned fees (70% of transaction fees)
     fn calculate_total_supply(&self) -> u64 {
         let chain = self.chain.read();
-        chain
+        
+        // Sum all coinbase + treasury emissions (money created)
+        let total_minted: u64 = chain
             .iter()
             .flat_map(|block| &block.transactions)
-            .filter(|tx| tx.is_coinbase())
+            .filter(|tx| tx.is_coinbase() || tx.sender == "TREASURY")
             .map(|tx| tx.amount)
-            .sum()
+            .sum();
+        
+        // Calculate all transaction fees
+        let total_fees: u64 = chain
+            .iter()
+            .flat_map(|block| &block.transactions)
+            .filter(|tx| !tx.is_coinbase() && tx.sender != "TREASURY")
+            .map(|tx| tx.fee)
+            .sum();
+        
+        // 70% of fees are burned (FEE_BURN_PERCENT constant)
+        let total_burned = (total_fees * FEE_BURN_PERCENT as u64) / 100;
+        
+        // Total supply = minted - burned
+        total_minted.saturating_sub(total_burned)
     }
 
     /// Get balance for an address (u64 microunits)
@@ -756,6 +774,21 @@ impl Blockchain {
             tracing::warn!("Fork detected: Block {} at height {}, we're at {}", 
                 &block.hash[..8], block.index, latest.index);
             
+            // SECURITY FIX (CRITICAL-6): Validate orphan blocks before storing (DoS prevention)
+            // Check basic cryptographic validity to prevent garbage storage
+            if !block.has_valid_hash() {
+                tracing::warn!("Rejecting orphan block with invalid PoW");
+                return Err(BlockchainError::InvalidBlock);
+            }
+            
+            // Validate merkle root
+            let tree = crate::core::merkle::MerkleTree::from_transactions(&block.transactions);
+            let computed_root = tree.root_hash().unwrap_or_else(|| "0".repeat(64));
+            if block.merkle_root != computed_root {
+                tracing::warn!("Rejecting orphan block with invalid merkle root");
+                return Err(BlockchainError::InvalidBlock);
+            }
+            
             // Store as orphaned block (with size limit)
             let mut orphans = self.orphaned_blocks.write();
             if orphans.len() >= MAX_ORPHAN_BLOCKS {
@@ -773,6 +806,19 @@ impl Blockchain {
             // Competing block at same height - apply longest chain rule
             tracing::warn!("Competing block at height {}: {} vs {}", 
                 block.index, &block.hash[..8], &latest.hash[..8]);
+            
+            // SECURITY FIX (CRITICAL-6): Validate before storing
+            if !block.has_valid_hash() {
+                tracing::warn!("Rejecting competing block with invalid PoW");
+                return Err(BlockchainError::InvalidBlock);
+            }
+            
+            let tree = crate::core::merkle::MerkleTree::from_transactions(&block.transactions);
+            let computed_root = tree.root_hash().unwrap_or_else(|| "0".repeat(64));
+            if block.merkle_root != computed_root {
+                tracing::warn!("Rejecting competing block with invalid merkle root");
+                return Err(BlockchainError::InvalidBlock);
+            }
             
             // For now, keep our block (in production: compare total work)
             // TODO: Implement total difficulty comparison
