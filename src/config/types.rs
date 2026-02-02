@@ -64,9 +64,7 @@ pub struct MiningConfig {
     pub min_reward_microunits: u64,
     pub blocks_per_year: u64,
     
-    // Early adopter incentives
-    pub early_adopter_bonus_blocks: u64,
-    pub early_adopter_multiplier: f64,
+    // Network bootstrap
     pub bootstrap_phase_blocks: u64,
     
     // Mining reward vesting (anti-dump mechanism)
@@ -131,8 +129,6 @@ impl Default for QuantaConfig {
                 annual_reduction_percent: 15,
                 min_reward_microunits: 5_000_000, // 5 QUA floor
                 blocks_per_year: 3_153_600,
-                early_adopter_bonus_blocks: 100_000,
-                early_adopter_multiplier: 1.5,
                 bootstrap_phase_blocks: 315_360,
                 mining_reward_lock_percent: 50,
                 mining_reward_lock_blocks: 157_680,
@@ -314,7 +310,6 @@ impl QuantaConfig {
         tracing::info!("  Year 1 Reward: {} microunits", self.mining.year_1_reward_microunits);
         tracing::info!("  Annual Reduction: {}%", self.mining.annual_reduction_percent);
         tracing::info!("  Min Reward Floor: {} microunits", self.mining.min_reward_microunits);
-        tracing::info!("  Early Adopter Bonus: {} blocks @ {}x", self.mining.early_adopter_bonus_blocks, self.mining.early_adopter_multiplier);
         tracing::info!("  Reward Vesting: {}% locked for {} blocks", self.mining.mining_reward_lock_percent, self.mining.mining_reward_lock_blocks);
         tracing::info!("  Fee Distribution: {}% burn, {}% treasury, {}% validator", 
             self.mining.fee_burn_percent, self.mining.fee_treasury_percent, self.mining.fee_validator_percent);

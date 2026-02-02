@@ -175,11 +175,6 @@ curl -X POST http://localhost:7782 \
 - Daily emission: ~864,000 QUA
 - Plus transaction fees (10% to miner, 70% burned)
 
-**Early Adopter Bonus:**
-- First 100,000 blocks: 1.5x multiplier
-- Duration: ~11.5 days
-- Reward: 150 QUA per block
-
 **Anti-Dump Protection:**
 - 50% of mining rewards locked for 6 months
 - Encourages long-term participation

@@ -100,12 +100,6 @@ curl -X POST http://localhost:3000/api/balance \
 - Daily emission: ~864,000 QUA
 - Plus 10% of transaction fees
 
-### Early Adopter Bonus
-
-First 100,000 blocks (~11.5 days):
-- Multiplier: 1.5x
-- Reward: 150 QUA per block
-
 ### Reward Lock
 
 50% of mining rewards are locked for 6 months (157,680 blocks) to prevent dumping and encourage long-term participation.

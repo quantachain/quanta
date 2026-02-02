@@ -45,9 +45,7 @@ const ANNUAL_REDUCTION_PERCENT: u64 = 15; // 15% reduction per year (faster valu
 const MIN_REWARD: u64 = 5_000_000; // 5 QUA floor (reached after ~20 years)
 const BLOCKS_PER_YEAR: u64 = 3_153_600; // 365.25 days * 86400 / 10 seconds
 
-// UNIQUE FEATURES - Early Adopter Incentives
-const EARLY_ADOPTER_BONUS_BLOCKS: u64 = 100_000; // First ~11.5 days
-const EARLY_ADOPTER_MULTIPLIER: f64 = 1.5; // 1.5x rewards for early miners
+// UNIQUE FEATURES - Network Bootstrap
 const BOOTSTRAP_PHASE_BLOCKS: u64 = 315_360; // First month gets network usage boost
 
 // SUSTAINABLE ECONOMICS - Fee Structure & Value Capture
@@ -396,22 +394,15 @@ impl Blockchain {
         // Apply minimum floor
         let base_reward = base_reward.max(MIN_REWARD);
         
-        // UNIQUE FEATURE 1: Early adopter bonus (first 100k blocks)
-        let reward_with_bonus = if chain_len < EARLY_ADOPTER_BONUS_BLOCKS {
-            (base_reward as f64 * EARLY_ADOPTER_MULTIPLIER).round() as u64
-        } else {
-            base_reward
-        };
-        
-        // UNIQUE FEATURE 2: Network usage adjustment during bootstrap
+        // Network usage adjustment during bootstrap phase
         let final_reward = if chain_len < BOOTSTRAP_PHASE_BLOCKS {
             // During bootstrap, adjust based on transaction activity
             let usage_factor = self.get_usage_factor();
-            let adjusted = (reward_with_bonus as f64 * usage_factor).round() as u64;
+            let adjusted = (base_reward as f64 * usage_factor).round() as u64;
             // Clamp between base and 2x base (encourages transaction activity)
-            adjusted.clamp(reward_with_bonus, reward_with_bonus * 2)
+            adjusted.clamp(base_reward, base_reward * 2)
         } else {
-            reward_with_bonus
+            base_reward
         };
         
         final_reward
@@ -617,12 +608,8 @@ impl Blockchain {
         let base_reward = (YEAR_1_REWARD as f64 * reduction_factor.powi(years_elapsed as i32)).round() as u64;
         let base_reward = base_reward.max(MIN_REWARD);
         
-        // Apply early adopter bonus if applicable
-        if height < EARLY_ADOPTER_BONUS_BLOCKS {
-            (base_reward as f64 * EARLY_ADOPTER_MULTIPLIER).round() as u64
-        } else {
-            base_reward
-        }
+        // Return base reward (no bonuses for fairness)
+        base_reward
         // Note: Usage factor not included here since it's dynamic and based on recent blocks
     }
 
@@ -649,18 +636,18 @@ impl Blockchain {
         let actual_time = latest_block.timestamp - start_block.timestamp;
         let expected_time = (TARGET_BLOCK_TIME * DIFFICULTY_ADJUSTMENT_INTERVAL) as i64;
         
-        // SECURITY: Limit adjustment range to prevent manipulation (Bitcoin-style: 4x max)
+        // Calculate actual time taken, clamp to prevent extreme adjustments (4x bounds)
         let actual_time_clamped = actual_time.max(expected_time / 4).min(expected_time * 4);
         
         let current_difficulty = latest_block.difficulty as i64;
         
-        // Adjust difficulty proportionally (clamped to ±25% per adjustment)
+        // Adjust difficulty proportionally with bounds
         let new_difficulty_raw = (current_difficulty * expected_time) / actual_time_clamped;
         let new_difficulty = new_difficulty_raw
-            .max(current_difficulty * 3 / 4)  // Max decrease 25%
-            .min(current_difficulty * 5 / 4)  // Max increase 25%
+            .max(current_difficulty / 2)      // Max decrease 50% (0.5x)
+            .min(current_difficulty * 2)      // Max increase 100% (2x)
             .max(4)                           // Minimum difficulty
-            .min(32) as u32;                  // Maximum difficulty (prevents overflow)
+            .min(256) as u32;                 // Maximum difficulty (increased cap for network scaling)
         
         tracing::info!("Difficulty adjustment: {} -> {} (actual time: {}s, expected: {}s)",
             current_difficulty, new_difficulty, actual_time, expected_time);

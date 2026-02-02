@@ -258,8 +258,10 @@ Valid Block: Hash < Target (leading zeros determined by difficulty)
   ```
 
 - **Bounds**: 
-  - Maximum increase: 2x per adjustment
-  - Maximum decrease: 0.5x per adjustment
+  - Maximum increase: 2x per adjustment (100%)
+  - Maximum decrease: 0.5x per adjustment (50%)
+  - Minimum difficulty: 4
+  - Maximum difficulty: 256
   - Prevents difficulty manipulation attacks
 
 ### 4.2 Block Structure
@@ -340,14 +342,10 @@ def calculate_reward(block_height):
     reduction_rate = 0.85
     annual_reward = max(base * (reduction_rate ** year), 5_000_000)
     
-    # Early adopter bonus (first 100k blocks)
-    if block_height < 100_000:
-        annual_reward *= 1.5
-    
-    # Network usage multiplier (bootstrap phase)
-    if block_height < 315_360:  # First ~36 days
+    # Network usage multiplier (bootstrap phase - first ~36 days)
+    if block_height < 315_360:
         usage_multiplier = calculate_usage_multiplier(block_height)
-        annual_reward *= usage_multiplier
+        annual_reward *= usage_multiplier  # 1.0x to 2.0x based on network activity
     
     return annual_reward
 ```

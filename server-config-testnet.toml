@@ -54,9 +54,7 @@ annual_reduction_percent = 15
 min_reward_microunits = 5_000_000  # 5 QUA floor
 blocks_per_year = 3_153_600
 
-# Early adopter bonus
-early_adopter_bonus_blocks = 100_000
-early_adopter_multiplier = 1.5
+# Network bootstrap phase
 bootstrap_phase_blocks = 315_360
 
 # Vesting

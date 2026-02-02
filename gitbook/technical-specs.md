@@ -28,8 +28,10 @@
 - Algorithm: SHA3-256 double hash
 - Block time: 10 seconds
 - Difficulty adjustment: Every 10 blocks
-- Maximum increase: 2x per adjustment
-- Maximum decrease: 0.5x per adjustment
+- Maximum increase: 2x per adjustment (100%)
+- Maximum decrease: 0.5x per adjustment (50%)
+- Minimum difficulty: 4
+- Maximum difficulty: 256
 
 ### Block Structure
 

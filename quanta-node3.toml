@@ -56,9 +56,7 @@ annual_reduction_percent = 15            # 15% reduction per year
 min_reward_microunits = 5_000_000       # 5 QUA minimum floor
 blocks_per_year = 3_153_600             # Blocks per year calculation
 
-# Early adopter incentives
-early_adopter_bonus_blocks = 100_000    # First ~11.5 days get bonus
-early_adopter_multiplier = 1.5          # 1.5x rewards multiplier
+# Network bootstrap phase
 bootstrap_phase_blocks = 315_360        # First month dynamic adjustments
 
 # Mining reward vesting (anti-dump mechanism)

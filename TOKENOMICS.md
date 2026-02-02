@@ -29,9 +29,8 @@ The QUANTA economic model is designed to achieve:
 1. **Long-term Sustainability**: Rewards that remain attractive for decades
 2. **Fair Distribution**: No pre-mine, no ICO, 100% through mining
 3. **Deflationary Pressure**: Fee burning creates supply reduction
-4. **Early Adopter Incentives**: Reward risk-taking without excessive inequality
-5. **Anti-Dump Protection**: Lock mechanisms prevent immediate sell pressure
-6. **Development Funding**: Sustainable treasury for ongoing development
+4. **Anti-Dump Protection**: Lock mechanisms prevent immediate sell pressure
+5. **Development Funding**: Sustainable treasury for ongoing development
 
 ### 1.2 Key Parameters
 
@@ -105,26 +104,7 @@ Without modifiers, a block reward is simply:
 Block Reward = base_reward(current_year)
 ```
 
-### 3.2 Early Adopter Bonus
-
-**Duration**: First 100,000 blocks (~11.5 days)
-
-**Multiplier**: 1.5x
-
-**Formula**:
-```python
-if block_height < 100_000:
-    reward *= 1.5
-```
-
-**Rationale**:
-- Attracts initial miners when network hashrate is low
-- Short duration prevents excessive early holder advantage
-- Creates excitement at launch without long-term distortion
-
-**Total Extra Emission**: ~157,680,000 QUA (50% of first 11.5 days)
-
-### 3.3 Network Usage Multiplier
+### 3.2 Network Usage Multiplier
 
 **Duration**: First 315,360 blocks (~36 days, "bootstrap phase")
 
@@ -165,7 +145,7 @@ def usage_multiplier(block_height):
 - Looking at 1000 blocks prevents single-block manipulation
 - Fee burning makes sustained fake activity expensive
 
-### 3.4 Combined Reward Calculation
+### 3.3 Combined Reward Calculation
 
 Full block reward formula:
 ```python
@@ -173,11 +153,7 @@ def calculate_block_reward(block_height, block):
     year = block_height / 3_153_600
     reward = base_reward(year)
     
-    # Early adopter bonus
-    if block_height < 100_000:
-        reward *= 1.5
-    
-    # Network usage multiplier
+    # Network usage multiplier during bootstrap phase
     if block_height < 315_360:
         reward *= usage_multiplier(block_height)
     
@@ -185,7 +161,7 @@ def calculate_block_reward(block_height, block):
 ```
 
 **Example Rewards**:
-- Block 1,000: 100 QUA × 1.5 (early bonus) × 1.2 (usage) = 180 QUA
+- Block 1,000: 100 QUA × 1.2 (usage) = 120 QUA
 - Block 150,000: 100 QUA × 1.3 (usage) = 130 QUA
 - Block 400,000: ~98 QUA (year 1, no bonuses)
 - Block 3,153,600: 85 QUA (year 2 base)
@@ -627,9 +603,7 @@ def calculate_block_reward(height):
     base = 100_000_000 * (0.85 ** year)
     base = max(base, 5_000_000)
     
-    # Bonuses
-    if height < 100_000:
-        base *= 1.5
+    # Network usage multiplier during bootstrap
     if height < 315_360:
         base *= usage_multiplier(height)
     
