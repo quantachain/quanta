@@ -1,92 +1,147 @@
+# ========================================
 # QUANTA Node Configuration
+# ========================================
+# Version: 1.0.0
+# Last Updated: 2026-02-03
+# This configuration matches the current codebase structure
+# For standalone/development nodes without bootstrap infrastructure
+# ========================================
+
 version = 1
 network_type = "Testnet"
 
+# ========================================
+# Node Settings
+# ========================================
 [node]
-# API server port
+# API server port - REST API for wallet interactions
 api_port = 3000
 
-# P2P network port
+# P2P network port - For peer-to-peer communication
 network_port = 8333
 
-# RPC server port (for daemon control)
+# RPC server port - For daemon control and monitoring
 rpc_port = 7782
 
-# Database path
+# Database path - Where blockchain data is stored
 db_path = "./quanta_data"
 
-# Disable P2P networking (single node mode)
+# Disable P2P networking - Set to true for standalone/local testing
+# When true, node runs in isolation without connecting to peers
 no_network = false
 
+# ========================================
+# Network Settings
+# ========================================
 [network]
-# Maximum number of peers
+# Maximum number of peers to connect to
 max_peers = 125
 
-# Bootstrap peer addresses (comma-separated host:port)
-# Testnet bootstrap nodes (Q2 2026 launch)
-bootstrap_nodes = [
-    # North America
-    "testnet-us-east.quanta.network:8333",
-    "testnet-us-west.quanta.network:8333",
-    
-    # Europe
-    "testnet-eu-west.quanta.network:8333",
-    "testnet-eu-central.quanta.network:8333",
-    
-    # Asia-Pacific
-    "testnet-ap-southeast.quanta.network:8333",
-    "testnet-ap-northeast.quanta.network:8333",
-    
-    # Backup nodes
-    "testnet-backup1.quanta.network:8333",
-    "testnet-backup2.quanta.network:8333",
-]
+# Bootstrap peer addresses - Initial peers to connect to on startup
+# Currently EMPTY as no bootstrap infrastructure exists yet
+# Add peer addresses here when available: ["ip:port", "ip:port"]
+bootstrap_nodes = []
 
-# DNS seeds for peer discovery (domain names that resolve to peer IPs)
-# These will return multiple IP addresses for decentralized discovery
-dns_seeds = ["seed.testnet.quantachain.org"]
+# DNS seeds for peer discovery
+# Currently EMPTY as no DNS seed infrastructure exists yet
+# Add seed domains here when available: ["seed1.domain", "seed2.domain"]
+dns_seeds = []
 
+# ========================================
+# Consensus Rules (MUST match across all network nodes)
+# ========================================
 [consensus]
+# Maximum number of transactions per block
 max_block_transactions = 2000
+
+# Maximum block size in bytes (1 MB)
 max_block_size_bytes = 1048576
+
+# Minimum transaction fee in microunits (0.0001 QUA)
+# Prevents spam attacks
 min_transaction_fee_microunits = 100
+
+# Transaction expiry in blocks (~24 hours at 10s blocks)
+# Prevents mempool bloat
 transaction_expiry_blocks = 8640
+
+# Coinbase maturity - Blocks before mining rewards can be spent
+# Prevents chain reorganization attacks
 coinbase_maturity = 100
 
+# ========================================
+# Security Settings (Node-local preferences)
+# ========================================
 [security]
+# Maximum number of transactions in mempool
 max_mempool_size = 5000
+
+# Transaction expiry in seconds (24 hours)
 transaction_expiry_seconds = 86400
+
+# Enable rate limiting on API endpoints
+# PRODUCTION: Always set to true
 enable_rate_limiting = true
+
+# Maximum requests per minute per IP address
 rate_limit_per_minute = 60
+
+# Enable automatic peer banning for malicious behavior
 enable_peer_banning = true
+
+# Require TLS for API connections
+# PRODUCTION: Set to true for public-facing nodes
 require_tls = false
 
+# ========================================
+# Mining & Tokenomics
+# ========================================
 [mining]
+# Year 1 block reward in microunits (100 QUA)
 year_1_reward_microunits = 100000000
+
+# Annual reduction percentage (15% per year)
 annual_reduction_percent = 15
+
+# Minimum reward floor in microunits (5 QUA)
 min_reward_microunits = 5000000
+
+# Expected blocks per year (365.25 days * 8640 blocks/day)
 blocks_per_year = 3153600
+
+# Bootstrap phase blocks (~100 days)
+# Higher rewards during initial network growth
 bootstrap_phase_blocks = 315360
+
+# Mining reward vesting (anti-dump mechanism)
+# Percentage of reward locked for vesting period
 mining_reward_lock_percent = 50
+
+# Number of blocks rewards remain locked (~50 days)
 mining_reward_lock_blocks = 157680
+
+# Fee distribution percentages (must sum to 100)
+# Burn percentage - Reduces total supply (deflationary)
 fee_burn_percent = 70
+
+# Treasury percentage - Funds development and ecosystem
 fee_treasury_percent = 20
+
+# Validator percentage - Rewards network validators
 fee_validator_percent = 10
+
+# Target block time in seconds
 target_block_time = 10
+
+# Difficulty adjustment interval in blocks (Bitcoin-style ~2 weeks)
 difficulty_adjustment_interval = 2016
 
+# ========================================
+# Metrics & Monitoring
+# ========================================
 [metrics]
+# Enable Prometheus metrics endpoint
 enabled = true
+
+# Metrics server port
 port = 9090
-
-# Mainnet bootstrap nodes (planned for Q1 2027)
-# Uncomment for mainnet:
-# bootstrap_nodes = [
-#     "mainnet-us-east.quanta.network:8333",
-#     "mainnet-us-west.quanta.network:8333",
-#     "mainnet-eu-west.quanta.network:8333",
-#     "mainnet-eu-central.quanta.network:8333",
-#     "mainnet-ap-southeast.quanta.network:8333",
-#     "mainnet-ap-northeast.quanta.network:8333",
-# ]
-
