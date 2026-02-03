@@ -5,7 +5,7 @@ services:
   # Node 1 - Bootstrap Node
   # ========================================
   node1:
-    image: quanta-node:latest
+    image: xd637/quanta-node:v0.1
     container_name: quanta-node-1
     hostname: node1
     ports:
@@ -19,7 +19,7 @@ services:
     environment:
       - RUST_LOG=info
       - QUANTA_NODE_NAME=node1
-    command: [ "/usr/local/bin/quanta", "start", "-c", "/home/quanta/quanta.toml", "--network", "testnet" ]
+    command: [ "/usr/local/bin/quanta", "start", "-c", "/home/quanta/quanta.toml" ]
     networks:
       - quanta-testnet
     healthcheck:
@@ -32,7 +32,7 @@ services:
   # Node 2 - Peer
   # ========================================
   node2:
-    image: quanta-node:latest
+    image: xd637/quanta-node:v0.1
     container_name: quanta-node-2
     hostname: node2
     ports:
@@ -49,7 +49,7 @@ services:
     depends_on:
       node1:
         condition: service_healthy
-    command: [ "/usr/local/bin/quanta", "start", "-c", "/home/quanta/quanta.toml", "--network", "testnet" ]
+    command: [ "/usr/local/bin/quanta", "start", "-c", "/home/quanta/quanta.toml" ]
     networks:
       - quanta-testnet
 
@@ -57,7 +57,7 @@ services:
   # Node 3 - Peer
   # ========================================
   node3:
-    image: quanta-node:latest
+    image: xd637/quanta-node:v0.1
     container_name: quanta-node-3
     hostname: node3
     ports:
@@ -76,7 +76,7 @@ services:
         condition: service_healthy
       node2:
         condition: service_started
-    command: [ "/usr/local/bin/quanta", "start", "-c", "/home/quanta/quanta.toml", "--network", "testnet" ]
+    command: [ "/usr/local/bin/quanta", "start", "-c", "/home/quanta/quanta.toml" ]
     networks:
       - quanta-testnet
 

@@ -53,8 +53,8 @@ enum Commands {
         config: Option<String>,
         
         /// Network type (mainnet or testnet)
-        #[arg(long, default_value = "mainnet")]
-        network: String,
+        #[arg(long)]
+        network: Option<String>,
         
         /// API server port (overrides config)
         #[arg(short, long)]
@@ -261,7 +261,7 @@ async fn main() {
                 network_port,
                 db.clone(),
                 bootstrap.clone(),
-                Some(network),
+                network,
                 no_network
             ).expect("Failed to load configuration");
             

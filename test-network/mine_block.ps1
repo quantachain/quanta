@@ -6,7 +6,8 @@ $ApiUrl = "http://localhost:3001/api/mine"
 
 Write-Host "1. Creating new wallet for miner inside container..."
 # Generate wallet and capture output
-$Output = docker exec -e QUANTA_WALLET_PASSWORD=password123 $NodeContainer /usr/local/bin/quanta new_wallet --file /home/quanta/$MinerValuesFile 2>&1
+$OutputLines = docker exec -e QUANTA_WALLET_PASSWORD=password123 $NodeContainer /usr/local/bin/quanta new_wallet --file /home/quanta/$MinerValuesFile 2>&1
+$Output = $OutputLines -join "`n"
 
 # Parse address using regex
 if ($Output -match "Address: (0x[a-fA-F0-9]+)") {
