@@ -3,6 +3,7 @@ use axum::{
     routing::{get, post},
     Router, http::StatusCode,
     http::Method,
+    response::IntoResponse,
 };
 use tower_http::cors::{CorsLayer, Any};
 use serde::{Deserialize, Serialize};
@@ -411,15 +412,59 @@ async fn get_peers(
     }
 }
 
-/// Get node metrics
+/// Get node metrics (Prometheus format)
 async fn get_metrics(
     State(state): State<Arc<ApiState>>,
-) -> Json<NodeMetrics> {
-    if let Some(ref metrics) = state.metrics {
-        Json(metrics.get_metrics().await)
+) -> impl IntoResponse {
+    let metrics = if let Some(ref metrics) = state.metrics {
+        metrics.get_metrics().await
     } else {
-        Json(NodeMetrics::default())
-    }
+        NodeMetrics::default()
+    };
+    
+    // Convert to Prometheus Text Format
+    let s = format!(
+        "# HELP quanta_peer_count Number of connected peers\n\
+         # TYPE quanta_peer_count gauge\n\
+         quanta_peer_count {}\n\
+         \n\
+         # HELP quanta_blocks_mined Total blocks mined by this node\n\
+         # TYPE quanta_blocks_mined counter\n\
+         quanta_blocks_mined {}\n\
+         \n\
+         # HELP quanta_chain_height Current blockchain height\n\
+         # TYPE quanta_chain_height gauge\n\
+         quanta_chain_height {}\n\
+         \n\
+         # HELP quanta_mempool_size Number of transactions in mempool\n\
+         # TYPE quanta_mempool_size gauge\n\
+         quanta_mempool_size {}\n\
+         \n\
+         # HELP quanta_node_uptime_seconds Node uptime in seconds\n\
+         # TYPE quanta_node_uptime_seconds gauge\n\
+         quanta_node_uptime_seconds {}\n\
+         \n\
+         # HELP quanta_blocks_received Total blocks received from network\n\
+         # TYPE quanta_blocks_received counter\n\
+         quanta_blocks_received {}\n\
+         \n\
+         # HELP quanta_transactions_received Total transactions received\n\
+         # TYPE quanta_transactions_received counter\n\
+         quanta_transactions_received {}\n\
+        ",
+        metrics.connected_peers,
+        metrics.blocks_mined,
+        metrics.chain_height,
+        metrics.mempool_size,
+        metrics.node_uptime_secs,
+        metrics.blocks_received,
+        metrics.transactions_received
+    );
+
+    (
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
+        s
+    )
 }
 
 /// Get specific block by height
