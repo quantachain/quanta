@@ -31,6 +31,7 @@ WORKDIR /home/quanta
 
 # Copy binary from builder
 COPY --from=builder /app/target/release/quanta /usr/local/bin/quanta
+COPY --from=builder /app/target/release/quanta-wallet-cli /usr/local/bin/quanta-wallet-cli
 COPY --chown=quanta:quanta quanta.toml /home/quanta/quanta.toml
 
 # Create data directories and set permissions

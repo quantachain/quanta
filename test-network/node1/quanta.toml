@@ -1,0 +1,86 @@
+# ========================================
+# QUANTA Node 1 Configuration (Bootstrap Node)
+# ========================================
+# This is the first node in the test network
+# Other nodes will connect to this one
+# ========================================
+
+version = 1
+network_type = "Testnet"
+
+# ========================================
+# Node Settings
+# ========================================
+[node]
+# API server port - Different for each node
+api_port = 3001
+
+# P2P network port - Different for each node
+network_port = 8331
+
+# RPC server port - Different for each node
+rpc_port = 7781
+
+# Database path
+db_path = "./quanta_data"
+
+# P2P networking enabled
+no_network = false
+
+# ========================================
+# Network Settings
+# ========================================
+[network]
+# Maximum number of peers
+max_peers = 125
+
+# Bootstrap nodes - Empty for node1 (it's the bootstrap)
+bootstrap_nodes = []
+
+# DNS seeds - Not needed for local testing
+dns_seeds = []
+
+# ========================================
+# Consensus Rules
+# ========================================
+[consensus]
+max_block_transactions = 2000
+max_block_size_bytes = 1048576
+min_transaction_fee_microunits = 100
+transaction_expiry_blocks = 8640
+coinbase_maturity = 100
+
+# ========================================
+# Security Settings
+# ========================================
+[security]
+max_mempool_size = 5000
+transaction_expiry_seconds = 86400
+enable_rate_limiting = true
+rate_limit_per_minute = 60
+enable_peer_banning = true
+require_tls = false
+
+# ========================================
+# Mining & Tokenomics
+# ========================================
+[mining]
+year_1_reward_microunits = 100000000
+annual_reduction_percent = 15
+min_reward_microunits = 5000000
+blocks_per_year = 3153600
+bootstrap_phase_blocks = 315360
+mining_reward_lock_percent = 50
+mining_reward_lock_blocks = 157680
+fee_burn_percent = 70
+fee_treasury_percent = 20
+fee_validator_percent = 10
+target_block_time = 10
+difficulty_adjustment_interval = 2016
+
+# ========================================
+# Metrics & Monitoring
+# ========================================
+[metrics]
+enabled = true
+port = 9091

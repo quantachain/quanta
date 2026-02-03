@@ -14,29 +14,14 @@ alerting:
 
 # Scrape configurations
 scrape_configs:
-  # QUANTA Node 1
-  - job_name: 'quanta-node1'
+  # QUANTA Local Node
+  - job_name: 'quanta-node'
+    metrics_path: '/api/metrics'
     static_configs:
-      - targets: ['node1:3000']
+      - targets: ['host.docker.internal:3000']
         labels:
-          node: 'node1'
-          environment: 'development'
-
-  # QUANTA Node 2
-  - job_name: 'quanta-node2'
-    static_configs:
-      - targets: ['node2:3000']
-        labels:
-          node: 'node2'
-          environment: 'development'
-
-  # QUANTA Node 3
-  - job_name: 'quanta-node3'
-    static_configs:
-      - targets: ['node3:3000']
-        labels:
-          node: 'node3'
-          environment: 'development'
+          node: 'local-node'
+          environment: 'production'
 
   # Prometheus itself
   - job_name: 'prometheus'

@@ -36,7 +36,7 @@ groups:
 
       # Low peer count
       - alert: LowPeerCount
-        expr: quanta_peer_count < 3
+        expr: quanta_peer_count < 1
         for: 10m
         labels:
           severity: warning

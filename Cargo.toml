@@ -12,6 +12,10 @@ path = "src/lib.rs"
 name = "quanta"
 path = "src/main.rs"
 
+[[bin]]
+name = "quanta-wallet-cli"
+path = "src/bin/wallet_cli.rs"
+
 [dependencies]
 # Post-Quantum Cryptography - Falcon signatures
 pqcrypto-falcon = "0.3"
