@@ -36,16 +36,30 @@ After building, the binary will be located at:
 ./target/release/quanta
 ```
 
-## Docker Installation
+## Docker Installation (Recommended)
 
-You can also run Quanta using Docker:
+The easiest way to run a Quanta node is using Docker. You can start a node with a single command:
 
 ```bash
-docker-compose up -d
+docker run -d --name quanta-node -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 xd637/quanta-node:v0.1
 ```
 
-For testnet deployment:
+This command will:
+- Pull the latest `v0.1` image if not present
+- Start the node in detached mode (`-d`)
+- Expose the necessary ports:
+  - `3000`: API
+  - `8333`: P2P Network
+  - `7782`: RPC
+  - `9090`: Metrics
+
+### Data Persistence
+
+To ensure your blockchain data persists across restarts, mount a volume:
 
 ```bash
-docker-compose -f docker-compose.testnet.yml up -d
+docker run -d --name quanta-node \
+  -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
+  -v quanta_data:/home/quanta/quanta_data \
+  xd637/quanta-node:v0.1
 ```

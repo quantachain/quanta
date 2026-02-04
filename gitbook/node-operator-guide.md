@@ -19,6 +19,19 @@ Complete guide for running and maintaining a Quanta node.
 
 ## Installation
 
+### Option 1: Docker (Recommended)
+
+Run a persistent node using Docker:
+
+```bash
+docker run -d --name quanta-node \
+  -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
+  -v quanta_data:/home/quanta/quanta_data \
+  xd637/quanta-node:v0.1
+```
+
+### Option 2: Build from Source
+
 1. Install Rust 1.70+:
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh

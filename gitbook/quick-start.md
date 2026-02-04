@@ -3,8 +3,18 @@
 Get started with Quanta in minutes.
 
 ## Start a Node
-
-Build and start the node in daemon mode:
+ 
+### Run with Docker (Recommended)
+ 
+The fastest way to get started is with Docker:
+ 
+```bash
+docker run -d --name quanta-node -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 xd637/quanta-node:v0.1
+```
+ 
+### Build from Source
+ 
+Alternatively, build and start the node in daemon mode:
 
 ```bash
 cargo build --release
