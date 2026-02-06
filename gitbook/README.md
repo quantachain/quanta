@@ -59,17 +59,3 @@ Documentation
      Contributing
 ```
 
-## Customization
-
-Feel free to:
-- Adjust content to match your specific needs
-- Add more sections as the project evolves
-- Include screenshots and diagrams
-- Add code examples and tutorials
-
-## Notes
-
-- All files are written in standard Markdown format
-- No emojis are used (as requested)
-- Content is based on the latest workspace files
-- Documentation is concise and focused on essential information
