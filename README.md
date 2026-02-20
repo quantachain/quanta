@@ -111,6 +111,10 @@ Cryptography:   pqcrypto-falcon, pqcrypto-kyber, sha3, argon2
 - Post-quantum encryption (Kyber-1024, NIST Level 5)
 - Quantum-resistant hashing (SHA3-256)
 - Memory-hard key derivation (Argon2id)
+- Domain-separated canonical signing (`QUANTA_TX_V1:` prefix, version-frozen)
+- Strict pre-verification size checks (public key = 897 bytes, signature 33-698 bytes)
+- Crypto agility via `sig_scheme` field (soft-forkable algorithm upgrade path)
+- Build determinism: exact dependency pinning, `strict-float` RUSTFLAG, `codegen-units = 1`
 
 #### Consensus & Blockchain
 - Adaptive Proof-of-Work with dynamic difficulty
@@ -423,9 +427,20 @@ curl http://localhost:3000/health
 - **Quantum Security**: Lattice-based signatures (no known quantum attacks), Grover-resistant hashing
 - **Key Protection**: Argon2id prevents brute-force attacks on encrypted wallets
 
+### Falcon-512 Protocol Hardening
+
+| Property | Implementation |
+|---|---|
+| Signing/verification separation | Signing is wallet-only; consensus nodes only call verify functions |
+| Domain separation | All signatures cover `SHA3-256("QUANTA_TX_V1:" \|\| signing_bytes)` |
+| Pre-verification size checks | Public key rejected if != 897 bytes; signature rejected outside [33,698] bytes |
+| Sender binding | Address must derive from the embedded public key before crypto runs |
+| Crypto agility | `sig_scheme` byte in every transaction; unknown values are hard-rejected |
+| Build determinism | Dependency pinned to `=0.3.0`; `strict-float` + `codegen-units=1` enforced |
+
 ### Network Security
 
-- **DoS Protection**: 2MB message limit, 5000 transaction mempool cap
+- **DoS Protection**: 2 MB message limit, 5000 transaction mempool cap
 - **Replay Protection**: Monotonic nonces, 24-hour transaction expiry
 - **51% Attack Mitigation**: Checkpoint system
 - **Timestamp Validation**: Blocks within 2 hours of current time
@@ -556,10 +571,11 @@ A: Falcon-512 provides NIST Level 1 security (equivalent to AES-128), which is s
 **Q: What if quantum computers never materialize?**  
 A: QUANTA is secure against classical attacks. Post-quantum crypto is insurance for the future, not speculation.
 
+**Q: What if Falcon-512 is found to have a critical vulnerability?**  
+A: The protocol encodes a `sig_scheme` byte in every transaction. A replacement algorithm can be assigned a new scheme value and activated via soft fork without changing the wire format. Nodes that have not upgraded will reject transactions using the new scheme, ensuring a conservative migration with no forced flag day.
+
 **Q: Can QUANTA interoperate with Bitcoin or Ethereum?**  
 A: Cross-chain bridges are planned for Phase 6 (2028+), requiring quantum-resistant relay protocols.
-
-### Mining Questions
 
 **Q: What hardware do I need to mine QUANTA?**  
 A: A 4-core CPU with 8GB RAM is sufficient. QUANTA uses CPU-based proof-of-work (SHA3-256 hashing).

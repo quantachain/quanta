@@ -1,5 +1,5 @@
 use crate::core::transaction::Transaction;
-use crate::crypto::signatures::verify_signature;
+use crate::crypto::signatures::verify_signature_strict;
 use serde::{Deserialize, Serialize};
 
 /// Multi-signature transaction requiring M-of-N signatures
@@ -50,9 +50,9 @@ impl MultiSigTransaction {
             return Err("Signature already provided for this index".to_string());
         }
         
-        // Verify the signature
-        let signing_data = self.base_tx.get_signing_data();
-        if !verify_signature(&signing_data, &signature, &self.public_keys[index]) {
+        // Verify the signature against the canonical signing hash.
+        let signing_hash = self.base_tx.get_signing_data();
+        if !verify_signature_strict(&signing_hash, &signature, &self.public_keys[index]) {
             return Err("Invalid signature".to_string());
         }
         
@@ -72,12 +72,12 @@ impl MultiSigTransaction {
             return false;
         }
         
-        let signing_data = self.base_tx.get_signing_data();
+        let signing_hash = self.base_tx.get_signing_data();
         let mut valid_sigs = 0;
         
         for (i, sig_opt) in self.signatures.iter().enumerate() {
             if let Some(sig) = sig_opt {
-                if verify_signature(&signing_data, sig, &self.public_keys[i]) {
+                if verify_signature_strict(&signing_hash, sig, &self.public_keys[i]) {
                     valid_sigs += 1;
                 }
             }

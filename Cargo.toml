@@ -18,7 +18,9 @@ path = "src/bin/wallet_cli.rs"
 
 [dependencies]
 # Post-Quantum Cryptography - Falcon signatures
-pqcrypto-falcon = "0.3"
+# PINNED: Exact version required for consensus determinism across all nodes.
+# Changing this version requires a coordinated network-wide upgrade.
+pqcrypto-falcon = "=0.3.0"
 pqcrypto-traits = "0.3"
 
 # SHA3 hashing (quantum-resistant)
@@ -99,3 +101,5 @@ tokio-test = "0.4"
 [profile.release]
 opt-level = 3
 lto = true
+# Single codegen unit ensures deterministic binary output across identical builds.
+codegen-units = 1

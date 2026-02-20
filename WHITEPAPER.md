@@ -2,7 +2,7 @@
 
 **A Quantum-Resistant Blockchain Built for the Future**
 
-Version 1.1 | January 2026
+Version 1.2 | February 2026
 
 ---
 
@@ -117,11 +117,44 @@ QUANTA implements NIST-standardized post-quantum algorithms:
 
 ### 2.3 Implementation Details
 
-**Signature Scheme**:
+**Canonical Signing Contract**
+
+All transaction signatures follow a strict canonical form enforced at the protocol level:
+
 ```
-Transaction Signature = Falcon-512.Sign(privkey, SHA3-256(tx_data))
-Verification = Falcon-512.Verify(pubkey, signature, SHA3-256(tx_data))
+signing_bytes = sender || recipient || amount_le64 || timestamp_le64 ||
+                fee_le64 || nonce_le64 || public_key || sig_scheme_u8 || tx_type
+
+signing_hash  = SHA3-256("QUANTA_TX_V1:" || signing_bytes)
+
+Signature     = Falcon-512.Sign(private_key, signing_hash)
+Verification  = Falcon-512.Verify(public_key, signature, signing_hash)
 ```
+
+The domain prefix `QUANTA_TX_V1:` is prepended before hashing. This provides domain separation, preventing a signature produced for QUANTA transactions from being replayed in any other context or protocol.
+
+**Crypto Agility**
+
+Every transaction encodes the signature scheme used as a single byte field:
+
+```
+SignatureScheme:
+  0 = Falcon512   (current, active)
+  1 = Reserved    (rejected by all current nodes)
+```
+
+This field is included in the signing payload, preventing scheme substitution attacks. Future algorithms can be activated via soft fork by assigning new scheme values and updating node verification dispatch, with no structural changes to the transaction format.
+
+**Strict Verification**
+
+Consensus nodes apply pre-checks before calling Falcon internals:
+
+- Public key must be exactly 897 bytes.
+- Signed message blob must be between 33 and 698 bytes.
+- Sender address must derive from the supplied public key.
+- Signature scheme field must be `Falcon512 = 0`.
+
+Any violation returns rejection immediately, before polynomial arithmetic is executed.
 
 **Wallet Encryption**:
 ```
@@ -130,7 +163,7 @@ Encrypted Wallet = Kyber-1024.Encrypt(plaintext_keys, user_password_via_Argon2)
 
 **Address Generation**:
 ```
-Address = Base58Check(0x00 || SHA3-256(Falcon-512.PublicKey)[:20])
+Address = "0x" || hex(SHA3-256(Falcon-512.PublicKey)[:20])
 ```
 
 ### 2.4 Operational Impact of Post-Quantum Cryptography
@@ -285,26 +318,34 @@ Block {
 
 ```rust
 Transaction {
-    sender: String,          // Sender's address
-    recipient: String,       // Recipient's address
-    amount: u64,            // Amount in microunits (1 QUA = 10^6 microunits)
-    fee: u64,               // Transaction fee in microunits
-    nonce: u64,             // Account nonce (prevents replay)
-    timestamp: i64,         // Transaction creation time
-    signature: Vec<u8>,     // Falcon-512 signature
-    public_key: Vec<u8>     // Falcon-512 public key
+    sender: String,          // Sender address derived from public_key
+    recipient: String,       // Recipient address
+    amount: u64,             // Amount in microunits (1 QUA = 10^6 microunits)
+    fee: u64,                // Transaction fee in microunits
+    nonce: u64,              // Account nonce (monotonic, prevents replay)
+    timestamp: i64,          // Transaction creation time (Unix)
+    signature: Vec<u8>,      // Falcon-512 signed-message blob
+    public_key: Vec<u8>,     // Falcon-512 public key (897 bytes)
+    sig_scheme: u8,          // Signature scheme: 0=Falcon512, 1=Reserved
+    tx_type: TransactionType // Transfer | DeployContract | CallContract
 }
 ```
 
 ### 4.4 Transaction Validation
 
-Each transaction must satisfy:
-1. **Signature Verification**: Falcon-512 signature is valid
-2. **Balance Check**: Sender has sufficient balance (amount + fee)
-3. **Nonce Ordering**: Nonce equals sender's account nonce
-4. **Timestamp Validity**: Transaction not expired (24-hour window)
-5. **Fee Minimum**: Fee >= 100 microunits (0.0001 QUA)
-6. **No Duplicates**: Transaction hash not already in chain
+Each transaction must satisfy all of the following checks in order:
+
+1. **Signature scheme known**: `sig_scheme` must be `0` (Falcon512). Unknown values are rejected.
+2. **Non-empty fields**: Both `signature` and `public_key` must be present.
+3. **Public key length**: Must be exactly 897 bytes. Shorter or longer values are rejected before cryptographic operations.
+4. **Signed message length**: Must be in the range [33, 698] bytes.
+5. **Sender derives from public key**: `SHA3-256(public_key)[:20]` must match the sender address. Prevents key substitution.
+6. **Cryptographic verification**: `Falcon-512.Verify(public_key, signature, SHA3-256("QUANTA_TX_V1:" || signing_bytes))` must succeed.
+7. **Balance check**: Sender has sufficient balance (amount + fee).
+8. **Nonce ordering**: Nonce equals sender account nonce + 1.
+9. **Timestamp validity**: Transaction not expired (24-hour window).
+10. **Fee minimum**: Fee >= 100 microunits (0.0001 QUA).
+11. **No duplicates**: Transaction hash not already in chain.
 
 ### 4.5 Block Validation
 
@@ -545,14 +586,42 @@ Fallback to hardcoded bootstrap nodes if DNS unavailable.
 ### 7.3 Post-Quantum Security Considerations
 
 **Harvest Now, Decrypt Later (HNDL)**:
-- Threat: Adversary stores encrypted data to decrypt with future quantum computer
-- QUANTA Protection: Kyber-1024 encryption provides 256-bit quantum security
-- Timeline: Safe until at least 2045 under conservative estimates
+- Threat: Adversary stores encrypted data to decrypt with future quantum computer.
+- QUANTA Protection: Kyber-1024 encryption provides 256-bit quantum security.
+- Timeline: Safe until at least 2045 under conservative estimates.
 
 **Signature Forgery**:
-- Threat: Quantum computer forges transaction signatures
-- QUANTA Protection: Falcon-512 signatures are lattice-based, quantum-resistant
-- No known quantum algorithm attacks lattice problems efficiently
+- Threat: Quantum computer forges transaction signatures.
+- QUANTA Protection: Falcon-512 signatures are lattice-based and quantum-resistant.
+- No known quantum algorithm attacks lattice problems efficiently.
+
+### 7.4 Falcon-512 Protocol Hardening
+
+Five specific hardening measures have been implemented at the protocol level to ensure Falcon-512 is deployed safely in a consensus-critical environment.
+
+**Separation of signing and verification**
+
+Signing is only ever performed by wallets on behalf of users. The consensus validation path — block acceptance and transaction relay — exclusively calls verification functions. No keypair material is required or loaded on a validating or mining node. This eliminates the operational risk of floating-point Gaussian sampling (which signing uses) from consensus.
+
+**Domain-separated canonical signing format**
+
+Transactions are signed over `SHA3-256("QUANTA_TX_V1:" || signing_bytes)`. The domain prefix `QUANTA_TX_V1:` is a consensus-frozen constant. Its inclusion ensures that a signature produced for a QUANTA transaction cannot be interpreted as valid in any other protocol context, and that a future version of the protocol can introduce a distinct signing domain without format changes.
+
+**Strict pre-verification size checks**
+
+Before any polynomial arithmetic is performed, the verifier checks:
+- Public key length == 897 bytes exactly.
+- Signed message length in range [33, 698].
+
+Malformed inputs are rejected in constant time before entering the Falcon library. This prevents malformed-input denial-of-service patterns and ensures any protocol-level invariant violation is caught immediately.
+
+**Crypto agility via signature scheme field**
+
+Every transaction encodes a `sig_scheme` byte (0 = Falcon512). This field is included in the signing payload. Nodes reject any transaction with an unrecognized scheme value. When a future algorithm is standardized and activated by soft fork, new scheme values can be assigned and verified without changing the transaction wire format or breaking backward compatibility.
+
+**Build determinism**
+
+The `pqcrypto-falcon` dependency is pinned to an exact version (`= 0.3.0`). The project-level `.cargo/config.toml` sets `target-feature=+strict-float` to enforce IEEE 754 compliant floating-point behavior, preventing compiler-introduced rounding divergence between x86_64 and ARM64 nodes. Release builds additionally set `codegen-units = 1` for fully deterministic binary output.
 
 ---
 
@@ -829,8 +898,8 @@ A: QUANTA is secure against classical attacks. Post-quantum crypto is insurance,
 **Q: Can QUANTA interoperate with Bitcoin/Ethereum?**
 A: Cross-chain bridges are planned for Phase 4. Requires trusted relayers or zero-knowledge proofs.
 
-**Q: What happens if Falcon is broken?**
-A: Hybrid signature schemes can be added via hard fork. Governance process will determine migration.
+**Q: What if Falcon-512 is broken or a critical implementation flaw is found?**
+A: The protocol includes a crypto agility mechanism. Every transaction carries a `sig_scheme` byte identifying the algorithm. A new algorithm can be assigned the next scheme value and activated via soft fork. Older nodes will reject transactions using the new scheme until they upgrade, ensuring a conservative and safe migration path. No structural changes to the transaction format or storage schema are required.
 
 **Q: Why proof-of-work instead of proof-of-stake?**
 A: PoW provides fair distribution and proven security. PoS may be considered in future after extensive research.
@@ -854,9 +923,9 @@ A: PoW provides fair distribution and proven security. PoS may be considered in 
 
 ## Document Information
 
-**Version**: 1.1  
+**Version**: 1.2  
 **Publication Date**: January 2026  
-**Last Updated**: January 7, 2026  
+**Last Updated**: February 2026  
 **Status**: Living Document (subject to updates)  
 **License**: Creative Commons Attribution 4.0 International (CC BY 4.0)
 

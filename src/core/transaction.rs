@@ -1,23 +1,70 @@
 use serde::{Serialize, Deserialize};
-use crate::crypto::verify_signature;
+use crate::crypto::{verify_signature_strict, canonical_signing_hash};
 use std::collections::HashMap;
 
-/// Transaction structure with Falcon signature
-/// Amount is in microunits (1 QUA = 1_000_000 microunits)
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub struct Transaction {
-    pub sender: String,           // Sender address (derived from public_key)
-    pub recipient: String,        // Recipient address
-    pub amount: u64,              // Amount in microunits (1 QUA = 1_000_000)
-    pub timestamp: i64,           // Unix timestamp
-    pub signature: Vec<u8>,       // Falcon signature (~666 bytes)
-    pub public_key: Vec<u8>,      // Falcon public key (~897 bytes)
-    pub fee: u64,                 // Transaction fee in microunits
-    pub nonce: u64,               // Nonce for replay protection
-    pub tx_type: TransactionType, // Transaction type
+// ---------------------------------------------------------------------------
+// Signature scheme enum — enables crypto agility via soft fork
+// ---------------------------------------------------------------------------
+
+/// Identifies which signature algorithm was used to sign this transaction.
+///
+/// Consensus rule: nodes must reject any transaction whose `sig_scheme` value
+/// they do not recognize. This allows future algorithms to be introduced via
+/// a soft fork without breaking older nodes that will simply reject unknown
+/// scheme values (conservative upgrade path).
+///
+/// FROZEN VALUES — do not reorder or delete:
+///   0 = Falcon512  (current, post-quantum)
+///   1 = Reserved   (placeholder; no implementation)
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Copy)]
+#[repr(u8)]
+pub enum SignatureScheme {
+    /// Falcon-512 (NIST PQC Round 3 — compact lattice signatures).
+    Falcon512 = 0,
+    /// Reserved for future algorithms. Transactions using this value will be
+    /// rejected by all current nodes until a soft fork activates support.
+    Reserved = 1,
 }
 
-/// Transaction types
+impl Default for SignatureScheme {
+    fn default() -> Self {
+        SignatureScheme::Falcon512
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Transaction
+// ---------------------------------------------------------------------------
+
+/// A signed transaction on the Quanta blockchain.
+/// Amount and fee are denominated in microunits (1 QUA = 1_000_000 microunits).
+///
+/// SIGNING CONTRACT:
+///   The bytes that are signed are: SHA3-256(SIGNING_DOMAIN || get_signing_bytes())
+///   where SIGNING_DOMAIN = b"QUANTA_TX_V1:" (see crypto::SIGNING_DOMAIN).
+///   This is enforced by `get_signing_data()` and verified by `verify()`.
+///
+/// CONSENSUS RULE:
+///   Nodes must only call `verify()` inside consensus logic.
+///   Signing (keypair operations) must never occur inside the consensus path.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Transaction {
+    pub sender: String,
+    pub recipient: String,
+    pub amount: u64,
+    pub timestamp: i64,
+    pub signature: Vec<u8>,
+    pub public_key: Vec<u8>,
+    pub fee: u64,
+    pub nonce: u64,
+    pub tx_type: TransactionType,
+    /// Signature scheme used. Defaults to `Falcon512`.
+    /// Included in the signing payload so that scheme substitution is rejected.
+    #[serde(default)]
+    pub sig_scheme: SignatureScheme,
+}
+
+/// Transaction types supported by the protocol.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum TransactionType {
     Transfer,
@@ -26,7 +73,7 @@ pub enum TransactionType {
 }
 
 impl Transaction {
-    /// Create a new transaction (unsigned) - amounts in microunits
+    /// Create a new unsigned Transfer transaction.
     pub fn new(sender: String, recipient: String, amount: u64, timestamp: i64) -> Self {
         Self {
             sender,
@@ -35,13 +82,14 @@ impl Transaction {
             timestamp,
             signature: vec![],
             public_key: vec![],
-            fee: 1000, // 0.001 QUA = 1000 microunits
+            fee: 1000,
             nonce: 0,
             tx_type: TransactionType::Transfer,
+            sig_scheme: SignatureScheme::Falcon512,
         }
     }
-    
-    /// Create deploy contract transaction
+
+    /// Create an unsigned DeployContract transaction.
     #[allow(dead_code)]
     pub fn new_deploy_contract(sender: String, code: Vec<u8>, timestamp: i64, nonce: u64) -> Self {
         Self {
@@ -51,13 +99,14 @@ impl Transaction {
             timestamp,
             signature: vec![],
             public_key: vec![],
-            fee: 10_000, // 0.01 QUA for deployment
+            fee: 10_000,
             nonce,
             tx_type: TransactionType::DeployContract { code },
+            sig_scheme: SignatureScheme::Falcon512,
         }
     }
-    
-    /// Create call contract transaction
+
+    /// Create an unsigned CallContract transaction.
     #[allow(dead_code)]
     pub fn new_call_contract(
         sender: String,
@@ -74,101 +123,97 @@ impl Transaction {
             timestamp,
             signature: vec![],
             public_key: vec![],
-            fee: 5000, // 0.005 QUA for calls
+            fee: 5000,
             nonce,
             tx_type: TransactionType::CallContract { contract, function, args },
+            sig_scheme: SignatureScheme::Falcon512,
         }
     }
 
-    /// Get transaction data for signing - MUST match hash calculation
-    /// Everything except signature itself
-    /// 
+    // -----------------------------------------------------------------------
+    // Serialization helpers
+    // -----------------------------------------------------------------------
+
+    /// Produce the raw bytes that are fed into the canonical signing hash.
+    ///
     /// CONSENSUS RULES (FROZEN FOREVER):
-    /// - All integers are LITTLE-ENDIAN (to_le_bytes)
-    /// - Public key is included (binds signature to key, prevents key substitution)
-    /// - Strings are UTF-8 bytes
-    pub fn get_signing_data(&self) -> Vec<u8> {
-        use sha3::{Digest, Sha3_256};
-        let mut hasher = Sha3_256::new();
-        
-        // CRITICAL: This must match hash() exactly (except signature)
-        hasher.update(self.sender.as_bytes());
-        hasher.update(self.recipient.as_bytes());
-        hasher.update(&self.amount.to_le_bytes()); // LITTLE-ENDIAN
-        hasher.update(&self.timestamp.to_le_bytes()); // LITTLE-ENDIAN
-        hasher.update(&self.fee.to_le_bytes()); // LITTLE-ENDIAN
-        hasher.update(&self.nonce.to_le_bytes()); // LITTLE-ENDIAN
-        hasher.update(&self.public_key);
-        
-        // Include tx_type
+    ///   - All integers encoded as LITTLE-ENDIAN.
+    ///   - Strings encoded as UTF-8.
+    ///   - `sig_scheme` encoded as a single byte (its u8 discriminant).
+    ///   - `public_key` included to bind the signature to a specific key.
+    ///   - Signature field is EXCLUDED (you cannot sign the signature).
+    ///
+    /// The returned bytes are NOT what the user passes to `sign()`.
+    /// The signer must call `canonical_signing_hash(get_signing_bytes())` which
+    /// prepends the domain tag and applies SHA3-256, yielding a 32-byte value
+    /// that is then signed with Falcon-512.
+    pub fn get_signing_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(256);
+
+        buf.extend_from_slice(self.sender.as_bytes());
+        buf.extend_from_slice(self.recipient.as_bytes());
+        buf.extend_from_slice(&self.amount.to_le_bytes());
+        buf.extend_from_slice(&self.timestamp.to_le_bytes());
+        buf.extend_from_slice(&self.fee.to_le_bytes());
+        buf.extend_from_slice(&self.nonce.to_le_bytes());
+        buf.extend_from_slice(&self.public_key);
+        // Include sig_scheme so that scheme substitution attacks fail.
+        buf.push(self.sig_scheme as u8);
+
         match &self.tx_type {
-            TransactionType::Transfer => hasher.update(&[0u8]),
+            TransactionType::Transfer => buf.push(0u8),
             TransactionType::DeployContract { code } => {
-                hasher.update(&[1u8]);
-                hasher.update(code);
+                buf.push(1u8);
+                buf.extend_from_slice(code);
             }
             TransactionType::CallContract { contract, function, args } => {
-                hasher.update(&[2u8]);
-                hasher.update(contract.as_bytes());
-                hasher.update(function.as_bytes());
-                hasher.update(args);
+                buf.push(2u8);
+                buf.extend_from_slice(contract.as_bytes());
+                buf.extend_from_slice(function.as_bytes());
+                buf.extend_from_slice(args);
             }
         }
-        
-        hasher.finalize().to_vec()
+
+        buf
     }
 
-    /// Verify the Falcon signature AND sender matches public_key
-    /// Special case: coinbase transactions bypass signature verification
-    pub fn verify(&self) -> bool {
-        // Coinbase transactions are verified by consensus rules, not signatures
-        if self.is_coinbase() || self.sender == "TREASURY" {
-            return true; // Coinbase/Treasury validity checked elsewhere (block reward rules)
-        }
-        
-        if self.signature.is_empty() || self.public_key.is_empty() {
-            return false;
-        }
-        
-        // CRITICAL: Verify sender matches the public key
-        let derived_address = self.derive_address_from_pubkey();
-        if self.sender != derived_address {
-            tracing::warn!("Sender mismatch: {} != {}", self.sender, derived_address);
-            return false;
-        }
-        
-        let data = self.get_signing_data();
-        verify_signature(&data, &self.signature, &self.public_key)
-    }
-    
-    /// Derive address from public key (must match sender)
-    fn derive_address_from_pubkey(&self) -> String {
-        use sha3::{Digest, Sha3_256};
-        let hash = Sha3_256::digest(&self.public_key);
-        format!("0x{}", hex::encode(&hash[..20])) // 0x + 40 hex chars = 42 total
+    /// Compute the canonical 32-byte signing hash: SHA3-256(SIGNING_DOMAIN || get_signing_bytes()).
+    ///
+    /// This is the exact 32-byte value that was signed by the sender's Falcon-512 key.
+    /// Verification calls this and passes the result to `verify_signature_strict()`.
+    pub fn get_signing_data(&self) -> [u8; 32] {
+        canonical_signing_hash(&self.get_signing_bytes())
     }
 
-    /// Calculate transaction hash - includes ALL fields except signature
-    /// This prevents hash collisions and replay attacks
-    /// 
+    // -----------------------------------------------------------------------
+    // Canonical transaction hash (for mempool dedup, Merkle tree, etc.)
+    // -----------------------------------------------------------------------
+
+    /// Calculate the transaction's canonical identifier hash.
+    ///
+    /// Covers ALL fields except `signature` (the signature signs the hash,
+    /// so including it would be circular). Used for:
+    ///   - Mempool deduplication
+    ///   - Merkle tree leaves
+    ///   - Block explorers
+    ///
     /// CONSENSUS RULES (FROZEN FOREVER):
-    /// - All integers are LITTLE-ENDIAN
-    /// - Public key included (prevents key substitution attacks)
-    /// - Signature NOT included (can't sign the signature)
+    ///   - All integers LITTLE-ENDIAN.
+    ///   - `sig_scheme` byte included.
+    ///   - `public_key` included (prevents key substitution).
     pub fn hash(&self) -> String {
         use sha3::{Digest, Sha3_256};
         let mut hasher = Sha3_256::new();
-        
-        // Include all transaction data EXCEPT signature (signature signs the hash)
+
         hasher.update(self.sender.as_bytes());
         hasher.update(self.recipient.as_bytes());
-        hasher.update(&self.amount.to_le_bytes()); // LITTLE-ENDIAN
-        hasher.update(&self.timestamp.to_le_bytes()); // LITTLE-ENDIAN
-        hasher.update(&self.fee.to_le_bytes()); // LITTLE-ENDIAN
-        hasher.update(&self.nonce.to_le_bytes()); // LITTLE-ENDIAN
+        hasher.update(&self.amount.to_le_bytes());
+        hasher.update(&self.timestamp.to_le_bytes());
+        hasher.update(&self.fee.to_le_bytes());
+        hasher.update(&self.nonce.to_le_bytes());
         hasher.update(&self.public_key);
-        
-        // Include tx_type discriminant
+        hasher.update(&[self.sig_scheme as u8]);
+
         match &self.tx_type {
             TransactionType::Transfer => hasher.update(&[0u8]),
             TransactionType::DeployContract { code } => {
@@ -182,36 +227,100 @@ impl Transaction {
                 hasher.update(args);
             }
         }
-        
+
         hex::encode(hasher.finalize())
     }
 
-    /// Check if this is a coinbase transaction (mining reward)
+    // -----------------------------------------------------------------------
+    // Verification — THE ONLY signature-checking entry point
+    // -----------------------------------------------------------------------
+
+    /// Verify the transaction signature.
+    ///
+    /// This is the ONLY function that should be called in consensus paths.
+    /// It performs the following checks in order:
+    ///
+    /// 1. Coinbase / Treasury bypass — these are validated by block reward rules, not signatures.
+    /// 2. Empty signature or public key — rejected immediately.
+    /// 3. Sender matches public key — prevents key substitution attacks.
+    /// 4. Signature scheme must be `Falcon512` — any other value is rejected.
+    /// 5. Delegate to `verify_signature_strict()` with the canonical signing hash.
+    ///
+    /// Returns `true` only if ALL checks pass.
+    pub fn verify(&self) -> bool {
+        // Rule 1: System transactions bypass signature verification.
+        if self.is_coinbase() || self.sender == "TREASURY" {
+            return true;
+        }
+
+        // Rule 2: Reject empty fields immediately.
+        if self.signature.is_empty() || self.public_key.is_empty() {
+            tracing::debug!("Transaction verify: empty signature or public key");
+            return false;
+        }
+
+        // Rule 3: Verify sender derives from the supplied public key.
+        let derived = self.derive_address_from_pubkey();
+        if self.sender != derived {
+            tracing::warn!(
+                "Transaction verify: sender address mismatch — claimed {}, derived {}",
+                self.sender, derived
+            );
+            return false;
+        }
+
+        // Rule 4: Only the active signature scheme is accepted.
+        match self.sig_scheme {
+            SignatureScheme::Falcon512 => {} // allowed
+            SignatureScheme::Reserved => {
+                tracing::warn!("Transaction verify: reserved signature scheme rejected");
+                return false;
+            }
+        }
+
+        // Rule 5: Strict Falcon-512 verification against the canonical signing hash.
+        let signing_hash = self.get_signing_data();
+        let ok = verify_signature_strict(&signing_hash, &self.signature, &self.public_key);
+        if !ok {
+            tracing::debug!("Transaction verify: Falcon-512 strict verification failed");
+        }
+        ok
+    }
+
+    /// Derive address from the public key embedded in this transaction.
+    fn derive_address_from_pubkey(&self) -> String {
+        use sha3::{Digest, Sha3_256};
+        let hash = Sha3_256::digest(&self.public_key);
+        format!("0x{}", hex::encode(&hash[..20]))
+    }
+
+    /// Returns `true` if this is a coinbase (mining reward) transaction.
     pub fn is_coinbase(&self) -> bool {
         self.sender == "COINBASE"
     }
 }
 
-/// Locked balance entry for vesting
+// ---------------------------------------------------------------------------
+// Account state types
+// ---------------------------------------------------------------------------
+
+/// A single locked balance entry (e.g., coinbase maturity, vesting).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LockedBalance {
     pub amount: u64,
     pub unlock_height: u64,
 }
 
-/// Account balance tracking (account-based model, not UTXO)
-/// This is simpler and works better with smart contracts
-/// SECURITY FIX (HIGH-4): Support multiple locked balances with different unlock times
+/// Per-address account record (account-based model, not UTXO).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AccountBalance {
     pub address: String,
-    pub balance: u64,                    // in microunits (spendable)
-    pub nonce: u64,                      // for replay protection
-    pub locked_balances: Vec<LockedBalance>, // Multiple locks with different unlock heights
+    pub balance: u64,
+    pub nonce: u64,
+    pub locked_balances: Vec<LockedBalance>,
 }
 
-/// Account state database (account-based model, NOT UTXO)
-/// Tracks balance + nonce for each address
+/// In-memory account state database.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AccountState {
     accounts: HashMap<String, AccountBalance>,
@@ -219,46 +328,40 @@ pub struct AccountState {
 
 impl AccountState {
     pub fn new() -> Self {
-        Self {
-            accounts: HashMap::new(),
-        }
+        Self { accounts: HashMap::new() }
     }
 
-    /// Credit account from transaction (add balance)
-    /// For coinbase: locked until maturity height
-    /// For regular: immediately spendable
+    /// Credit an account from a transaction.
+    ///   - Coinbase credits are locked until `current_height + coinbase_maturity`.
+    ///   - Regular credits are immediately spendable.
     pub fn credit_account(&mut self, tx: &Transaction, current_height: u64, coinbase_maturity: u64) {
         if tx.amount == 0 {
-            return; // Skip zero-amount txs (like contract calls)
+            return;
         }
-        
+
         let account = self.accounts.entry(tx.recipient.clone()).or_insert(AccountBalance {
             address: tx.recipient.clone(),
             balance: 0,
             nonce: 0,
             locked_balances: Vec::new(),
         });
-        
+
         if tx.is_coinbase() {
-            // Coinbase rewards are locked until maturity
             account.locked_balances.push(LockedBalance {
                 amount: tx.amount,
                 unlock_height: current_height + coinbase_maturity,
             });
         } else {
-            // Regular transactions are immediately spendable
             account.balance = account.balance.saturating_add(tx.amount);
         }
     }
 
-    /// Debit account (spend balance + fee)
-    /// Returns true if successful, false if insufficient funds
-    /// SECURITY FIX (HIGH-3): Removed automatic nonce increment - caller handles it explicitly
+    /// Debit an account.
+    /// Returns `false` if the account has insufficient spendable balance.
     pub fn debit_account(&mut self, address: &str, total_amount: u64) -> bool {
         if let Some(account) = self.accounts.get_mut(address) {
             if account.balance >= total_amount {
                 account.balance -= total_amount;
-                // Nonce increment removed - caller must call increment_nonce() explicitly
                 true
             } else {
                 false
@@ -267,27 +370,25 @@ impl AccountState {
             false
         }
     }
-    
-    /// Unlock mature coinbase rewards (called at each new block)
-    /// SECURITY FIX (HIGH-4): Properly handle multiple locks with different unlock times
+
+    /// Move mature coinbase balances into the spendable pool.
+    /// Called once per new block.
     pub fn unlock_mature_coinbase(&mut self, current_height: u64) {
         for account in self.accounts.values_mut() {
             let mut unlocked_total = 0u64;
             account.locked_balances.retain(|lock| {
                 if current_height >= lock.unlock_height {
                     unlocked_total += lock.amount;
-                    false  // Remove this lock
+                    false
                 } else {
-                    true  // Keep locked
+                    true
                 }
             });
             account.balance = account.balance.saturating_add(unlocked_total);
         }
     }
-    
-    /// Add locked balance for mining reward vesting (ANTI-DUMP mechanism)
-    /// Used for 50% of mining rewards locked for 6 months
-    /// SECURITY FIX (HIGH-4): Adds new locked entry instead of merging
+
+    /// Add a locked balance with a specific unlock height (vesting / anti-dump).
     pub fn add_locked_balance(&mut self, address: &str, amount: u64, unlock_height: u64) {
         let account = self.accounts.entry(address.to_string()).or_insert(AccountBalance {
             address: address.to_string(),
@@ -295,38 +396,32 @@ impl AccountState {
             nonce: 0,
             locked_balances: Vec::new(),
         });
-        
-        // Add new locked balance entry
-        account.locked_balances.push(LockedBalance {
-            amount,
-            unlock_height,
-        });
+        account.locked_balances.push(LockedBalance { amount, unlock_height });
     }
 
-    /// Get balance for an address (spendable only)
+    /// Spendable balance for an address.
     pub fn get_balance(&self, address: &str) -> u64 {
         self.accounts.get(address).map(|acc| acc.balance).unwrap_or(0)
     }
-    
-    /// Get total balance (spendable + locked)
+
+    /// Total balance (spendable + all locked entries).
     pub fn get_total_balance(&self, address: &str) -> u64 {
         self.accounts.get(address).map(|acc| {
-            let total_locked: u64 = acc.locked_balances.iter().map(|l| l.amount).sum();
-            acc.balance + total_locked
+            let locked: u64 = acc.locked_balances.iter().map(|l| l.amount).sum();
+            acc.balance + locked
         }).unwrap_or(0)
     }
-    
-    /// Get account nonce
+
+    /// Current nonce for an address.
     pub fn get_nonce(&self, address: &str) -> u64 {
         self.accounts.get(address).map(|acc| acc.nonce).unwrap_or(0)
     }
-    
-    /// Increment nonce for account (CRITICAL for transaction ordering)
+
+    /// Increment nonce for an address (called after a transaction is applied).
     pub fn increment_nonce(&mut self, address: &str) {
         if let Some(acc) = self.accounts.get_mut(address) {
             acc.nonce += 1;
         } else {
-            // Create account with nonce 1 if doesn't exist
             self.accounts.insert(address.to_string(), AccountBalance {
                 address: address.to_string(),
                 balance: 0,
@@ -335,21 +430,129 @@ impl AccountState {
             });
         }
     }
-    
-    /// Verify transaction nonce matches account nonce
+
+    /// Returns `true` if the transaction nonce is the next expected value.
     pub fn verify_nonce(&self, address: &str, tx_nonce: u64) -> bool {
         let account_nonce = self.get_nonce(address);
         tx_nonce == account_nonce + 1 || (account_nonce == 0 && tx_nonce == 1)
     }
 
-    /// Check if address has sufficient balance
+    /// Returns `true` if the address can spend `amount`.
     pub fn has_sufficient_balance(&self, address: &str, amount: u64) -> bool {
         self.get_balance(address) >= amount
     }
 
-    /// Get all account addresses
+    /// All known addresses.
     pub fn get_accounts(&self) -> Vec<String> {
         self.accounts.keys().cloned().collect()
     }
 }
 
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::FalconKeypair;
+
+    fn signed_transfer(kp: &FalconKeypair, amount: u64, nonce: u64) -> Transaction {
+        let mut tx = Transaction::new(
+            kp.get_address(),
+            "0xrecipient000000000000000000000000000000".to_string(),
+            amount,
+            1_700_000_000,
+        );
+        tx.nonce = nonce;
+        tx.public_key = kp.public_key.clone();
+        let signing_bytes = tx.get_signing_bytes();
+        tx.signature = kp.sign_transaction_canonical(&signing_bytes);
+        tx
+    }
+
+    #[test]
+    fn test_valid_transaction_verifies() {
+        let kp = FalconKeypair::generate();
+        let tx = signed_transfer(&kp, 1_000_000, 1);
+        assert!(tx.verify(), "Properly signed transaction must verify");
+    }
+
+    #[test]
+    fn test_sig_scheme_defaults_to_falcon512() {
+        let tx = Transaction::new("a".into(), "b".into(), 0, 0);
+        assert_eq!(tx.sig_scheme, SignatureScheme::Falcon512);
+    }
+
+    #[test]
+    fn test_reserved_scheme_rejected() {
+        let kp = FalconKeypair::generate();
+        let mut tx = signed_transfer(&kp, 1_000, 1);
+        tx.sig_scheme = SignatureScheme::Reserved;
+        assert!(!tx.verify(), "Reserved signature scheme must be rejected by verify()");
+    }
+
+    #[test]
+    fn test_tampered_amount_invalidates_signature() {
+        let kp = FalconKeypair::generate();
+        let mut tx = signed_transfer(&kp, 1_000, 1);
+        tx.amount = 9_999_999;
+        assert!(!tx.verify(), "Tampering with amount must invalidate signature");
+    }
+
+    #[test]
+    fn test_empty_signature_rejected() {
+        let kp = FalconKeypair::generate();
+        let mut tx = signed_transfer(&kp, 1_000, 1);
+        tx.signature = vec![];
+        assert!(!tx.verify(), "Empty signature must be rejected");
+    }
+
+    #[test]
+    fn test_wrong_sender_rejected() {
+        let kp = FalconKeypair::generate();
+        let attacker = FalconKeypair::generate();
+        let mut tx = signed_transfer(&kp, 1_000, 1);
+        // Replace public key with attacker's — sender address will no longer match
+        tx.public_key = attacker.public_key.clone();
+        assert!(!tx.verify(), "Mismatched sender/pubkey must be rejected");
+    }
+
+    #[test]
+    fn test_hash_is_deterministic() {
+        let kp = FalconKeypair::generate();
+        let tx = signed_transfer(&kp, 500_000, 2);
+        assert_eq!(tx.hash(), tx.hash(), "Transaction hash must be deterministic");
+    }
+
+    #[test]
+    fn test_signing_data_changes_with_amount() {
+        let kp = FalconKeypair::generate();
+        let mut tx1 = Transaction::new(kp.get_address(), "0xrecip".into(), 100, 0);
+        tx1.public_key = kp.public_key.clone();
+        let mut tx2 = tx1.clone();
+        tx2.amount = 999;
+        assert_ne!(
+            tx1.get_signing_data(),
+            tx2.get_signing_data(),
+            "Different amounts must produce different signing hashes"
+        );
+    }
+
+    #[test]
+    fn test_coinbase_bypasses_signature_check() {
+        let tx = Transaction {
+            sender: "COINBASE".to_string(),
+            recipient: "0xminer000000000000000000000000000000".to_string(),
+            amount: 100_000_000,
+            timestamp: 0,
+            signature: vec![],
+            public_key: vec![],
+            fee: 0,
+            nonce: 0,
+            tx_type: TransactionType::Transfer,
+            sig_scheme: SignatureScheme::Falcon512,
+        };
+        assert!(tx.verify(), "Coinbase must bypass signature verification");
+    }
+}

@@ -1,0 +1,13 @@
+# Project-level Cargo build configuration for QUANTA.
+#
+# Build determinism policy:
+#   Every node in the network must compile from the same source with the same
+#   flags to guarantee identical cryptographic behavior (especially Falcon-512
+#   verification, which must produce bit-for-bit identical results across
+#   x86_64 and ARM64). Do not override these flags in CI or deployment scripts.
+
+[build]
+# Enforce strict IEEE 754 floating-point behavior.
+# Prevents compiler optimizations that could produce platform-dependent
+# rounding differences in the difficulty adjustment calculation.
+rustflags = ["-C", "target-feature=+strict-float"]
