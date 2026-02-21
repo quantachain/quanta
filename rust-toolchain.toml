@@ -1,0 +1,17 @@
+# QUANTA Rust toolchain pin.
+#
+# All nodes must build with the SAME compiler version to ensure:
+#   - Identical codegen for Falcon-512 signature paths
+#   - Identical LLVM optimizations across x86_64 and ARM64
+#   - Reproducible release binaries
+#
+# Version requirements:
+#   >= 1.78  — Cargo.lock v4 support
+#   >= 1.85  — edition2024 stabilized (required by getrandom 0.4+)
+#
+# To upgrade: coordinate a network-wide upgrade and update Cargo.lock.
+# Never run with `+nightly` or `+beta` on a consensus node.
+
+[toolchain]
+channel = "1.85.0"
+profile = "minimal"

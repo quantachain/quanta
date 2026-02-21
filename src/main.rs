@@ -911,7 +911,7 @@ async fn main() {
             };
             let next_nonce = current_nonce + 1;
             
-            use crate::core::transaction::{Transaction, TransactionType};
+            use crate::core::transaction::{Transaction, TransactionType, SignatureScheme};
             let mut tx = Transaction {
                 sender: wallet.address.clone(),
                 recipient: to.clone(),
@@ -922,11 +922,12 @@ async fn main() {
                 fee: 1000, // 0.001 QUA default fee
                 nonce: next_nonce,
                 tx_type: TransactionType::Transfer,
+                sig_scheme: SignatureScheme::Falcon512,
             };
             
             // Sign transaction
             let signing_data = tx.get_signing_data();
-            tx.signature = wallet.keypair.sign(&signing_data);
+            tx.signature = wallet.keypair.sign_transaction_canonical(&signing_data);
             
             let add_result = blockchain.write().await.add_transaction(tx);
             match add_result {
@@ -990,7 +991,7 @@ async fn main() {
 }
 
 async fn run_demo(db_path: &str) {
-    use crate::core::transaction::{Transaction, TransactionType};
+    use crate::core::transaction::{Transaction, TransactionType, SignatureScheme};
     let storage = Arc::new(BlockchainStorage::new(db_path).expect("Failed to open database"));
     
     // Clear old demo data
@@ -1036,9 +1037,10 @@ async fn run_demo(db_path: &str) {
         fee: 1000, // 0.001 QUA
         nonce: nonce1,
         tx_type: TransactionType::Transfer,
+        sig_scheme: SignatureScheme::Falcon512,
     };
     let signing_data1 = tx1.get_signing_data();
-    tx1.signature = wallet1.keypair.sign(&signing_data1);
+    tx1.signature = wallet1.keypair.sign_transaction_canonical(&signing_data1);
     blockchain.write().await.add_transaction(tx1).unwrap();
     println!("   Tx 1: 25 QUA to wallet2 (nonce {})", nonce1);
     
@@ -1063,9 +1065,10 @@ async fn run_demo(db_path: &str) {
         fee: 1000,
         nonce: nonce2,
         tx_type: TransactionType::Transfer,
+        sig_scheme: SignatureScheme::Falcon512,
     };
     let signing_data2 = tx2.get_signing_data();
-    tx2.signature = wallet1.keypair.sign(&signing_data2);
+    tx2.signature = wallet1.keypair.sign_transaction_canonical(&signing_data2);
     blockchain.write().await.add_transaction(tx2).unwrap();
     println!("   Tx 2: 15 QUA to wallet3 (nonce {})", nonce2);
     

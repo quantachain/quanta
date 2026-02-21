@@ -5,9 +5,15 @@
 #   flags to guarantee identical cryptographic behavior (especially Falcon-512
 #   verification, which must produce bit-for-bit identical results across
 #   x86_64 and ARM64). Do not override these flags in CI or deployment scripts.
+#
+# Determinism is enforced by:
+#   1. Pinned Rust toolchain in rust-toolchain.toml (never floating-point flags).
+#   2. Consensus math uses integer arithmetic ONLY — no f64 in block validation.
+#   3. codegen-units = 1 + lto = true in [profile.release] (see Cargo.toml).
+#   4. Avoid -C target-cpu=native (causes binary divergence across machines).
 
 [build]
-# Enforce strict IEEE 754 floating-point behavior.
-# Prevents compiler optimizations that could produce platform-dependent
-# rounding differences in the difficulty adjustment calculation.
-rustflags = ["-C", "target-feature=+strict-float"]
+# No extra rustflags needed. Determinism is achieved through:
+#   - Locked toolchain version (rust-toolchain.toml)
+#   - Integer-only consensus math (no f64 in difficulty adjustment)
+#   - Reproducible release profile (Cargo.toml [profile.release])

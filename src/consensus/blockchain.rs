@@ -49,8 +49,10 @@ const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = 2016;
 
 // SECURITY FIX (External Audit): Difficulty bounds
 // Tightened from 2x/0.5x to 1.15x/0.85x (prevents wild swings)
-const MAX_DIFFICULTY_ADJUSTMENT_UP: f64 = 1.15;   // Max 15% increase per adjustment
-const MAX_DIFFICULTY_ADJUSTMENT_DOWN: f64 = 0.85; // Max 15% decrease per adjustment
+// INTEGER MATH ONLY: expressed as percent numerators (100 = 100%).
+// No f64 — floating-point divergence would cause consensus forks.
+const MAX_DIFFICULTY_ADJUSTMENT_UP_PCT: u32 = 115;   // Max 15% increase per adjustment (x * 115 / 100)
+const MAX_DIFFICULTY_ADJUSTMENT_DOWN_PCT: u32 = 85;  // Max 15% decrease per adjustment (x * 85 / 100)
 const MIN_DIFFICULTY: u32 = 4;
 // Increased from 256 to 2^31-1 for long-term security (prevents maxing out)
 const MAX_DIFFICULTY: u32 = 2_147_483_647; // Can support massive hashrate growth
@@ -113,7 +115,32 @@ const CHECKPOINTS: &[(u64, &str)] = &[
     // (10000, "<block_10000_hash>"),
 ];
 
+/// Apply the annual reward reduction using PURE INTEGER MATH.
+///
+/// Formula: reward = start * (85/100)^years
+///
+/// We avoid `f64` entirely because IEEE 754 results can differ across
+/// architectures and compiler optimization levels, which would cause
+/// consensus forks. Instead we multiply by 85 and divide by 100 for
+/// each year, which is deterministic on every platform.
+///
+/// Note: integer division truncates (rounds down). Over 20 years the
+/// accumulated error is < 0.01 QUA versus the f64 result — well within
+/// the 5 QUA `MIN_REWARD` floor.
+fn apply_annual_reduction(start: u64, years: u64) -> u64 {
+    let mut reward = start;
+    let keep_pct = 100 - ANNUAL_REDUCTION_PERCENT; // = 85
+    for _ in 0..years {
+        reward = reward * keep_pct / 100;
+        if reward <= MIN_REWARD {
+            return MIN_REWARD;
+        }
+    }
+    reward
+}
+
 /// Thread-safe blockchain with persistent storage (OPTIMIZED)
+
 /// 
 /// CRITICAL CHANGE: No longer stores full chain in memory!
 /// Before: 3.15M blocks × 2 MB = 20 GB RAM (crashes!)
@@ -172,6 +199,7 @@ impl Blockchain {
                 fee: 0,
                 nonce: 0,
                 tx_type: crate::core::transaction::TransactionType::Transfer,
+                sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
             };
             account_state.credit_account(&genesis_tx, 0, COINBASE_MATURITY);
             
@@ -395,6 +423,7 @@ impl Blockchain {
             fee: 0,
             nonce: 0,
             tx_type: crate::core::transaction::TransactionType::Transfer,
+            sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
         };
         
         // Treasury allocation transaction (if any)
@@ -411,6 +440,7 @@ impl Blockchain {
                 fee: 0,
                 nonce: 0,
                 tx_type: crate::core::transaction::TransactionType::Transfer,
+                sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
             };
             all_transactions.push(treasury_tx);
         }
@@ -435,17 +465,14 @@ impl Blockchain {
     }
 
     /// Get current mining reward with adaptive model (u64 microunits)
+    ///
+    /// CONSENSUS-CRITICAL: Pure integer math only. No f64.
+    /// Reduction formula: reward = YEAR_1_REWARD * (85/100)^years_elapsed
+    /// Applied iteratively to avoid any floating-point divergence.
     fn get_mining_reward(&self) -> u64 {
         let chain_len = self.chain.read().len() as u64;
-        
-        // Calculate base reward with annual reduction
         let years_elapsed = chain_len / BLOCKS_PER_YEAR;
-        let reduction_factor = (100 - ANNUAL_REDUCTION_PERCENT) as f64 / 100.0;
-        let base_reward = (YEAR_1_REWARD as f64 * reduction_factor.powi(years_elapsed as i32)).round() as u64;
-        
-        // Apply minimum floor and return
-        // SECURITY: Removed usage multiplier to prevent gaming attacks (see SECURITY_AUDIT.md)
-        base_reward.max(MIN_REWARD)
+        apply_annual_reduction(YEAR_1_REWARD, years_elapsed).max(MIN_REWARD)
     }
     
 
@@ -647,16 +674,12 @@ impl Blockchain {
     }
     
     /// Calculate reward at specific height (for validation)
+    ///
+    /// CONSENSUS-CRITICAL: Must match `get_mining_reward` exactly.
+    /// Pure integer math — no f64.
     fn calculate_reward_at_height(&self, height: u64) -> u64 {
-        // Use same logic as get_mining_reward but with specified height
         let years_elapsed = height / BLOCKS_PER_YEAR;
-        let reduction_factor = (100 - ANNUAL_REDUCTION_PERCENT) as f64 / 100.0;
-        let base_reward = (YEAR_1_REWARD as f64 * reduction_factor.powi(years_elapsed as i32)).round() as u64;
-        let base_reward = base_reward.max(MIN_REWARD);
-        
-        // Return base reward (no bonuses for fairness)
-        base_reward
-        // Note: Usage factor not included here since it's dynamic and based on recent blocks
+        apply_annual_reduction(YEAR_1_REWARD, years_elapsed).max(MIN_REWARD)
     }
     
     /// Get median timestamp from last N blocks (prevents timestamp manipulation)
@@ -726,17 +749,27 @@ impl Blockchain {
         // Calculate actual time taken, clamp to prevent extreme adjustments (4x bounds)
         let actual_time_clamped = actual_time.max(expected_time / 4).min(expected_time * 4);
         
-        // SECURITY FIX (CRITICAL-2): Use floating point to prevent integer division rounding errors
-        let current_difficulty_f64 = latest_block.difficulty as f64;
-        let new_difficulty_f64 = current_difficulty_f64 * (expected_time as f64 / actual_time_clamped as f64);
-        
-        // SECURITY FIX (External Audit): Apply tighter bounds (15% max change per adjustment)
-        let new_difficulty = new_difficulty_f64.round() as i64;
-        let new_difficulty = new_difficulty
-            .max((current_difficulty_f64 * MAX_DIFFICULTY_ADJUSTMENT_DOWN).round() as i64) // Max decrease 15%
-            .min((current_difficulty_f64 * MAX_DIFFICULTY_ADJUSTMENT_UP).round() as i64)   // Max increase 15%
-            .max(MIN_DIFFICULTY as i64)          // Minimum difficulty = 4
-            .min(MAX_DIFFICULTY as i64) as u32;  // Maximum difficulty = 2^31-1
+        // INTEGER MATH ONLY — no f64, no platform-dependent rounding.
+        // Formula: new_difficulty = current * expected_time / actual_time
+        // To avoid truncation, we scale up by 1000, divide, then round back down.
+        // E.g. if ratio = 1.05, scaled = 1050; we add 500 before dividing by 1000
+        // to get the nearest integer (equivalent to .round()).
+        let cd = latest_block.difficulty as u64;
+        let actual = actual_time_clamped as u64;
+        let expected = expected_time as u64;
+
+        // scaled_difficulty = round(current * expected / actual)
+        let scaled = cd
+            .checked_mul(expected)
+            .and_then(|v| v.checked_mul(1000))
+            .map(|v| (v / actual + 500) / 1000)  // +500 for rounding
+            .unwrap_or(cd);
+
+        // Apply ±15% bounds using integer percent constants, then global min/max.
+        let floor = (cd * MAX_DIFFICULTY_ADJUSTMENT_DOWN_PCT as u64 + 50) / 100; // round
+        let ceil  = (cd * MAX_DIFFICULTY_ADJUSTMENT_UP_PCT   as u64 + 50) / 100; // round
+        let new_difficulty = scaled.clamp(floor, ceil)
+            .clamp(MIN_DIFFICULTY as u64, MAX_DIFFICULTY as u64) as u32;
         
         tracing::info!("Difficulty adjustment: {} -> {} (actual time: {}s, expected: {}s)",
             latest_block.difficulty, new_difficulty, actual_time, expected_time);
