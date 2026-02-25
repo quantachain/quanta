@@ -6,6 +6,7 @@
 [![Rust Version](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://www.rust-lang.org)
 [![Build Status](https://img.shields.io/badge/build-in_progress-yellow.svg)]()
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.18753528-blue)](https://doi.org/10.5281/zenodo.18753528)
 
 ---
 
@@ -616,17 +617,25 @@ copies or substantial portions of the Software.
 
 ---
 
-## Citation
+## Research Paper
+
+The technical design of QUANTA is described in detail in our preprint:
+
+> **QUANTA: Engineering a Production-Ready Post-Quantum Blockchain with Falcon-512 Lattice Signatures**  
+> Kishore K — February 2026  
+> DOI: [10.5281/zenodo.18753528](https://doi.org/10.5281/zenodo.18753528)
 
 If you use QUANTA in your research or project, please cite:
 
 ```bibtex
-@software{quanta2026,
-  title = {QUANTA: A Quantum-Resistant Blockchain},
-  author = {QUANTA Development Team},
-  year = {2026},
-  url = {https://github.com/quantachain/quanta},
-  version = {1.0}
+@misc{quanta2026,
+  title  = {QUANTA: Engineering a Production-Ready Post-Quantum Blockchain
+             with Falcon-512 Lattice Signatures},
+  author = {Kishore K},
+  year   = {2026},
+  month  = feb,
+  doi    = {10.5281/zenodo.18753528},
+  url    = {https://doi.org/10.5281/zenodo.18753528}
 }
 ```
 
