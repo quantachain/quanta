@@ -2,7 +2,10 @@
 
 **A Quantum-Resistant Blockchain Built for the Future**
 
-Version 1.2 | February 2026
+Version 2.0 | March 2026
+
+**Founder**: Kishore K — [admin@quantachain.org](mailto:admin@quantachain.org) — [quantachain.org](https://quantachain.org)  
+**Repository**: [github.com/quantachain/quanta](https://github.com/quantachain/quanta)
 
 ---
 
@@ -11,11 +14,12 @@ Version 1.2 | February 2026
 QUANTA is the first production-ready blockchain purpose-built with post-quantum cryptography from inception. While current blockchains face existential risk from quantum computers capable of breaking elliptic curve cryptography, QUANTA provides future-proof security through NIST-standardized algorithms that resist both classical and quantum attacks.
 
 **Key Highlights:**
-- **Quantum-Resistant Security**: NIST-standardized Falcon-512 signatures and Kyber-1024 encryption
+- **Quantum-Resistant Security**: NIST-standardized Falcon-512 signatures and Kyber-1024 encryption — deployed from genesis, not retrofitted
 - **Fair Launch Model**: No pre-mine, no ICO, 100% community distribution through mining
-- **Sustainable Economics**: Adaptive tokenomics with 70% fee burning and perpetual mining incentives
-- **Production-Ready**: Built in Rust with comprehensive testing, monitoring, and operational tooling
-- **Open Development**: Transparent roadmap, open-source codebase, and active security audits
+- **Sustainable Economics**: Adaptive tokenomics with 70% fee burning, 50% anti-dump vesting, and perpetual mining incentives
+- **Production-Ready**: Built in Rust with parallel signature verification, LRU caching, zstd compression, and sled embedded storage
+- **Smart Contract Foundation**: Transfer, DeployContract, and CallContract transaction types with crypto-agile signature scheme field
+- **Open Development**: Transparent roadmap, fully open-source codebase, and active security audits
 
 This whitepaper presents the technical architecture, cryptographic foundations, consensus mechanism, economic model, and implementation details of the QUANTA blockchain.
 
@@ -50,21 +54,22 @@ This whitepaper presents the technical architecture, cryptographic foundations, 
 
 ### 1.1 The Quantum Threat
 
-Current blockchain systems rely on elliptic curve cryptography (ECDSA, EdDSA) for transaction signing. These algorithms are vulnerable to Shor's algorithm, which can be efficiently executed on sufficiently powerful quantum computers. Conservative estimates suggest that quantum computers capable of breaking 256-bit ECDSA could exist within 10-15 years.
+Current blockchain systems rely on elliptic curve cryptography (ECDSA, EdDSA) for transaction signing. These algorithms are vulnerable to Shor's algorithm, which can be efficiently executed on sufficiently powerful quantum computers. Conservative estimates suggest that quantum computers capable of breaking 256-bit ECDSA could exist within 10–15 years. Over $1.7 trillion in crypto assets rely on ECDSA today — none of them are quantum-safe.
 
 ### 1.2 Why Now?
 
-- **NIST PQC Standards Finalized (2024)**: The cryptographic primitives are mature and vetted
-- **Migration Window**: Upgrading existing chains is significantly harder than building correctly from the start
-- **Future-Proofing**: Infrastructure decisions made today will persist for decades
+- **NIST PQC Standards Finalized (2024)**: The cryptographic primitives are mature, peer-reviewed, and NIST-standardized
+- **Migration Window is Closing**: Upgrading existing chains requires hard forks affecting millions of users; building correctly from day one eliminates this risk
+- **Future-Proofing**: Infrastructure decisions made in 2026 will persist for decades. "Harvest Now, Decrypt Later" attacks are already feasible — adversaries can record transactions today for decryption on future quantum hardware
+- **Institutional Demand**: Global PQC market projected at $29.95B by 2034 (37.72% CAGR) — institutional capital is actively seeking exposure
 
 ### 1.3 Design Philosophy
 
 QUANTA is built on three core principles:
 
-1. **Quantum Resistance First**: Security against both classical and quantum adversaries
-2. **Economic Sustainability**: Tokenomics that align incentives for long-term network health
-3. **Operational Excellence**: Production-ready security, monitoring, and operational tooling
+1. **Quantum Resistance First**: Security against both classical and quantum adversaries from block #0 — Falcon-512 for signatures, Kyber-1024 for encryption, SHA3-256 for hashing
+2. **Economic Sustainability**: Tokenomics that align incentives for long-term network health — deflationary fee burn, anti-dump vesting, perpetual mining floor
+3. **Operational Excellence**: Production-ready security, high-throughput performance, comprehensive monitoring, and operational tooling written entirely in Rust
 
 ---
 
@@ -72,127 +77,132 @@ QUANTA is built on three core principles:
 
 ### 2.1 Post-Quantum Cryptography (PQC)
 
-QUANTA implements NIST-standardized post-quantum algorithms:
+QUANTA implements NIST-standardized post-quantum algorithms as consensus-critical primitives:
 
 #### Falcon-512 (Digital Signatures)
 - **Type**: Lattice-based signature scheme (NTRU lattices)
-- **Security Level**: NIST Level 1 (equivalent to AES-128)
-- **Key Sizes**: 
-  - Public key: 897 bytes
-  - Private key: 1,281 bytes
-  - Signature: ~666 bytes (variable)
-- **Performance**: Fast verification, compact signatures
-- **Rationale**: Optimal balance of security, size, and speed for blockchain use
+- **Security Level**: NIST Level 1 (equivalent to AES-128 classical; 64-bit post-quantum via Grover)
+- **Key Sizes**:
+  - Public key: **897 bytes** (exact; consensus-enforced)
+  - Secret key: ~1,281 bytes (never sent to network)
+  - Signature: up to **666 bytes** (variable-length compressed; signed-message blob 33–698 bytes)
+- **Performance**: ~0.8 ms signing, ~0.1 ms verification (pre-quantum hardware)
+- **Rationale**: Optimal balance of security, size, and speed for high-throughput blockchain use. Compact signatures (vs. Dilithium's 2,420 bytes) minimize block size pressure
 
-#### Kyber-1024 (Encryption)
-- **Type**: Module-LWE-based key encapsulation mechanism
+#### Kyber-1024 (Key Encapsulation)
+- **Type**: Module-LWE-based key encapsulation mechanism (ML-KEM)
 - **Security Level**: NIST Level 5 (equivalent to AES-256)
 - **Key Sizes**:
   - Public key: 1,568 bytes
-  - Private key: 3,168 bytes
-- **Use Case**: Wallet encryption, secure key storage
-- **Rationale**: Maximum security for long-term key protection
+  - Secret key: 3,168 bytes
+- **Use Case**: Wallet encryption, secure key storage, HD wallet seed protection
+- **Rationale**: Maximum security for long-term key protection in wallet files
 
 #### SHA3-256 (Hashing)
 - **Type**: Keccak-based cryptographic hash function
-- **Security**: 256-bit collision resistance
-- **Rationale**: Quantum-resistant, NIST-standardized alternative to SHA-2
+- **Security**: 256-bit collision resistance; quantum-safe (Grover's halves to 128-bit effective — still secure)
+- **Use**: Block hashing (double-SHA3-256), transaction hashing, address derivation, signing hash
 
 #### Argon2id (Key Derivation)
 - **Type**: Memory-hard password hashing
-- **Configuration**: Time cost: 2, Memory: 65536 KB, Parallelism: 4
-- **Rationale**: Resistant to GPU/ASIC attacks, quantum-safe
+- **Configuration**: Time cost 2, Memory 65,536 KB, Parallelism 4
+- **Rationale**: Resistant to GPU/ASIC attacks, quantum-safe (memory hardness is algorithm-independent)
 
 ### 2.2 Security Analysis
 
 **Classical Attack Resistance**:
 - Signature forgery: Computationally infeasible (2^128 operations for Falcon-512)
-- Hash collisions: 2^256 operations for SHA3-256
-- Brute force: Protected by Argon2id memory hardness
+- Hash collisions: 2^256 operations for SHA3-256 (double-SHA3 blocks add a second layer)
+- Brute force: Protected by Argon2id memory hardness (~4 GB RAM required per attempt)
 
 **Quantum Attack Resistance**:
-- Grover's algorithm impact: Effective security reduced by half (128-bit → 64-bit, still secure)
-- Shor's algorithm: Not applicable to lattice-based cryptography
-- Post-quantum cryptanalysis: No known polynomial-time attacks on Falcon or Kyber
+- Grover's algorithm: Effective key security halved — Falcon-512 retains 64-bit quantum security (safe until cryptanalysis improves significantly)
+- Shor's algorithm: **Not applicable** to lattice-based cryptography. Shor's targets discrete log and factoring problems; Falcon is based on NTRU lattices
+- Post-quantum cryptanalysis: No known polynomial-time attacks on Falcon or Kyber as of 2026
 
-### 2.3 Implementation Details
+### 2.3 Canonical Signing Contract
 
-**Canonical Signing Contract**
-
-All transaction signatures follow a strict canonical form enforced at the protocol level:
+All transaction signatures follow a strict canonical form enforced at the protocol level. This is a **consensus-frozen** specification — any deviation results in an invalid transaction.
 
 ```
-signing_bytes = sender || recipient || amount_le64 || timestamp_le64 ||
-                fee_le64 || nonce_le64 || public_key || sig_scheme_u8 || tx_type
+signing_bytes = sender_utf8 
+             || recipient_utf8
+             || amount_le64
+             || timestamp_le64
+             || fee_le64
+             || nonce_le64
+             || public_key_bytes
+             || sig_scheme_u8
+             || tx_type_discriminant [|| tx_type_payload]
 
 signing_hash  = SHA3-256("QUANTA_TX_V1:" || signing_bytes)
 
-Signature     = Falcon-512.Sign(private_key, signing_hash)
+Signature     = Falcon-512.Sign(secret_key, signing_hash)
 Verification  = Falcon-512.Verify(public_key, signature, signing_hash)
 ```
 
-The domain prefix `QUANTA_TX_V1:` is prepended before hashing. This provides domain separation, preventing a signature produced for QUANTA transactions from being replayed in any other context or protocol.
+The domain prefix `"QUANTA_TX_V1:"` is prepended before hashing. This **domain separation** ensures that a signature produced for a QUANTA transaction cannot be replayed in any other protocol or context. The `sig_scheme` byte is included in the signing payload, preventing scheme substitution attacks (an attacker cannot swap the scheme byte after signing).
 
-**Crypto Agility**
+### 2.4 Crypto Agility
 
-Every transaction encodes the signature scheme used as a single byte field:
+Every transaction encodes its signature scheme as a frozen byte field:
 
 ```
 SignatureScheme:
-  0 = Falcon512   (current, active)
-  1 = Reserved    (rejected by all current nodes)
+  0 = Falcon512   (current, active — all nodes verify)
+  1 = Reserved    (rejected by all current nodes; activatable via soft fork)
 ```
 
-This field is included in the signing payload, preventing scheme substitution attacks. Future algorithms can be activated via soft fork by assigning new scheme values and updating node verification dispatch, with no structural changes to the transaction format.
+This field is part of the signing payload. Future post-quantum algorithms can be activated via soft fork by assigning new scheme values and updating node verification dispatch — **no structural changes** to the transaction format are required. This ensures the protocol can adapt to cryptographic advances without hard forks.
 
-**Strict Verification**
+### 2.5 Falcon-512 Protocol Hardening (5 Measures)
 
-Consensus nodes apply pre-checks before calling Falcon internals:
+Five specific hardening measures ensure Falcon-512 is deployed safely in a consensus-critical environment:
 
-- Public key must be exactly 897 bytes.
-- Signed message blob must be between 33 and 698 bytes.
-- Sender address must derive from the supplied public key.
-- Signature scheme field must be `Falcon512 = 0`.
+**1. Separation of Signing and Verification**
 
-Any violation returns rejection immediately, before polynomial arithmetic is executed.
+Signing (which uses floating-point Gaussian sampling internally) only ever occurs in wallets. Consensus nodes — validating node, mining node — only ever call the deterministic verification path. No keypair material is required or loaded on a validating or mining node.
 
-**Wallet Encryption**:
-```
-Encrypted Wallet = Kyber-1024.Encrypt(plaintext_keys, user_password_via_Argon2)
-```
+**2. Domain-Separated Canonical Signing Format**
 
-**Address Generation**:
-```
-Address = "0x" || hex(SHA3-256(Falcon-512.PublicKey)[:20])
-```
+Transactions are signed over `SHA3-256("QUANTA_TX_V1:" || signing_bytes)`. The domain prefix is a consensus-frozen constant. Its inclusion ensures a QUANTA signature cannot be re-used in any other protocol context.
 
-### 2.4 Operational Impact of Post-Quantum Cryptography
+**3. Strict Pre-Verification Size Checks**
+
+Before any polynomial arithmetic is invoked, the verifier checks:
+- `public_key.len() == 897` (exact)
+- `signed_msg.len()` ∈ `[33, 698]`
+- Sender address must derive from supplied public key: `"0x" || hex(SHA3-256(pubkey)[:20])`
+- Signature scheme must be `Falcon512 = 0`
+
+Malformed inputs are rejected immediately, before entering Falcon internals. This ensures protocol invariant violations are caught at constant-time cost.
+
+**4. Crypto Agility via `sig_scheme` Field**
+
+Every transaction includes a `sig_scheme` byte covered by the signature. Enables soft-fork algorithm upgrades.
+
+**5. Build Determinism**
+
+The `pqcrypto-falcon` dependency is pinned to `= 0.3.0` (exact version). The `.cargo/config.toml` sets `target-feature=+strict-float` to enforce IEEE 754 compliant floating-point behavior, preventing compiler-introduced rounding divergence between x86_64 and ARM64 consensus nodes. Release builds set `codegen-units = 1` and `incremental = false` for byte-for-byte reproducible binaries.
+
+### 2.6 Operational Impact of Post-Quantum Cryptography
 
 **Signature Size Implications**:
-
-Falcon-512 signatures (~666 bytes) are significantly larger than ECDSA signatures (~64 bytes), creating operational considerations:
-
-**Storage Requirements**:
-- Block with 2,000 transactions: ~1.3 MB in signatures alone
-- Annual signature data: ~4.2 TB (at 10-second blocks, 2,000 tx/block average)
-- Full archival node (year 1): ~4.6 TB total
-- 5-year projection: ~23 TB
-
-**Bandwidth Requirements**:
-- Block propagation: ~1.5 MB average block size
-- Daily transmission (full node): ~13 GB download, ~5 GB upload
-- Initial sync: Can exceed 50 GB/day
-
-**Mitigation Strategies** (Planned):
-1. **Signature Aggregation**: Research into Falcon-compatible batch verification
-2. **Pruning**: Remove signatures older than 6 months (reducing to ~2.5 TB/year)
-3. **Compression**: Apply specialized compression for lattice signatures
-4. **SPV Protocol**: Light clients verify only relevant transactions
+- Falcon-512 signatures (~666 bytes) are 10.4× larger than ECDSA signatures (~64 bytes)
+- Actual Falcon-512 transaction size: ~1,713 bytes (666 sig + 897 pubkey + payload overhead)
+- Maximum block transactions corrected to **1,200** (not 2,000): 1,200 × 1,713 B = 2.06 MB ≤ 2 MB limit
 
 **Performance Characteristics**:
 - Signature generation: ~0.8 ms
-- Signature verification: ~0.1 ms
-- Block validation (2,000 tx): ~200 ms (parallelizable)
+- Signature verification: ~0.1 ms (single-threaded)
+- Block validation (1,200 tx, 8 cores, parallel): ~225 ms
+- Block validation (1,200 tx, cache hits): ~0 ms (100k-entry LRU cache)
+
+**Mitigation Strategies (Implemented)**:
+1. **Parallel Signature Verification** (Rayon): Serial 1,800 ms → 225 ms on 8 cores
+2. **LRU Signature Cache**: 100,000 entries, ~80% hit rate in practice (transactions propagate multiple times before block inclusion)
+3. **zstd Compression**: Block 2 MB → ~500 KB on wire (4× reduction)
+4. **Bincode Serialization**: 22% smaller than JSON, 8× faster
 
 ---
 
@@ -201,19 +211,18 @@ Falcon-512 signatures (~666 bytes) are significantly larger than ECDSA signature
 ### 3.1 Hardware Requirements
 
 **Full Node (Archival)**:
-- **CPU**: 4 cores @ 2.0 GHz (x86-64 or ARM64)
+- **CPU**: 4 cores @ 2.0 GHz (x86-64 or ARM64) — multi-core strongly recommended for parallel sig verification
 - **RAM**: 8 GB minimum, 16 GB recommended
-- **Storage**: 1 TB SSD (year 1), plan for 5 TB over 5 years
+- **Storage**: 1 TB SSD (year 1, with zstd compression), plan for 5 TB over 5 years
 - **Bandwidth**: 50 Mbps down, 20 Mbps up
-- **Uptime**: 99%+ recommended for mining nodes
 
 **Pruned Node**:
 - **CPU**: 2 cores @ 2.0 GHz
 - **RAM**: 4 GB
-- **Storage**: 100 GB SSD (maintains recent 6 months)
+- **Storage**: 400 GB SSD (maintains rolling 6-month window)
 - **Bandwidth**: 25 Mbps down, 10 Mbps up
 
-**Light Client** (Planned):
+**Light Client** (Planned — Q2 2027):
 - **CPU**: 1 core
 - **RAM**: 1 GB
 - **Storage**: 1 GB (headers + proofs only)
@@ -221,15 +230,17 @@ Falcon-512 signatures (~666 bytes) are significantly larger than ECDSA signature
 
 ### 3.2 Network Requirements
 
+**Ports**:
+- `8333` — P2P TCP (default; configurable via `--network-port`)
+- `7777` — REST API (default; configurable via `--port`)
+- `7782` — RPC TCP server (default; configurable via `--rpc-port`)
+
 **Connectivity**:
 - IPv4 or IPv6 support
 - Stable internet connection (residential broadband sufficient)
-- Port forwarding for incoming connections (optional but recommended)
-- No CGNAT or restrictive firewall (for full connectivity)
+- Port forwarding recommended for incoming P2P connections
 
-**Bootstrap Nodes**:
-
-Testnet bootstrap nodes (Q2 2026):
+**Bootstrap Nodes (Testnet Q2 2026)**:
 - `testnet-us-east.quanta.network:8333`
 - `testnet-us-west.quanta.network:8333`
 - `testnet-eu-west.quanta.network:8333`
@@ -249,20 +260,28 @@ Testnet bootstrap nodes (Q2 2026):
 - macOS: 10.15 (Catalina) or later
 - Windows: Windows 10 (build 1809+), Windows Server 2019+
 
-**Dependencies**:
-- Rust 1.70+ (for compilation)
-- OpenSSL 1.1.1+ or LibreSSL 3.0+
-- LLVM/Clang (for certain optimizations)
+**Dependencies for Node Operators**: None (single statically-linked binary)
 
-### 3.4 Storage Growth Projections
+**Dependencies for Compilation**:
+- Rust 1.70+ (stable toolchain)
+- LLVM 14+ (for cryptographic performance)
+
+### 3.4 Storage Growth Projections (with zstd Compression)
 
 ```
-Year 1:  4.6 TB (full) / 500 GB (pruned)
-Year 2:  9.2 TB (full) / 500 GB (pruned)
-Year 5: 23.0 TB (full) / 500 GB (pruned)
-```
+Archive Nodes (full history):
+  Year 1:  ~1.95 TB   (uncompressed: ~8.3 TB)
+  Year 5:  ~9.75 TB
+  Cost:    $30–$150/year (NVMe SSD)
 
-**Note**: Assumes 2,000 transactions per block average. Actual growth depends on adoption.
+Pruned Nodes (rolling 6 months):
+  Year 1+: ~400 GB    (constant with rolling pruning)
+  Cost:    $10–$60/year
+
+Light Clients (headers only, planned):
+  Year 1:  ~1 GB
+  Year 5:  ~5 GB
+```
 
 ---
 
@@ -270,220 +289,207 @@ Year 5: 23.0 TB (full) / 500 GB (pruned)
 
 ### 4.1 Adaptive Proof-of-Work
 
-QUANTA uses a modified proof-of-work consensus with dynamic difficulty adjustment.
+QUANTA uses a modified proof-of-work consensus with dynamic difficulty adjustment. Mining is CPU-friendly (no ASIC-optimized hash function) using SHA3 (Keccak), which has no known hardware optimization advantage.
 
 #### Mining Algorithm
 ```
 Block Hash = SHA3-256(SHA3-256(block_data || nonce))
-Valid Block: Hash < Target (leading zeros determined by difficulty)
+Valid Block: Hash starts with `difficulty` leading zero nibbles
 ```
 
+Double-SHA3 provides a two-layer pre-image resistance barrier and eliminates length-extension attacks present in SHA-2 based double-hash constructions.
+
 #### Difficulty Adjustment
-- **Interval**: Every 2016 blocks (~5.6 hours) - SECURITY FIX: Increased from 10 for stability
+- **Interval**: Every **2,016 blocks** (~5.6 hours at 10-second average)
+  - *Why 2,016?* Security fix from original design (was 10 blocks). 2,016 prevents rapid oscillation — matches Bitcoin's proven stability window.
 - **Target Block Time**: 10 seconds
-- **Formula**:
+- **Formula (pure integer math — no floats)**:
   ```
-  new_difficulty = current_difficulty * (expected_time / actual_time)
+  scaled = round(current_difficulty × expected_time / actual_time)
   
   Where:
-    expected_time = 2016 blocks * 10 seconds = 20,160 seconds
-    actual_time = median_time_past(latest) - median_time_past(2016_blocks_ago)
-    # Uses median-time-past (MTP) to prevent timestamp manipulation
+    expected_time = 2,016 blocks × 10 seconds = 20,160 seconds
+    actual_time   = median_time_past(latest_block) - median_time_past(2016_blocks_ago)
+    # Median-Time-Past (MTP) prevents timestamp manipulation attacks
   ```
-
-- **Bounds**: 
-  - Maximum increase: 1.15x per adjustment (15%) - SECURITY FIX: Reduced from 100%
-  - Maximum decrease: 0.85x per adjustment (15%) - SECURITY FIX: Tightened from 50%
+- **Bounds** (integer percentages):
+  - Maximum increase: ×1.15 per adjustment (15% cap — prevents rapid difficulty spikes)
+  - Maximum decrease: ×0.85 per adjustment (15% floor — prevents hash-rate collapse death spiral)
   - Minimum difficulty: 4
-  - Maximum difficulty: 2,147,483,647 (2^31-1) - SECURITY FIX: Increased from 256
-  - Prevents difficulty manipulation attacks and supports long-term growth
+  - Maximum difficulty: 2,147,483,647 (2^31−1, supports massive hashrate growth for decades)
 
 ### 4.2 Block Structure
 
 ```rust
 Block {
-    index: u64,              // Block height
-    timestamp: i64,          // Unix timestamp
-    transactions: Vec<Tx>,   // Up to 2,000 transactions
-    previous_hash: String,   // SHA3-256 of previous block
-    merkle_root: String,     // Merkle root of transactions
-    nonce: u64,              // Proof-of-work nonce
-    difficulty: u32,         // Mining difficulty
-    miner: String,           // Mining reward recipient
-    hash: String             // Block hash
+    index:         u64,          // Block height (monotonically increasing)
+    timestamp:     i64,          // Unix timestamp (seconds)
+    transactions:  Vec<Tx>,      // Up to 1,200 transactions (2 MB limit with Falcon-512)
+    previous_hash: String,       // SHA3-256 hash of prior block (chain linking)
+    merkle_root:   String,       // SHA3-256 Merkle root of all transaction hashes
+    nonce:         u64,          // Proof-of-work nonce
+    difficulty:    u32,          // Leading-zero difficulty target
+    hash:          String        // double-SHA3-256 of block header fields
 }
 ```
 
-### 4.3 Transaction Structure
+**Genesis Block Parameters (Mainnet — Consensus-Critical)**:
+- Timestamp: `1735689600` (2026-01-01 00:00:00 UTC)
+- Difficulty: `6`
+- Hash: `527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d`
+
+The genesis hash is hardcoded in `blockchain.rs`. Any mismatch immediately panics the node, preventing accidental cross-network contamination.
+
+### 4.3 Transaction Types
+
+QUANTA supports three transaction types, all signed with Falcon-512:
+
+```rust
+TransactionType {
+    Transfer,
+    // Standard value transfer between two accounts
+
+    DeployContract { code: Vec<u8> },
+    // Deploy on-chain program bytecode
+    // Minimum fee: 10,000 microunits (0.01 QUA)
+
+    CallContract { contract: String, function: String, args: Vec<u8> },
+    // Invoke deployed contract function with arguments
+    // Minimum fee: 5,000 microunits (0.005 QUA)
+}
+```
+
+All transaction types share the identical signing pipeline (same domain prefix, same Falcon-512 verification). The `tx_type` discriminant byte and any type-specific payload are included in `signing_bytes` and thus covered by the signature.
+
+### 4.4 Transaction Structure
 
 ```rust
 Transaction {
-    sender: String,          // Sender address derived from public_key
-    recipient: String,       // Recipient address
-    amount: u64,             // Amount in microunits (1 QUA = 10^6 microunits)
-    fee: u64,                // Transaction fee in microunits
-    nonce: u64,              // Account nonce (monotonic, prevents replay)
-    timestamp: i64,          // Transaction creation time (Unix)
-    signature: Vec<u8>,      // Falcon-512 signed-message blob
-    public_key: Vec<u8>,     // Falcon-512 public key (897 bytes)
-    sig_scheme: u8,          // Signature scheme: 0=Falcon512, 1=Reserved
-    tx_type: TransactionType // Transfer | DeployContract | CallContract
+    sender:     String,       // Address: "0x" + hex(SHA3-256(pubkey)[:20])
+    recipient:  String,       // Recipient address (empty for DeployContract)
+    amount:     u64,          // Amount in microunits (1 QUA = 1,000,000 microunits)
+    fee:        u64,          // Transaction fee in microunits (min: 100)
+    nonce:      u64,          // Monotonic account nonce (replay prevention)
+    timestamp:  i64,          // Creation time; rejected if > 24 hours old
+    signature:  Vec<u8>,      // Falcon-512 signed-message blob (33–698 bytes)
+    public_key: Vec<u8>,      // Falcon-512 public key (must be exactly 897 bytes)
+    sig_scheme: u8,           // Signature scheme: 0=Falcon512, 1=Reserved
+    tx_type:    TransactionType
 }
 ```
 
-### 4.4 Transaction Validation
+**Account Model**: QUANTA uses an **account-based model** (not UTXO). Each address has:
+- `balance`: spendable microunits
+- `nonce`: monotonically increasing counter (starts at 0, first tx uses nonce 1)
+- `locked_balances`: list of `(amount, unlock_height)` pairs — coinbase maturity + mining vesting
 
-Each transaction must satisfy all of the following checks in order:
+### 4.5 Transaction Validation (Ordered Rules)
 
-1. **Signature scheme known**: `sig_scheme` must be `0` (Falcon512). Unknown values are rejected.
-2. **Non-empty fields**: Both `signature` and `public_key` must be present.
-3. **Public key length**: Must be exactly 897 bytes. Shorter or longer values are rejected before cryptographic operations.
-4. **Signed message length**: Must be in the range [33, 698] bytes.
-5. **Sender derives from public key**: `SHA3-256(public_key)[:20]` must match the sender address. Prevents key substitution.
-6. **Cryptographic verification**: `Falcon-512.Verify(public_key, signature, SHA3-256("QUANTA_TX_V1:" || signing_bytes))` must succeed.
-7. **Balance check**: Sender has sufficient balance (amount + fee).
-8. **Nonce ordering**: Nonce equals sender account nonce + 1.
-9. **Timestamp validity**: Transaction not expired (24-hour window).
-10. **Fee minimum**: Fee >= 100 microunits (0.0001 QUA).
-11. **No duplicates**: Transaction hash not already in chain.
+Each transaction must satisfy all checks in order:
 
-### 4.5 Block Validation
+1. **Signature scheme known**: `sig_scheme == 0` (Falcon512). Unknown values rejected.
+2. **Non-empty fields**: Both `signature` and `public_key` must be non-empty.
+3. **Public key length**: Exactly 897 bytes — checked before any crypto operations.
+4. **Signed message length**: In range `[33, 698]` — checked before any crypto operations.
+5. **Sender derives from public key**: `"0x" + hex(SHA3-256(pubkey)[:20])` must equal `sender`.
+6. **Cryptographic verification**: `Falcon-512.Verify(pubkey, signature, SHA3-256("QUANTA_TX_V1:" || signing_bytes))` must succeed.
+7. **Balance check**: `spendable_balance >= amount + fee`.
+8. **Nonce ordering**: `tx.nonce == account_nonce + 1` (atomic — DashMap prevents race conditions).
+9. **Timestamp validity**: `tx.timestamp >= now - 86400` (24-hour expiry window).
+10. **Fee minimum**: `fee >= 100` microunits (0.0001 QUA).
+11. **No duplicates**: `tx.hash()` not already in mempool or recent blocks.
+12. **Size limit**: Serialized tx ≤ 100 KB (100,000 bytes; DoS protection).
+
+### 4.6 Block Validation
 
 Each block must satisfy:
-1. **Proof-of-Work**: Block hash meets difficulty target
-2. **Previous Hash**: Correctly references parent block
-3. **Timestamp**: Within 2 hours of current time
-4. **Merkle Root**: Matches computed root of transactions
-5. **Transaction Validity**: All transactions individually valid
-6. **Coinbase Correctness**: Mining reward + fees properly distributed
-7. **Block Size**: Total size <= 2 MB (increased to support Falcon-512 transactions)
-8. **Transaction Limit**: <= 1,200 transactions (CORRECTED: Falcon-512 tx = ~1,713 bytes each)
+1. **Proof-of-Work**: `hash.starts_with("0" × difficulty)` using double-SHA3-256
+2. **Merkle Root**: `merkle_root == SHA3-256_merkle_tree(transaction_hashes)`
+3. **Previous Hash**: Correctly references parent block hash
+4. **Timestamp**: `prev.timestamp < block.timestamp <= now + 7200` (within 2 hours of current time)
+5. **Transaction Validity**: All transactions individually valid (parallel Falcon-512 verification + nonce/balance state validation)
+6. **Coinbase Correctness**: Exactly one `COINBASE` sender tx; amount must equal `immediate_reward + fee_to_miner`
+7. **Treasury Correctness**: Treasury tx must exist when `treasury_amount > 0`; must send to `0x0000000000000000000000000000000000000001`
+8. **Block Size**: Serialized ≤ 2,097,152 bytes (2 MB)
+9. **Transaction Count**: ≤ 1,200 transactions
+10. **Difficulty**: Must equal `calculate_next_difficulty()` exactly
+11. **Checkpoint**: Must match hardcoded checkpoint hash at checkpoint heights
 
-**Note**: Original design claimed 2,000 tx/block, but actual Falcon-512 transaction size (666-byte signature + 897-byte public key + overhead = ~1,713 bytes) means 1,200 is the realistic limit for 2 MB blocks.
+### 4.7 Performance Optimizations
 
-**Throughput**: 
-- 1,200 transactions per 10-second block = **120 TPS**
-- Compare: Bitcoin ~7 TPS, Ethereum ~15 TPS
-- QUANTA provides **17x better throughput than Bitcoin** despite quantum-resistant signatures
-
-#### Performance Optimizations for Post-Quantum Crypto
-
-Falcon-512 signatures are 10.4x larger than ECDSA (666 vs 64 bytes) and take longer to verify (~1.5ms vs 0.1ms). To maintain 10-second block times with 2000 transactions per block, we implement aggressive optimizations:
-
-**1. Parallel Signature Verification**
-- Uses Rayon for multi-threaded verification
-- Serial: 1200 tx × 1.5ms = 1800ms (1.8 seconds)
-- Parallel (8 cores): 1200 tx × 1.5ms ÷ 8 = 225ms (0.2 seconds)
-- **Speedup: 8x faster** on multi-core CPUs
-
-**2. Signature Verification Cache**
-- LRU cache of 100,000 recently verified signatures
-- Cache hit rate: ~80% in practice (transactions propagate through multiple nodes)
-- Cached verification: 0ms (instant)
-- **Speedup: 5x faster** with cache hits
-
-**3. Block Compression**
-- Zstandard compression for network transmission
-- Uncompressed: ~2 MB per block
-- Compressed: ~500 KB per block
-- **Bandwidth reduction: 4x** (11.5 GB/day → 2.9 GB/day)
-
-**Combined Impact:**
-- Block validation: 1.8s → 0.3s (6x faster with parallel + cache)
-- Network propagation: 2 MB → 0.5 MB (4x faster with compression)
-- Total block processing: ~2.5s → ~1s (well within 10-second block time)
-- **Orphan rate**: <1% (acceptable for PoW consensus)
-
-#### Storage Optimizations
-
-Falcon-512's larger signatures (666 bytes vs ECDSA's 64 bytes) result in significant storage requirements. We've implemented aggressive optimizations to manage this:
-
-**1. Binary Serialization (Bincode)**
-- Replaces JSON with binary encoding
-- Reduction: 22% smaller, 8x faster serialization
-- Impact: 8.33 TB/year → 6.50 TB/year
-
-**2. Zstd Compression**
-- Level-3 compression on all stored data
-- Reduction: 75% total storage savings
-- Impact: 6.50 TB/year → **1.95 TB/year**
-- CPU overhead: ~20ms per block (acceptable)
-
-**3. Multi-Tier Node Architecture**
-
-| Node Type | Storage (Year 1) | Bandwidth | Use Case |
-|-----------|------------------|-----------|----------|
-| **Archive** | 1.95 TB | 15 GB/day | Block explorers, research |
-| **Pruned** | 400 GB | 10 GB/day | Miners, validators |
-| **Light (SPV)** | 1 GB | 100 MB/day | Wallet users |
-| **Ultra-Light** | 10 MB | 10 MB/day | Mobile wallets |
-
-**Storage Growth Projections:**
+**Parallel Signature Verification (Rayon)**:
 ```
-Archive Nodes (full history):
-- Year 1: 1.95 TB
-- Year 5: 9.75 TB
-- Cost: $30-150/year
-
-Pruned Nodes (6 months):
-- Year 1: 400 GB
-- Year 5: 400 GB (constant with rolling pruning)
-- Cost: $10-60/year
-
-Light Clients (headers only):
-- Year 1: 1 GB
-- Year 5: 5 GB
-- Cost: $0 (uses existing device)
+Serial:    1,200 tx × 1.5 ms = 1,800 ms
+Parallel:  1,200 tx × 1.5 ms ÷ 8 cores = 225 ms   ← 8× speedup
 ```
 
-**Comparison to Bitcoin:**
-- Bitcoin Year 1: 50 GB
-- QUANTA Year 1 (optimized): 1.95 TB
-- **Ratio: 39x larger** (acceptable trade-off for quantum resistance)
+**Signature Verification Cache (LRU)**:
+```
+Cache size:  100,000 entries
+Hit rate:    ~80% (transactions seen multiple times before block inclusion)
+Cache hit:   0 ms  ← instant verification
+Effective block validation time: ~45 ms at 80% cache
+```
 
-**Note:** Most users run light clients (1 GB), only serious participants need archive nodes. This is the same model Bitcoin and Ethereum use.
+**Block Compression (zstd)**:
+```
+Uncompressed block:  ~2 MB
+Compressed block:    ~500 KB  ← 4× reduction
+Network daily data:  ~13 GB → ~3.25 GB
+```
+
+**Throughput**:
+- **120 TPS** (1,200 tx ÷ 10 seconds)
+- 17× higher than Bitcoin (~7 TPS)
+- 8× higher than Ethereum (~15 TPS)
+- Achieved despite 10.4× larger signatures than ECDSA
 
 ---
 
 ## 5. Economic Model
 
-See TOKENOMICS.md for complete economic specification.
+See [TOKENOMICS.md](./TOKENOMICS.md) for the complete economic specification.
 
 ### 5.1 Supply Overview
 
-- **Initial Supply**: 0 QUA (fair launch)
-- **Emission Schedule**: Exponential decay with floor
-- **Asymptotic Maximum**: ~1.5 billion QUA
-- **Distribution**: 100% through mining (no pre-mine, no ICO)
+- **Initial Supply**: 0 QUA (fair launch — no pre-mine, no ICO, no team allocation)
+- **Emission Schedule**: Exponential decay (15% annual reduction) with a 5 QUA perpetual floor
+- **Soft Maximum**: ~1.5 billion QUA by year 15–20
+- **Distribution**: 100% through proof-of-work mining
 
-### 5.2 Block Reward Formula
+### 5.2 Block Reward Formula (Integer Math — Consensus Critical)
 
-```python
-def calculate_reward(block_height):
-    blocks_per_year = 3_153_600  # ~10 second blocks
-    year = block_height / blocks_per_year
-    
-    # Base reward with 15% annual reduction
-    base = 100_000_000  # 100 QUA in microunits
-    reduction_rate = 0.85
-    annual_reward = max(base * (reduction_rate ** year), 5_000_000)
-    
-    # Network usage multiplier (bootstrap phase - first ~36 days)
-    if block_height < 315_360:
-        usage_multiplier = calculate_usage_multiplier(block_height)
-        annual_reward *= usage_multiplier  # 1.0x to 2.0x based on network activity
-    
-    return annual_reward
+```
+year = block_height / 3,153,600    (integer division)
+base  = 100 QUA × (85/100)^year   (applied iteratively using integer ops)
+reward = max(base, 5 QUA)
+
+No floating point — integer division only, to prevent consensus forks
+across x86_64 and ARM64 architectures.
 ```
 
-### 5.3 Fee Distribution
+### 5.3 Reward Distribution Per Block
 
-Transaction fees are split:
-- **70%**: Burned (permanent supply reduction)
-- **20%**: Development treasury
-- **10%**: Block miner
+```
+Block Reward = R  (e.g., 100 QUA in Year 1)
 
-This creates deflationary pressure while funding development and rewarding validators.
+Treasury allocation:  R × 5%  → Treasury address (0x0000...0001)
+Miner reward:         R × 95% → Miner address
+
+  Of miner reward:
+    Immediate:  (R × 95%) × 50% = 47.5% of R  (spendable now)
+    Locked:     (R × 95%) × 50% = 47.5% of R  (locked for 157,680 blocks / ~6 months)
+```
+
+### 5.4 Fee Distribution Per Block
+
+```
+Total fees = sum of all tx.fee in block
+
+Fee burn:      fees × 70%  → Destroyed (deflationary)
+Fee treasury:  fees × 20%  → Treasury address
+Fee miner:     fees × 10%  → Miner address (added to coinbase)
+```
 
 ---
 
@@ -491,48 +497,64 @@ This creates deflationary pressure while funding development and rewarding valid
 
 ### 6.1 Peer-to-Peer Protocol
 
-**Network Identification**:
-- Testnet Magic: `QUAX` (0x51554158)
-- Mainnet Magic: `QUAM` (0x5155414D)
+**Network Magic Bytes**:
+- Testnet: `QUAX` (0x51554158)
+- Mainnet: `QUAM` (0x5155414D)
 
-**Message Types**:
-- Handshake: Version, VerAck
-- Discovery: GetAddr, Addr
-- Sync: GetBlocks, Block, GetHeaders, Headers, GetHeight, Height
-- Transactions: NewTx, GetMempool, Mempool
-- Maintenance: Ping, Pong, Disconnect
+**P2P Message Types**:
+| Category | Messages |
+|---|---|
+| Handshake | `Version`, `VerAck` |
+| Peer Discovery | `GetAddr`, `Addr` |
+| Block Sync | `GetBlocks`, `Block`, `GetHeaders`, `Headers`, `GetHeight`, `Height` |
+| Transactions | `NewTx`, `GetMempool`, `Mempool` |
+| Maintenance | `Ping`, `Pong`, `Disconnect` |
 
-**Security Features**:
+**Security Parameters**:
 - Maximum message size: 2 MB (DoS protection)
-- Peer connection limits: 125 peers maximum
+- Maximum peers: 125 connections
 - Ping interval: 60 seconds
-- Peer timeout: 180 seconds
-- Invalid message handling: Automatic peer disconnection
+- Peer timeout: 180 seconds (3 pings missed)
+- Wire encoding: bincode (binary, not JSON — 8× faster, 22% smaller than text)
 
 ### 6.2 DNS Seed Discovery
 
-Nodes can discover peers through DNS seeds:
+Nodes bootstrap peer discovery through DNS seeds:
 ```
-seed1.quanta.network
-seed2.quanta.network
+seed.quanta.network
+nodes.quanta.network
+peers.quanta.network
 ```
 
-Fallback to hardcoded bootstrap nodes if DNS unavailable.
+Falls back to hardcoded bootstrap addresses if DNS is unavailable. Supports both IPv4 and IPv6 DNS resolution.
 
 ### 6.3 Block Propagation
 
 1. Miner mines valid block
-2. Broadcast to all connected peers
-3. Peers validate and add to chain
+2. Broadcasts to all connected peers (bincode-encoded, zstd-compressed)
+3. Peers validate (parallel signature verification + LRU cache)
 4. Peers rebroadcast to their connections
-5. Full network propagation in <5 seconds (target)
+5. Full network propagation target: **< 5 seconds**
 
-### 6.4 Mempool Management
+### 6.4 Blockchain Sync Protocol
 
-- **Maximum Size**: 5,000 pending transactions
-- **Eviction Policy**: Lowest fee transactions removed first
-- **Priority**: Transactions sorted by fee-per-byte
-- **Expiry**: Transactions older than 24 hours automatically removed
+On first start, a new node:
+1. Connects to bootstrap peers
+2. Requests chain height
+3. Downloads missing blocks sequentially (with parallel validation)
+4. Verifies every block including Merkle root, signatures, reward amounts
+5. Begins participating in block propagation and mempool relay
+
+Initial sync speed: limited by bandwidth (~500 KB/block compressed) and CPU (225 ms/block validation).
+
+### 6.5 Mempool Management
+
+- **Maximum size**: 5,000 pending transactions
+- **Eviction policy**: Lowest-fee transactions evicted when full
+- **Priority ordering**: Highest fee-per-transaction selected first for block template
+- **Expiry**: Transactions older than 24 hours automatically evicted
+- **Nonce tracking**: Per-sender `DashMap<String, u64>` for atomic concurrent nonce validation (eliminates race conditions)
+- **Duplicate detection**: Transaction hash deduplication before mempool insertion
 
 ---
 
@@ -541,87 +563,63 @@ Fallback to hardcoded bootstrap nodes if DNS unavailable.
 ### 7.1 Threat Model
 
 **Assumptions**:
-- Adversary has bounded computational power
-- Adversary does not control >50% of mining power
-- Adversary may control network nodes but not all
-- Quantum computers with 10^6+ qubits may exist in future
+- Adversary has bounded classical computational power
+- Adversary does not control > 50% of mining power
+- Adversary may operate sybil network nodes
+- Adversary may possess quantum computers with up to 10^6 qubits in the future
 
-**Explicitly NOT Protected**:
-- 51% attacks (inherent to PoW)
-- Eclipse attacks on network-isolated nodes
+**Explicitly NOT Protected Against**:
+- 51% attacks (fundamental PoW property)
+- Eclipse attacks on network-isolated nodes (mitigated by diverse bootstrapping)
 - Physical key extraction from compromised devices
 
 ### 7.2 Attack Resistance
 
 #### Double-Spend Attack
-**Mitigation**: 
-- Confirmation depth recommendations: 6 blocks for high-value transactions
-- Probabilistic finality: 99.9% certainty after 6 blocks with 40% attacker hashpower
+**Mitigation**:
+- Recommended confirmation depth: 6 blocks for high-value transactions
+- Probabilistic finality: 99.9% certainty after 6 blocks even at 40% attacker hashpower
+- Checkpoint system: prevents rewriting finalized checkpoints
 
 #### Transaction Replay Attack
 **Mitigation**:
-- Monotonic nonce requirement per account
-- 24-hour transaction expiry
-- Unique transaction hash per signature
+- Monotonic nonce per account (stored in persistent account state)
+- 24-hour transaction expiry window
+- Unique transaction hash (covers all fields including nonce and timestamp)
 
 #### Timestamp Manipulation
 **Mitigation**:
-- Blocks must be within 2 hours of current time
-- Network time averaging across peers
-- Rejection of blocks with timestamps before previous block
+- Block timestamp must be strictly > previous block timestamp
+- Block timestamp must be ≤ now + 7,200 seconds (±2 hours tolerance)
+- Difficulty adjustment uses **Median-Time-Past** across last 11 blocks, not raw timestamps
 
-#### Memory Exhaustion (DoS)
+#### Memory Exhaustion / DoS
 **Mitigation**:
 - Orphan block limit: 100 blocks maximum
-- Mempool size cap: 5,000 transactions
+- Mempool cap: 5,000 transactions
 - Maximum message size: 2 MB
-- Per-peer memory limits
+- Maximum transaction size: 100 KB
+- Strict pre-check rejection of malformed crypto inputs
 
 #### Sybil Attack
 **Mitigation**:
-- Proof-of-work requirement for block production
-- Connection limits per IP range
-- Peer reputation system (future enhancement)
+- Proof-of-work requirement for block production (CPU investment required)
+- Maximum 125 peer connections (bounds sybil influence)
+- Peer diversity through multiple DNS seed domains
 
 ### 7.3 Post-Quantum Security Considerations
 
 **Harvest Now, Decrypt Later (HNDL)**:
-- Threat: Adversary stores encrypted data to decrypt with future quantum computer.
-- QUANTA Protection: Kyber-1024 encryption provides 256-bit quantum security.
-- Timeline: Safe until at least 2045 under conservative estimates.
+- **Threat**: Adversary records wallet-encrypted data today; decrypts on future quantum hardware
+- **QUANTA Protection**: Kyber-1024 encryption provides 256-bit post-quantum security — safe until at least 2045 under conservative estimates
 
-**Signature Forgery**:
-- Threat: Quantum computer forges transaction signatures.
-- QUANTA Protection: Falcon-512 signatures are lattice-based and quantum-resistant.
-- No known quantum algorithm attacks lattice problems efficiently.
+**Signature Forgery via Quantum Computer**:
+- **Threat**: Future quantum computer forges Falcon-512 transaction signatures
+- **QUANTA Protection**: Falcon-512 relies on NTRU lattice problems. No known quantum algorithm (Shor's or otherwise) solves lattice problems efficiently. Current best quantum attacks are brute-force (Grover's), reducing security from 128-bit to 64-bit — still computationally infeasible.
 
-### 7.4 Falcon-512 Protocol Hardening
-
-Five specific hardening measures have been implemented at the protocol level to ensure Falcon-512 is deployed safely in a consensus-critical environment.
-
-**Separation of signing and verification**
-
-Signing is only ever performed by wallets on behalf of users. The consensus validation path — block acceptance and transaction relay — exclusively calls verification functions. No keypair material is required or loaded on a validating or mining node. This eliminates the operational risk of floating-point Gaussian sampling (which signing uses) from consensus.
-
-**Domain-separated canonical signing format**
-
-Transactions are signed over `SHA3-256("QUANTA_TX_V1:" || signing_bytes)`. The domain prefix `QUANTA_TX_V1:` is a consensus-frozen constant. Its inclusion ensures that a signature produced for a QUANTA transaction cannot be interpreted as valid in any other protocol context, and that a future version of the protocol can introduce a distinct signing domain without format changes.
-
-**Strict pre-verification size checks**
-
-Before any polynomial arithmetic is performed, the verifier checks:
-- Public key length == 897 bytes exactly.
-- Signed message length in range [33, 698].
-
-Malformed inputs are rejected in constant time before entering the Falcon library. This prevents malformed-input denial-of-service patterns and ensures any protocol-level invariant violation is caught immediately.
-
-**Crypto agility via signature scheme field**
-
-Every transaction encodes a `sig_scheme` byte (0 = Falcon512). This field is included in the signing payload. Nodes reject any transaction with an unrecognized scheme value. When a future algorithm is standardized and activated by soft fork, new scheme values can be assigned and verified without changing the transaction wire format or breaking backward compatibility.
-
-**Build determinism**
-
-The `pqcrypto-falcon` dependency is pinned to an exact version (`= 0.3.0`). The project-level `.cargo/config.toml` sets `target-feature=+strict-float` to enforce IEEE 754 compliant floating-point behavior, preventing compiler-introduced rounding divergence between x86_64 and ARM64 nodes. Release builds additionally set `codegen-units = 1` for fully deterministic binary output.
+**Long-Range Chain Rewrite**:
+- **Threat**: Adversary rewrites chain history from genesis
+- **QUANTA Protection**: Hardcoded checkpoints in binary prevent rewriting finalized chain segments. Social consensus (exchanges, wallets reject alternative chains at checkpoint heights).
 
 ---
 
@@ -629,319 +627,324 @@ The `pqcrypto-falcon` dependency is pinned to an exact version (`= 0.3.0`). The 
 
 ### 8.1 Technology Stack
 
-- **Language**: Rust 2021 (memory-safe, high-performance)
-- **Async Runtime**: Tokio (efficient concurrent I/O)
-- **Database**: Sled (embedded, transactional key-value store)
-- **Networking**: Tokio TCP with custom P2P protocol
-- **API**: Axum (REST) + JSON-RPC 2.0
-- **Serialization**: Bincode (efficient binary format)
-- **Cryptography**: 
-  - pqcrypto-falcon (Falcon signatures)
-  - pqcrypto-kyber (Kyber encryption)
-  - sha3 (SHA3 hashing)
-  - argon2 (key derivation)
+| Component | Technology | Rationale |
+|---|---|---|
+| **Language** | Rust 2021 | Memory-safe, zero-cost abstractions, no GC pauses |
+| **Async Runtime** | Tokio 1.35 | Production-grade async I/O, multi-threaded |
+| **Database** | sled 0.34 | Embedded, transactional, crash-safe key-value store |
+| **P2P Networking** | Tokio TCP + custom protocol | Full control; bincode wire format |
+| **REST API** | Axum 0.7 + Tower | High-performance, type-safe HTTP |
+| **RPC Server** | Custom TCP JSON-RPC | Low latency, CLI-to-node communication |
+| **Serialization** | bincode 1.3 (wire) + serde_json (API) | Binary internal, JSON external |
+| **Parallel Compute** | Rayon 1.8 | Parallel iterator-based signature verification |
+| **Compression** | zstd 0.13 | Block and P2P message compression |
+| **Signature Cache** | lru 0.12 | 100k-entry LRU signature verification cache |
+| **Concurrency** | parking_lot + DashMap | Lock-free concurrent nonce tracking |
+| **Cryptography** | pqcrypto-falcon 0.3.0 (pinned), pqcrypto-kyber 0.8, sha3 0.10, argon2 0.5 | All post-quantum |
 
-### 8.2 Storage Schema
+### 8.2 Module Architecture
 
-**Blockchain Storage**:
 ```
-blocks/{height} → Block
-blocks/latest → u64 (latest height)
-blocks/hash/{hash} → u64 (height lookup)
+quanta/
+├── src/
+│   ├── consensus/
+│   │   ├── blockchain.rs   ← Chain state, block add/validate, difficulty, rewards
+│   │   ├── mempool.rs      ← Mempool management, fee ordering
+│   │   ├── performance.rs  ← Metrics, performance tracking
+│   │   └── mod.rs
+│   ├── core/
+│   │   ├── block.rs        ← Block struct, mine(), hash, PoW check
+│   │   ├── transaction.rs  ← Tx struct, verify(), signing contract, AccountState
+│   │   ├── merkle.rs       ← SHA3-256 Merkle tree
+│   │   └── mod.rs
+│   ├── crypto/
+│   │   ├── signatures.rs   ← FalconKeypair, verify_signature_strict(), sha3, domain sep
+│   │   ├── wallet.rs       ← QuantumWallet, Kyber-1024 encryption, Argon2id
+│   │   ├── hd_wallet.rs    ← BIP39 mnemonic, BIP32 derivation, Falcon keys
+│   │   ├── multisig.rs     ← M-of-N Falcon-512 threshold signatures
+│   │   └── mod.rs
+│   ├── network/
+│   │   ├── p2p.rs          ← TCP peer sessions, magic bytes, message protocol
+│   │   ├── sync.rs         ← Blockchain sync, block request/response
+│   │   ├── discovery.rs    ← DNS seed resolution, peer address exchange
+│   │   └── mod.rs
+│   ├── api/
+│   │   └── mod.rs          ← Axum REST endpoints (port 7777)
+│   ├── rpc/
+│   │   └── mod.rs          ← TCP RPC server + client (port 7782)
+│   ├── storage/
+│   │   └── mod.rs          ← sled DB wrapper, block/account CRUD
+│   ├── config/
+│   │   └── mod.rs          ← TOML config loader, QuantaConfig struct
+│   ├── bin/
+│   │   └── wallet_cli.rs   ← Interactive wallet CLI binary
+│   └── main.rs             ← CLI entry point (quanta binary, ~20 subcommands)
 ```
 
-**State Storage**:
+### 8.3 Storage Schema (sled Key-Value)
+
 ```
-accounts/{address}/balance → u64
-accounts/{address}/nonce → u64
-accounts/{address}/locked_balance → u64
-accounts/{address}/lock_release_height → u64
+Blockchain:
+  "blocks/{height}"        → bincode(Block)      ← full block
+  "blocks/height"          → u64                 ← current chain height
+  "blocks/hash/{hash}"     → u64                 ← height lookup by hash
+
+Account State:
+  "accounts/{addr}/balance"             → u64     ← spendable microunits
+  "accounts/{addr}/nonce"               → u64     ← current account nonce
+  "accounts/{addr}/locked_balances"    → bincode(Vec<LockedBalance>)
+
+Indexes:
+  "transactions/{tx_hash}" → (block_height, tx_index)
 ```
 
-**Index Storage**:
-```
-transactions/{tx_hash} → (block_height, tx_index)
-```
+### 8.4 HD Wallet (BIP39 / BIP32 with Falcon-512)
 
-### 8.3 Atomic Operations
+QUANTA supports hierarchical deterministic wallets compatible with the BIP39 and BIP32 standards, adapted for Falcon-512 keys:
 
-All state modifications are atomic using database transactions:
-```rust
-transaction.begin()
-  - Deduct sender balance
-  - Increment sender nonce
-  - Add recipient balance
-  - Store transaction
-  - Update indexes
-transaction.commit()
+- **Mnemonic**: 24-word BIP39 phrase (256-bit entropy)
+- **Master Seed**: PBKDF2-HMAC-SHA512 (2048 rounds) from mnemonic + optional passphrase
+- **Account Generation**: HMAC-SHA512-based child key derivation per account index
+- **Key Per Account**: Each account generates a fresh Falcon-512 keypair
+- **Backup**: The 24-word mnemonic is the sole recovery mechanism
+
+```bash
+# Generate HD wallet with 3 accounts
+quanta new_hd_wallet --accounts 3 --file hd_wallet.json
 ```
 
-Ensures consistency even under crashes or power loss.
+### 8.5 Multisig Transactions
+
+QUANTA implements M-of-N threshold Falcon-512 multisig for treasury and high-value accounts:
+
+- **Scheme**: M-of-N signers must provide valid Falcon-512 signatures
+- **Use Cases**: Treasury (3-of-5), team wallets, smart contract escrow
+- **Address**: Multisig address derived from SHA3-256 hash of all N public keys
+- **Verification**: Block validator checks M independent Falcon-512 signatures
+
+### 8.6 REST API Endpoints
+
+```
+GET  /health                     ← Node health check
+GET  /blocks/:height             ← Block by height
+GET  /blocks/latest              ← Latest block
+GET  /transactions/:hash         ← Transaction by hash
+GET  /accounts/:address/balance  ← Account balance
+GET  /accounts/:address/nonce    ← Account nonce
+GET  /mempool                    ← Pending transactions
+POST /transactions               ← Submit new transaction
+GET  /peers                      ← Connected peer list
+GET  /network/stats              ← Network statistics
+```
 
 ---
 
 ## 9. Governance and Upgrades
 
-### 9.1 Current Governance Model
+### 9.1 Current Governance Model (Off-Chain)
 
-QUANTA v1.0 uses off-chain governance:
-- Development team proposes upgrades
-- Community discussion on GitHub/Discord
-- Testnet deployment and testing period
-- Mainnet upgrade with clear migration path
+QUANTA v1.x uses off-chain governance:
+- Kishore K (Founder) and core team propose upgrades
+- Community review on GitHub Discussions and Discord
+- Testnet deployment and minimum 2-week testing period
+- Mainnet upgrade with clear migration path and 4-week advance notice
 
-### 9.2 Future On-Chain Governance
+### 9.2 Soft Fork Process
 
-Planned features:
-- Token-weighted voting
-- Proposal submission and voting mechanism
-- Time-locked protocol upgrades
-- Emergency security patches with multisig
+Soft forks are backward-compatible upgrades:
+1. New rule added with version bit signaling
+2. 95% miner activation threshold
+3. Old nodes remain valid (receive valid blocks)
+4. Example: activating a new `sig_scheme` value
 
 ### 9.3 Hard Fork Policy
 
 Hard forks will be:
-- Well-announced (minimum 4 weeks notice)
-- Testnet-validated (minimum 2 weeks on testnet)
-- Backward-compatible when possible
-- Clearly versioned (semantic versioning)
+- Announced with minimum 4-week notice
+- Testnet-validated for minimum 2 weeks
+- Semantically versioned (MAJOR.MINOR.PATCH)
+- Require explicit user upgrade action
+
+### 9.4 Future On-Chain Governance (Planned Year 2+)
+
+- Token-weighted proposal voting
+- Time-locked protocol upgrade execution
+- Emergency security patches with multisig override
+- Transparent on-chain treasury spending proposals
 
 ---
 
 ## 10. Roadmap
 
-### Phase 1: Testnet Preparation (Q1 2026) - In Progress
+### ✅ Phase 1: Testnet Preparation (Q1 2026) — **COMPLETE**
 
-**Current Status**: Active Development
+- ✅ Core blockchain implementation (consensus, crypto, storage)
+- ✅ P2P networking with DNS seed discovery
+- ✅ REST API and RPC server
+- ✅ HD Wallet (BIP39/BIP32) and multisig
+- ✅ Docker deployment and monitoring setup
+- ✅ Performance optimizations (parallel verify, LRU cache, zstd)
+- ✅ Security hardening (strict pre-checks, domain separation, build determinism)
+- ✅ Community onboarding materials and guides
+- ✅ Block explorer (explorer.html)
 
-**Core Development**:
--  Testnet node development and deployment
--  Internal testing and validation
--  Private testnet launch for community
--  Extensive internal security testing
--  Network monitoring and health check systems
--  Community onboarding materials and guides
+### 🔄 Phase 2: Public Testnet Launch (Q2 2026)
 
-### Phase 2: Public Testnet Launch (Q2 2026)
-
-**Launch & Operations**:
 - Public testnet launch with geographically distributed bootstrap nodes
-- Real-world stress testing and network validation
-- Active community engagement and developer onboarding
-- Performance monitoring and optimization
-
-**Security Audits**:
+- Real-world stress testing (target: 10,000+ transactions, 30+ days stable)
 - External security audits and vulnerability assessments
-- Bug bounty program with progressive rewards
-- Network resilience testing under various conditions
-- Protocol refinement based on real-world data
+- Bug bounty program launch
+- Performance monitoring and optimization
+- Developer onboarding and SDK documentation
 
-**Success Criteria**:
-- 30+ active testnet nodes from diverse regions
-- 10,000+ transactions validated successfully
-- Zero critical vulnerabilities in production code
-- 30+ days of continuous stable operation
+**Success Criteria**: 30+ active nodes, 10,000+ TXs validated, zero critical CVEs, 30+ days uptime
 
 ### Phase 3: Security Hardening (Q3 2026)
 
-**Remediation & Refinement**:
-- Address all testnet findings and vulnerabilities
-- Comprehensive security audits and penetration testing
-- Code optimization and protocol finalization
-- Final security review and vulnerability patches
-- Documentation updates and security best practices
-- Emergency response procedures and incident management
+- Address all testnet findings
+- Comprehensive penetration testing
+- Protocol finalization and code freeze
+- Documentation completion
+- Emergency response procedures
 
 ### Phase 4: Mainnet Preparation (Q4 2026)
 
-**Pre-Launch Activities**:
 - Code freeze and final audit
-- Genesis block configuration and launch parameters
-- Production bootstrap node deployment across regions
-- Desktop wallet release for all major platforms
-- Block explorer deployment and transaction indexing
-- Exchange partnership discussions and integration support
+- Genesis block configuration (mainnet parameters)
+- Production bootstrap node deployment (6+ regions)
+- Desktop wallet (all major platforms)
+- Block explorer production deployment
+- Exchange integration support
 
 ### Phase 5: Mainnet Launch (Q1 2027)
 
-**Genesis Event**:
-- Mainnet genesis with transparent, auditable parameters
-- Multi-region bootstrap node activation
-- Full-featured block explorer and analytics dashboard
-- Production wallet release with comprehensive security
+- Mainnet genesis event
+- Full-featured block explorer
+- Production wallet release
+- Continuous network monitoring
+- Exchange listing coordination
 
-**Post-Launch (First 30 Days)**:
-- Continuous network monitoring and health tracking
-- Daily community updates and transparency reports
-- Rapid incident response and network optimization
-- Exchange integration and listing coordination
+**Success Criteria**: 25+ independent nodes, 95%+ uptime, consistent block times 10–15 seconds
 
-**Success Criteria**:
-- 25+ independent mainnet nodes within first month
-- 95%+ network uptime and stability
-- Block time consistency within 10-15 seconds
-- Zero consensus failures or chain reorganizations
+### Phase 6: Expansion (Q2–Q4 2027)
 
-### Phase 6: Expansion (Q2-Q4 2027)
-
-**Q2 2027**:
-- Light client protocol (SPV) specification
-- Signature aggregation research
-- Mobile wallet exploration
-
-**Q3 2027**:
-- Mobile wallet prototype (if resources allow)
-- Hardware wallet integration research
-- Pruning mode optimization
-
-**Q4 2027**:
-- Developer documentation improvements
-- API reference completion
-- Community contribution guidelines
-- Performance optimization research
-
-### Phase 7: Ecosystem (2028+)
-
-**Smart Contract Layer** (pending resources and community demand):
-- Post-quantum VM design research
-- VM prototype exploration
-- Community feedback and requirements gathering
-
-**Advanced Features** (long-term research goals):
-- Privacy enhancements research
-- Cross-chain bridge exploration
-- Layer 2 solutions research
-- Interoperability standards participation
-
-**Ecosystem Growth** (community-driven):
-- Community contribution recognition
-- Educational content and guides
-- Developer documentation
-- Organic adoption and partnerships
-
-### Long-Term Research (2029+)
-
-- Post-quantum zero-knowledge proofs
-- Quantum random number generation integration
-- Proof-of-stake research (quantum-resistant consensus)
-- Cryptographic agility framework (algorithm migration paths)
-
-### Timeline Rationale
-
-**Why Extended Timeline?**
-1. **Security First**: Rushing mainnet risks catastrophic vulnerabilities
-2. **Small Team**: Limited resources require realistic pacing
-3. **Community Building**: Organic growth takes time
-4. **Testing Thoroughness**: Post-quantum cryptography requires careful validation
-5. **Operational Learning**: Bootstrap infrastructure needs real-world testing
-
-**Current Status** (January 2026):
-- Core protocol implementation: 95% complete
-- Network layer: 90% complete
-- Wallet implementation: 85% complete
-- Testing infrastructure: 70% complete
-- Documentation: 80% complete
-
-**Critical Path to Testnet**:
-1. Complete remaining test coverage (February 2026)
-2. Internal security audit (March 2026)
-3. Bootstrap node deployment (April 2026)
-4. Public testnet launch (May 2026)
+- Light client (SPV) protocol specification
+- Signature aggregation research (Falcon batch verification)
+- Mobile wallet prototype
+- Hardware wallet integration
+- Smart contract execution layer
+- Layer 2 scaling research
 
 ---
 
 ## 11. Comparison with Existing Solutions
 
-### vs Bitcoin/Ethereum
-- **Advantage**: Quantum-resistant cryptography
-- **Tradeoff**: Larger signature sizes (~666 bytes vs ~64 bytes)
+### 11.1 vs Bitcoin
 
-### vs Quantum-Resistant Forks
-- **Advantage**: Purpose-built, not retrofitted
-- **Advantage**: Modern tokenomics, not legacy models
+| Feature | Bitcoin | QUANTA |
+|---|---|---|
+| Signature Scheme | ECDSA (quantum-vulnerable) | Falcon-512 (NIST PQ standard) |
+| Hash Function | SHA-256 | SHA3-256 (quantum-safe) |
+| Initial Reward | 50 BTC | 100 QUA |
+| Reduction Method | 50% halving every 4 years | Smooth 15% annual decay |
+| Final Supply | 21M (hard cap) | ~1.5B (soft cap, 5 QUA floor) |
+| Security Budget | Ends ~2140 | Perpetual (5 QUA/block minimum) |
+| Fee Burning | None | 70% of fees |
+| Block TPS | ~7 TPS | 120 TPS |
+| Smart Contracts | No (only UTXO scripts) | Transfer + DeployContract + CallContract |
+| HD Wallet | BIP32/39 (ECDSA) | BIP32/39 (Falcon-512) |
+| Multisig | ECDSA multisig | Falcon-512 M-of-N |
+| Quantum Risk | **HIGH** — ECDSA breakable | **NONE** — native PQ from genesis |
 
-### vs Academic PQC Blockchains
-- **Advantage**: Production-ready, not research prototype
-- **Advantage**: Full ecosystem tooling
+### 11.2 vs Ethereum
+
+| Feature | Ethereum (PoS) | QUANTA |
+|---|---|---|
+| Consensus | Proof-of-Stake | Proof-of-Work (ASIC-resistant) |
+| Signature | ECDSA (quantum-vulnerable) | Falcon-512 (NIST PQ standard) |
+| Quantum Risk | **HIGH** — all addresses vulnerable | **NONE** |
+| Issuance | ~0.5% annual | 15% → 0.8% over 20 years |
+| Fee Burning | EIP-1559 (variable burn) | 70% fixed burn |
+| Initial Distribution | ICO + pre-mine (~72M ETH founders) | Fair launch — zero pre-mine |
+| Smart Contracts | Solidity EVM | Native TX types + future QUANTA VM |
+
+### 11.3 vs QRL (Quantum Resistant Ledger)
+
+| Feature | QRL | QUANTA |
+|---|---|---|
+| PQ Signatures | XMSS (hash-based, stateful) | Falcon-512 (stateless, NIST standard) |
+| Signature Size | ~2,500 bytes | ~666 bytes (3.75× smaller) |
+| Key State | Stateful (limited uses) | Stateless (unlimited reuse) |
+| TPS | ~10 | 120 |
+| Smart Contracts | Limited | Transfer + Deploy + Call |
+| Language | Python + Go | Rust (memory-safe, high-performance) |
+
+### 11.4 vs QANplatform
+
+| Feature | QAN | QUANTA |
+|---|---|---|
+| PQ Approach | Multi-sig lattice layer | Native Falcon-512 from genesis |
+| Consensus | PoS | PoW (Sybil-resistant, no stake hoarding) |
+| Fair Launch | No (ICO) | Yes (100% mining, no pre-mine) |
+| Open Source | Partial | Fully open source (GitHub) |
+
+**QUANTA's unique position**: Purpose-built PQ blockchain, fully open source, fair launch, production-ready Rust implementation, 120 TPS, smart contract foundations, and the only PQ chain using NIST-standardized Falcon-512 as its native and only signature scheme.
 
 ---
 
 ## 12. Conclusion
 
-QUANTA represents a pragmatic approach to quantum-resistant blockchain technology. By implementing NIST-standardized post-quantum cryptography today, QUANTA provides security guarantees that will remain valid decades into the future.
+Quantum computers represent an existential threat to every blockchain secured by elliptic curve cryptography. QUANTA is not a retrofitted patch — it is a blockchain designed from block #0 with NIST-standardized post-quantum cryptography at its core.
 
-The combination of Falcon-512 signatures, adaptive proof-of-work, sustainable tokenomics, and production-grade engineering creates a foundation suitable for long-term decentralized applications.
+With Falcon-512 signatures, Kyber-1024 wallet encryption, SHA3-256 hashing, a fair launch model, sustainable tokenomics, and a production-grade Rust implementation, QUANTA provides the infrastructure for digital value to survive the quantum era.
 
-As quantum computing advances from theoretical possibility to practical reality, QUANTA will be ready.
+The window to build quantum-resistant infrastructure before quantum computers arrive is narrowing. QUANTA is already here.
+
+**Contact**: Kishore K, Founder | admin@quantachain.org | quantachain.org
 
 ---
 
 ## References
 
-1. NIST Post-Quantum Cryptography Standardization (2024)
-2. Falcon: Fast-Fourier Lattice-based Compact Signatures over NTRU
-3. CRYSTALS-Kyber: Key Encapsulation Mechanism
-4. The Keccak SHA-3 Proposal
-5. Bitcoin: A Peer-to-Peer Electronic Cash System (Nakamoto, 2008)
-6. Ethereum: A Next-Generation Smart Contract and Decentralized Application Platform (Buterin, 2014)
+1. Ducas, L., et al. (2019). *FALCON: Fast-Fourier Lattice-based Compact Signatures over NTRU*. NIST PQC submission.
+2. Avanzi, R., et al. (2022). *CRYSTALS-Kyber: Algorithm Specifications and Supporting Documentation*. NIST FIPS 203.
+3. NIST (2024). *Post-Quantum Cryptography Standards: FIPS 204 (ML-DSA), FIPS 205 (SLH-DSA), FIPS 203 (ML-KEM)*.
+4. Shor, P. (1994). *Algorithms for Quantum Computation: Discrete Logarithms and Factoring*. FOCS 1994.
+5. Nakamoto, S. (2008). *Bitcoin: A Peer-to-Peer Electronic Cash System*.
+6. NIST. (2023). *Falcon (FIPS 206 draft)*. Post-Quantum Cryptography Standardization.
+7. Precedence Research (2025). *Post-Quantum Cryptography Market Size, Share & Trends Report*.
 
 ---
 
 ## Appendix A: FAQ
 
-**Q: Why not use larger key sizes?**
-A: Falcon-512 and Kyber-1024 provide sufficient security. Larger keys increase bandwidth and storage without meaningful security gain.
+**Q: What makes QUANTA different from simply adding PQ signatures to Bitcoin?**
 
-**Q: What if quantum computers never materialize?**
-A: QUANTA is secure against classical attacks. Post-quantum crypto is insurance, not speculation.
+A: Retrofitting Bitcoin would require every address holder to migrate, a coordinated hard fork of thousands of nodes, and changes to UTXO structures. QUANTA builds PQ cryptography at the protocol foundation: signing format, address derivation, wallet encryption, and node verification are all PQ-native. There is no "legacy mode" that weakens security.
 
-**Q: Can QUANTA interoperate with Bitcoin/Ethereum?**
-A: Cross-chain bridges are planned for Phase 4. Requires trusted relayers or zero-knowledge proofs.
+**Q: Isn't Falcon-512 only NIST Level 1? Should we use Level 3 or higher?**
 
-**Q: What if Falcon-512 is broken or a critical implementation flaw is found?**
-A: The protocol includes a crypto agility mechanism. Every transaction carries a `sig_scheme` byte identifying the algorithm. A new algorithm can be assigned the next scheme value and activated via soft fork. Older nodes will reject transactions using the new scheme until they upgrade, ensuring a conservative and safe migration path. No structural changes to the transaction format or storage schema are required.
+A: Level 1 provides 128-bit classical / 64-bit quantum security. A quantum computer capable of attacking 64-bit Falcon security would require millions of error-corrected qubits — a capability estimated to be 30+ years away under the most optimistic projections. Falcon-512 offers the best throughput for a blockchain (smaller signatures, faster verification). We can upgrade via the `sig_scheme` soft-fork mechanism if needed.
 
-**Q: Why proof-of-work instead of proof-of-stake?**
-A: PoW provides fair distribution and proven security. PoS may be considered in future after extensive research.
+**Q: What is the `tx_type` field and why does it matter for investors?**
 
----
+A: QUANTA supports three transaction types: `Transfer`, `DeployContract`, and `CallContract`. This means QUANTA is not just a value-transfer layer — it is a foundation for quantum-resistant decentralized applications. Smart contracts deployed on QUANTA inherit full Falcon-512 security, unlike EVM contracts on quantum-vulnerable Ethereum.
 
----
+**Q: What is the HD wallet and why does it matter?**
 
-## Appendix B: Glossary
+A: The HD wallet uses BIP39 (24-word mnemonic) and BIP32 (hierarchical deterministic derivation) with Falcon-512 keys. A single 24-word seed backs up all accounts. This provides the same user experience as any modern crypto wallet, with full post-quantum security.
 
-**Falcon-512**: NIST-standardized post-quantum signature scheme based on NTRU lattices  
-**Kyber-1024**: NIST-standardized post-quantum key encapsulation mechanism  
-**SHA3-256**: Quantum-resistant cryptographic hash function  
-**Argon2id**: Memory-hard password hashing function resistant to GPU/ASIC attacks  
-**PoW (Proof-of-Work)**: Consensus mechanism requiring computational work to mine blocks  
-**HD Wallet**: Hierarchical Deterministic wallet following BIP39 standard  
-**SPV**: Simplified Payment Verification for light clients  
-**Microunits**: Base unit for amounts (1 QUA = 1,000,000 microunits)
+**Q: Why Proof-of-Work instead of Proof-of-Stake?**
+
+A: PoW provides Sybil resistance through physical resource expenditure, requires no initial token distribution (enabling a fair launch), and has a 15-year proven security track record. PoS systems require a pre-existing token distribution — which creates centralization. QUANTA's fair launch through PoW enables genuine decentralization from genesis.
+
+**Q: When is mainnet?**
+
+A: Target Q1 2027. The current phase is testnet development (Q2-Q3 2026) followed by mainnet preparation and code freeze (Q4 2026).
 
 ---
 
-## Document Information
-
-**Version**: 1.2  
-**Publication Date**: January 2026  
-**Last Updated**: February 2026  
-**Status**: Living Document (subject to updates)  
-**License**: Creative Commons Attribution 4.0 International (CC BY 4.0)
-
-**Authors**: QUANTA Development Team  
-**Contact**: [GitHub Issues](https://github.com/quantachain/quanta/issues) | [Discord](https://discord.gg/quanta)  
-**Repository**: https://github.com/quantachain/quanta  
-**Website**: https://www.quantachain.org
-
----
-
-## Disclaimer
-
-This whitepaper is for informational purposes only and does not constitute investment advice, financial advice, trading advice, or any other sort of advice. QUANTA is experimental software. Use at your own risk. The development team makes no warranties about the fitness of this software for any purpose.
-
-**No Investment Offering**: This whitepaper does not constitute an offer to sell or a solicitation to buy any tokens or securities. QUANTA has no initial coin offering (ICO), no pre-mine, and no token sale.
-
-**Forward-Looking Statements**: This document contains forward-looking statements about planned features and timelines. Actual results may differ materially from those expressed or implied.
-
-**Security Considerations**: While QUANTA implements quantum-resistant cryptography, no system is completely secure. Users should practice proper security hygiene and understand the risks.
+**Document Version**: 2.0  
+**Last Updated**: March 2026  
+**Founder**: Kishore K (admin@quantachain.org)  
+**License**: CC BY 4.0  

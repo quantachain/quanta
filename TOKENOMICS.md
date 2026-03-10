@@ -2,7 +2,9 @@
 
 **Comprehensive Economic Model Specification**
 
-Version 1.0 - January 2026
+Version 2.0 — March 2026
+
+**Founder**: Kishore K — [admin@quantachain.org](mailto:admin@quantachain.org) — [quantachain.org](https://quantachain.org)
 
 ---
 
@@ -17,6 +19,8 @@ Version 1.0 - January 2026
 7. [Economic Security](#7-economic-security)
 8. [Simulation Results](#8-simulation-results)
 9. [Comparison with Other Chains](#9-comparison-with-other-chains)
+10. [Future Economic Considerations](#10-future-economic-considerations)
+11. [Economic Attack Vectors](#11-economic-attack-vectors)
 
 ---
 
@@ -24,49 +28,71 @@ Version 1.0 - January 2026
 
 ### 1.1 Design Goals
 
-The QUANTA economic model is designed to achieve:
+The QUANTA economic model achieves:
 
-1. **Long-term Sustainability**: Rewards that remain attractive for decades
-2. **Fair Distribution**: No pre-mine, no ICO, 100% through mining
-3. **Deflationary Pressure**: Fee burning creates supply reduction
-4. **Anti-Dump Protection**: Lock mechanisms prevent immediate sell pressure
-5. **Development Funding**: Sustainable treasury for ongoing development
+1. **Long-term Sustainability**: Mining rewards remain attractive for decades, never reaching zero
+2. **Fair Distribution**: No pre-mine, no ICO, no team allocation — 100% through proof-of-work mining
+3. **Deflationary Pressure**: Fee burning creates permanent supply reduction
+4. **Anti-Dump Protection**: 50% of mining rewards locked for 6 months — prevents launch-day sell cascades
+5. **Development Funding**: Two transparent treasury streams (block reward allocation + fee share) for ongoing development
 
-### 1.2 Key Parameters
+### 1.2 Key Parameters (Source: `src/consensus/blockchain.rs`)
 
-| Parameter | Value | Rationale |
-|-----------|-------|-----------|
-| Initial Block Reward | 100 QUA | High enough to attract miners, low enough to prevent inflation |
-| Annual Reduction | 15% | Gradual decay, not sudden halvings |
-| Minimum Reward | 5 QUA | Ensures perpetual mining incentive |
-| Block Time | 10 seconds | Fast finality, reasonable propagation time |
-| Blocks Per Year | 3,153,600 | 365.25 days * 24 hours * 360 blocks/hour |
-| Fee Burn Rate | 70% | Strong deflationary pressure |
-| Treasury Allocation | 20% of fees | Sustainable development funding |
-| Miner Fee Share | 10% of fees | Additional incentive beyond block reward |
+| Parameter | Value | Code Constant |
+|---|---|---|
+| 1 QUA denomination | 1,000,000 microunits | `MICROUNITS_PER_QUA = 1_000_000` |
+| Initial Block Reward | 100 QUA | `YEAR_1_REWARD = 100_000_000` |
+| Annual Reduction | 15% | `ANNUAL_REDUCTION_PERCENT = 15` |
+| Minimum Reward Floor | 5 QUA | `MIN_REWARD = 5_000_000` |
+| Block Time Target | 10 seconds | `TARGET_BLOCK_TIME = 10` |
+| Blocks Per Year | 3,153,600 | `BLOCKS_PER_YEAR = 3_153_600` |
+| Fee Burn Rate | **70%** | `FEE_BURN_PERCENT = 70` |
+| Fee to Treasury | **20%** | `FEE_TREASURY_PERCENT = 20` |
+| Fee to Miner | **10%** | `FEE_VALIDATOR_PERCENT = 10` |
+| Block Reward to Treasury | **5%** | `TREASURY_ALLOCATION_PERCENT = 5` |
+| Mining Reward Lock | **50% for 6 months** | `MINING_REWARD_LOCK_PERCENT = 50` |
+| Lock Duration | 157,680 blocks | `MINING_REWARD_LOCK_BLOCKS = 157_680` |
+| Coinbase Maturity | 100 blocks | `COINBASE_MATURITY = 100` |
+| Min Transaction Fee | 100 microunits (0.0001 QUA) | `MIN_TRANSACTION_FEE = 100` |
+| Mempool Limit | 5,000 transactions | `MAX_MEMPOOL_SIZE = 5000` |
+| Max Block Size | 2 MB (2,097,152 bytes) | `MAX_BLOCK_SIZE_BYTES = 2_097_152` |
+| Max Block Transactions | **1,200** | `MAX_BLOCK_TRANSACTIONS = 1200` |
+
+> **Note on Block TX Limit**: The limit was corrected from 2,000 to 1,200 in the production codebase. Falcon-512 transactions average ~1,713 bytes (666-byte signature + 897-byte public key + overhead). 1,200 × 1,713 = 2.06 MB, which fits within the 2 MB block size with minor overhead management.
 
 ---
 
 ## 2. Supply Schedule
 
-### 2.1 Emission Formula
+### 2.1 Emission Formula (Integer Math — Consensus Critical)
 
-The base block reward follows exponential decay with a floor:
+The block reward uses **pure integer math** — no floating point. Floating-point divergence between CPU architectures would cause consensus forks. The formula applied iteratively ensures determinism on every platform:
 
-```python
-def base_reward(year):
-    initial_reward = 100_000_000  # 100 QUA in microunits
-    reduction_rate = 0.85         # 15% annual reduction
-    minimum_reward = 5_000_000    # 5 QUA floor
-    
-    reward = initial_reward * (reduction_rate ** year)
-    return max(reward, minimum_reward)
+```rust
+fn apply_annual_reduction(start: u64, years: u64) -> u64 {
+    let mut reward = start;
+    let keep_pct = 85; // 100 - 15 (annual reduction)
+    for _ in 0..years {
+        reward = reward * keep_pct / 100;
+        if reward <= MIN_REWARD {
+            return MIN_REWARD; // 5 QUA floor
+        }
+    }
+    reward
+}
+
+fn get_mining_reward(block_height: u64) -> u64 {
+    let years_elapsed = block_height / BLOCKS_PER_YEAR;
+    apply_annual_reduction(YEAR_1_REWARD, years_elapsed).max(MIN_REWARD)
+}
 ```
+
+Note: Integer division truncates. Over 20 years, the accumulated rounding error vs. an ideal `f64` computation is < 0.01 QUA — well within the 5 QUA floor.
 
 ### 2.2 Emission Schedule Table
 
-| Year | Base Reward (QUA) | Blocks | Annual Emission | Cumulative Supply |
-|------|-------------------|--------|-----------------|-------------------|
+| Year | Base Reward (QUA/block) | Blocks/Year | Annual Emission | Cumulative Supply |
+|---|---|---|---|---|
 | 1 | 100.00 | 3,153,600 | 315,360,000 | 315,360,000 |
 | 2 | 85.00 | 3,153,600 | 268,056,000 | 583,416,000 |
 | 3 | 72.25 | 3,153,600 | 227,847,600 | 811,263,600 |
@@ -79,18 +105,30 @@ def base_reward(year):
 
 ### 2.3 Asymptotic Maximum Supply
 
-The total supply approaches but never reaches a hard cap:
-
 ```
-Asymptotic Maximum ≈ 1.5 billion QUA (year 15-20)
-True Maximum: Infinite (due to 5 QUA floor)
-Practical Maximum: ~2 billion QUA (year 50)
+Soft Maximum:   ~1.5 billion QUA (year 15–20, before floor kicks in)
+Practical Max:  ~2 billion QUA (year 50)
+True Maximum:   Infinite (due to 5 QUA perpetual floor)
 ```
 
 This ensures:
-- No "final Bitcoin" problem where mining stops
-- Perpetual security budget
+- No "final Bitcoin" problem — mining never stops
+- Perpetual security budget for miners
 - Predictable long-term inflation (~0.8% annually after year 20)
+
+### 2.4 Effective Circulating Supply
+
+The anti-dump vesting mechanism means **not all mined QUA is immediately circulating**:
+
+| Phase | Immediate (Circulating) | Locked (Vesting) |
+|---|---|---|
+| Per block | 47.5% of reward | 47.5% of reward (6-month lock) |
+| Treasury | 5% of reward | Controlled by multisig |
+
+Of 100 QUA mined per block in Year 1:
+- 47.5 QUA → miner wallet immediately spendable
+- 47.5 QUA → miner wallet locked for 157,680 blocks (~6 months)
+- 5.0 QUA → treasury (immediately spendable for operations)
 
 ---
 
@@ -98,17 +136,38 @@ This ensures:
 
 ### 3.1 Standard Block Reward
 
-Without modifiers, a block reward is simply:
+```
+Block Reward = apply_annual_reduction(100 QUA, years_since_genesis)
+             = max(100 × (85/100)^year, 5 QUA)
+```
+
+### 3.2 Reward Distribution (Per Block)
+
+The total block reward `R` is distributed as follows:
 
 ```
-Block Reward = base_reward(current_year)
+Treasury Allocation:  R × 5%            → sent to treasury address
+Miner Base Reward:    R × 95%           → available to miner
+
+  Of Miner Base Reward:
+    Immediate:        (R × 95%) × 50%   → credited to miner immediately
+    Locked:           (R × 95%) × 50%   → locked until height + 157,680
+
+Example at R = 100 QUA:
+  Treasury:       5.0 QUA  (hardcoded address)
+  Miner gets now: 47.5 QUA (immediately spendable)
+  Miner locked:   47.5 QUA (vests after ~6 months)
 ```
 
-### 3.2 Network Usage Multiplier
+> ⚠️ **Note**: Earlier documentation described a 50%/50% miner split as if the full 100 QUA were split. The correct formula first subtracts the 5% treasury allocation, then applies 50%/50% to the remaining 95%. This yields 47.5% immediate / 47.5% locked of the total block reward — matching the production `blockchain.rs` implementation exactly.
 
-**Duration**: First 315,360 blocks (~36 days, "bootstrap phase")
+### 3.3 Network Usage Multiplier (Bootstrap Phase)
 
-**Range**: 1.0x to 2.0x
+**Duration**: First 315,360 blocks (~36 days — the bootstrap phase)
+
+**Range**: 1.0× to 2.0×
+
+During the bootstrap phase, block rewards are boosted based on real fee activity to reward early miners and network contributors. Fee-based measurement (not transaction count) resists spam manipulation.
 
 **Formula**:
 ```python
@@ -116,56 +175,19 @@ def usage_multiplier(block_height):
     if block_height >= 315_360:
         return 1.0  # No multiplier after bootstrap
     
-    # Analyze last 1000 blocks
     lookback = min(1000, block_height)
     recent_blocks = blocks[block_height - lookback : block_height]
+    total_fees = sum(sum(tx.fee for tx in b.transactions) for b in recent_blocks)
     
-    # Calculate total fees paid (economic activity indicator)
-    total_fees = sum(sum(tx.fee for tx in block.transactions) 
-                     for block in recent_blocks)
-    
-    # Normalize to expected minimum activity
-    # Assume minimum 10 QUA fees per 1000 blocks
-    expected_minimum = 10_000_000  # microunits
-    
-    # Multiplier scales with fee activity
+    expected_minimum = 10_000_000  # 10 QUA in microunits (baseline activity)
     multiplier = 1.0 + min(1.0, total_fees / expected_minimum)
-    
-    return multiplier
+    return multiplier  # Range: [1.0, 2.0]
 ```
-
-**Rationale**:
-- Rewards genuine network usage, not just mining
-- Fee-based (not tx count) prevents spam attacks
-- Caps at 2.0x to prevent runaway inflation
-- Only during bootstrap when network needs incentive
 
 **Attack Resistance**:
-- Miners cannot profitably spam transactions (fees cost more than reward gain)
-- Looking at 1000 blocks prevents single-block manipulation
-- Fee burning makes sustained fake activity expensive
-
-### 3.3 Combined Reward Calculation
-
-Full block reward formula:
-```python
-def calculate_block_reward(block_height, block):
-    year = block_height / 3_153_600
-    reward = base_reward(year)
-    
-    # Network usage multiplier during bootstrap phase
-    if block_height < 315_360:
-        reward *= usage_multiplier(block_height)
-    
-    return reward
-```
-
-**Example Rewards**:
-- Block 1,000: 100 QUA × 1.2 (usage) = 120 QUA
-- Block 150,000: 100 QUA × 1.3 (usage) = 130 QUA
-- Block 400,000: ~98 QUA (year 1, no bonuses)
-- Block 3,153,600: 85 QUA (year 2 base)
-- Block 31,536,000: 19.69 QUA (year 10)
+- Miners cannot profitably spam: fees cost 100% but reward gain is at most 100% (net zero)
+- 1000-block lookback averages out single-block manipulation
+- Fee burning makes sustained fake activity expensive (70% of fee cost is permanently destroyed)
 
 ---
 
@@ -173,173 +195,175 @@ def calculate_block_reward(block_height, block):
 
 ### 4.1 Transaction Fees
 
-**Minimum Fee**: 100 microunits (0.0001 QUA)
+**Minimum Fee**: 100 microunits (0.0001 QUA) — prevents network spam
 
-**Purpose**:
-- Spam prevention
-- Network prioritization
-- Economic sustainability
+**Fee Types by Transaction**:
+| Transaction Type | Recommended Fee |
+|---|---|
+| Transfer | 1,000 microunits (0.001 QUA) |
+| DeployContract | 10,000 microunits (0.01 QUA) |
+| CallContract | 5,000 microunits (0.005 QUA) |
 
-**Fee Market**:
-- Users can pay higher fees for priority inclusion
-- Miners select highest-fee transactions first
-- Mempool limits create natural fee market
+**Fee Market**: Transactions are sorted highest-fee-first for block inclusion. A natural fee market emerges as mempool fills (5,000 TX cap).
 
 ### 4.2 Fee Distribution
 
-Each block's transaction fees are split:
+Each block's total transaction fees (`F`) are split in fixed proportions:
 
-| Recipient | Percentage | Purpose |
-|-----------|------------|---------|
-| **Burn Address** | 70% | Permanent supply reduction |
-| **Treasury** | 20% | Development funding |
-| **Miner** | 10% | Additional validator reward |
+| Recipient | Percentage | Destination |
+|---|---|---|
+| **Burn (destroyed)** | **70%** | Sent to unspendable address — permanent deflation |
+| **Treasury** | **20%** | `0x0000000000000000000000000000000000000001` |
+| **Block Miner** | **10%** | Miner's coinbase address (added to immediate reward) |
 
-**Example**:
+> **Rounding**: `fee_burned + fee_to_treasury + fee_to_miner = total_fees` is guaranteed arithmetically. Any rounding remainder goes to the miner (preventing loss of microunits).
+
+**Example (1,000 transactions × 0.001 QUA each)**:
 ```
-Block has 1000 transactions, each paying 0.001 QUA fee
-Total fees: 1 QUA = 1,000,000 microunits
-
-Distribution:
-- Burn: 700,000 microunits (0.7 QUA) - destroyed forever
-- Treasury: 200,000 microunits (0.2 QUA) - development fund
-- Miner: 100,000 microunits (0.1 QUA) - added to block reward
+Total fees:     1,000,000 microunits (1 QUA)
+Burned:           700,000 microunits (0.70 QUA) — destroyed forever
+Treasury:         200,000 microunits (0.20 QUA) — development fund
+Miner:            100,000 microunits (0.10 QUA) — added to coinbase
 ```
 
 ### 4.3 Burn Mechanism
 
-**Implementation**:
-```
-Burn Address: "QUANTA_BURN_ADDRESS" (special constant)
-```
+**Burn Implementation**: Fees tagged as "burned" are accounted for in token supply tracking but are never credited to any spendable address. The 70% burn fraction directly reduces circulating supply.
 
-Coins sent to burn address are:
-- Tracked in total supply calculations
-- Permanently unspendable (no private key exists)
-- Visible on-chain for transparency
+**Deflationary Effect Estimates**:
 
-**Deflationary Effect**:
+| Scenario | Annual TX | Avg Fee | Annual Burned | Annual Emission |
+|---|---|---|---|---|
+| Year 1, Low | 10M | 0.001 QUA | 7,000 QUA | 315,360,000 QUA |
+| Year 5, Medium | 50M | 0.002 QUA | 70,000 QUA | 164,619,891 QUA |
+| Year 10, High | 200M | 0.005 QUA | 700,000 QUA | 62,094,634 QUA |
+| Year 20, Mature | 1B | 0.01 QUA | 7,000,000 QUA | 15,768,000 QUA |
 
-Year 1 estimates (conservative):
-- 10 million transactions
-- Average fee: 0.001 QUA
-- Total fees: 10,000 QUA
-- Burned: 7,000 QUA
-- Net inflation: 315,360,000 - 7,000 = 315,353,000 QUA
+At high adoption (Year 20+), fee burning could **exceed new emission**, making QUANTA net deflationary.
 
-Year 10 estimates (mature network):
-- 100 million transactions
-- Average fee: 0.005 QUA (higher due to value appreciation)
-- Total fees: 500,000 QUA
-- Burned: 350,000 QUA
-- New emission: 62,094,634 QUA
-- Net inflation rate: (62,094,634 - 350,000) / total_supply ≈ 4.3%
+### 4.4 Treasury Accumulation from Fees
 
-### 4.4 Treasury Accumulation
+Treasury receives 20% of all transaction fees, creating a sustainable independent funding stream:
 
-**Treasury Address**: Multisig controlled by core development team
-
-**Transparency**: All treasury transactions publicly visible
-
-**Usage**:
-- Developer salaries
-- Security audits
-- Infrastructure costs
-- Grants program
-- Marketing and outreach
-
-**Projected Treasury Growth**:
-- Year 1: ~2,000 QUA
-- Year 5: ~50,000 QUA
-- Year 10: ~200,000 QUA
+| Year | Est. Annual TX | Fee Revenue (20%) | Cumulative Treasury |
+|---|---|---|---|
+| 1 | 10M | ~2,000 QUA | ~2,000 QUA |
+| 5 | 50M | ~20,000 QUA | ~62,000 QUA |
+| 10 | 200M | ~140,000 QUA | ~500,000 QUA |
 
 ---
 
 ## 5. Anti-Dump Mechanisms
 
-### 5.1 Mining Reward Lock
+### 5.1 Mining Reward Vesting
 
-**Percentage Locked**: 50% of mining rewards
+**Purpose**: Prevent miners from immediately dumping all rewards on launch day, which would crash the price and undermine network confidence.
 
-**Lock Duration**: 157,680 blocks (~6 months at 10s blocks)
-
-**Mechanism**:
-```python
-block_reward = calculate_block_reward(height)
-immediate_reward = block_reward * 0.5
-locked_reward = block_reward * 0.5
-
-miner_receives_now = immediate_reward + (10% of fees)
-miner_locked_until = height + 157_680
+**Parameters**:
+```
+MINING_REWARD_LOCK_PERCENT  = 50  (% of miner's share that is locked)
+MINING_REWARD_LOCK_BLOCKS   = 157,680  (≈ 6 months at 10-second blocks)
 ```
 
-**Implementation**:
+**Mechanism** (as implemented in `blockchain.rs`):
+
 ```rust
-struct AccountState {
-    balance: u64,              // Immediately spendable
-    locked_balance: u64,       // Time-locked
-    lock_release_height: u64,  // Block when lock expires
-}
+// Of the 95% miner reward:
+let immediate_reward = (miner_reward * (100 - MINING_REWARD_LOCK_PERCENT)) / 100;
+// = 95% × 50% = 47.5% of total block reward → credited immediately
+
+let locked_reward    = miner_reward - immediate_reward;
+// = 95% × 50% = 47.5% of total block reward → locked balance
+
+// Locked balance is stored in account_state as LockedBalance {
+//     amount: locked_reward,
+//     unlock_height: current_height + MINING_REWARD_LOCK_BLOCKS
+// }
 ```
 
 **Unlock Behavior**:
-- Locked balance becomes spendable at release height
-- Can be tracked per mining event (multiple locks possible)
-- Wallet displays both available and locked balances
+- Locked balance automatically becomes spendable at `block_height >= unlock_height`
+- Multiple concurrent locks possible (each mining event creates a new lock entry)
+- Wallet displays: Available Balance / Locked Balance / Total Balance
 
-**Rationale**:
-- Prevents miners from immediately dumping rewards
-- Aligns incentives: miners benefit from long-term price stability
-- 6-month lock is long enough to matter, short enough to be acceptable
-- 50% lock preserves operational liquidity for miners
+**Coinbase Maturity**: In addition to the 6-month vesting, all mining rewards (including the immediate 47.5%) are subject to a **100-block coinbase maturity** before they can be included in a spend. This prevents spending mining rewards from orphaned blocks.
 
-### 5.2 Economic Impact
+### 5.2 Economic Impact of Vesting
 
-**Circulating Supply vs Total Supply**:
+| Phase | Total Mined | Circulating (Unlocked) | Locked | Burned |
+|---|---|---|---|---|
+| Day 1 | 720,000 QUA | 342,000 QUA | 342,000 QUA | 0 QUA |
+| Month 1 | ~21.6M QUA | ~10.3M QUA | ~10.3M QUA | ~100 QUA |
+| Month 6 | ~130M QUA | ~97M QUA | ~33M QUA | ~7,000 QUA |
+| Year 1 | ~315M QUA | ~275M QUA | ~40M QUA | ~50,000 QUA |
 
-| Time | Total Mined | Circulating (Unlocked) | Locked | Burned |
-|------|-------------|------------------------|--------|--------|
-| Day 30 | ~270 million QUA | ~135 million QUA | ~135 million QUA | ~100 QUA |
-| Day 180 | ~1.1 billion QUA | ~825 million QUA | ~275 million QUA | ~10,000 QUA |
-| Year 1 | ~1.2 billion QUA | ~1.05 billion QUA | ~150 million QUA | ~50,000 QUA |
-
-**Effective Inflation Control**:
-- First 6 months: 50% of supply locked
-- Reduces immediate sell pressure
-- Stabilizes price during critical launch period
+After 6 months, the 6-month rolling lock stabilizes at ~12–13% of total mined supply.
 
 ---
 
 ## 6. Treasury Model
 
-### 6.1 Treasury Accumulation
+### 6.1 Treasury Funding Streams
 
-**Source**: 20% of all transaction fees
+The treasury receives two distinct income streams:
 
-**Control**: 3-of-5 multisig (core team + community representatives)
+| Source | Amount | Frequency |
+|---|---|---|
+| Block Reward Allocation | 5% of each block reward | Every block (~10 seconds) |
+| Fee Share | 20% of block's total transaction fees | Every block (when fees > 0) |
 
-**Transparency**: All transactions visible on-chain
+**Year 1 projections**:
+- Block allocation: 3,153,600 blocks × 5 QUA = **~15,768,000 QUA/year** from blocks
+- Fee share: ~10M TX × 0.001 QUA × 20% = **~2,000 QUA/year** from fees (initially modest)
 
-### 6.2 Allocation Guidelines
+### 6.2 Treasury Address
 
-Recommended distribution:
-- **40%**: Core development (salaries, infrastructure)
-- **25%**: Security (audits, bug bounties)
-- **20%**: Ecosystem grants (DApps, tools, integrations)
-- **10%**: Marketing and community
-- **5%**: Reserve/emergency fund
+```
+Treasury Address: 0x0000000000000000000000000000000000000001
+```
 
-### 6.3 Governance
+This is a **hardcoded consensus constant** (`TREASURY_ADDRESS` in `blockchain.rs`). Every node enforces that the treasury transaction in each block targets this exact address. Tampering with the treasury address is an automatic block rejection.
 
-**Current Model** (Year 1):
-- Core team proposals
-- Community feedback
-- Quarterly transparency reports
+### 6.3 Allocation Guidelines
 
-**Future Model** (Year 2+):
-- On-chain treasury voting
-- Token-weighted voting on proposals
-- Time-locked spending with veto period
+Recommended distribution of treasury funds:
+
+| Category | Allocation | Purpose |
+|---|---|---|
+| Core Development | 40% | Developer salaries, infrastructure |
+| Security | 25% | Audits, bug bounties, penetration testing |
+| Ecosystem Grants | 20% | DApps, tools, integrations, SDK |
+| Marketing & Community | 10% | Exchange listings, awareness |
+| Reserve | 5% | Emergency fund |
+
+### 6.4 Governance
+
+**Current Model (Year 1 — Off-Chain)**:
+- Kishore K (Founder) and core team proposals
+- Community feedback on GitHub Discussions
+- Quarterly transparency reports with full transaction history
+
+**Future Model (Year 2+ — On-Chain)**:
+- Token-weighted voting on treasury proposals
+- Time-locked spending with community veto period
+- On-chain proposal submission and execution
+
+### 6.5 Treasury Multisig
+
+Treasury is controlled by a **3-of-5 multisig** Falcon-512 threshold scheme:
+
+| Signers | Requirement |
+|---|---|
+| Kishore K (Founder) | Required for major decisions |
+| Core Developer 2 | |
+| Core Developer 3 | |
+| Community Representative 1 | |
+| Community Representative 2 | |
+
+**Signing Policy**:
+- Routine expenses (< 10,000 QUA): Any 3 of 5 signers
+- Major expenses (> 10,000 QUA): All 5 signers + public announcement
+- Emergency expenses: 3 signers + post-facto public disclosure
 
 ---
 
@@ -347,63 +371,57 @@ Recommended distribution:
 
 ### 7.1 51% Attack Cost
 
-**Cost to attack**:
 ```
-Attack Cost = (Network Hashrate * Attack Duration * Energy Cost) + Equipment Cost
+Attack Cost = (Hashrate_needed × Duration × Energy_cost) + Hardware_cost
 ```
 
 Year 1 estimates:
-- Network hashrate: ~10 TH/s (assumed)
-- Equipment: $1,000,000 (ASIC miners)
-- Energy: $50,000/hour
-- 1-hour attack cost: ~$1,050,000
+- Network hashrate: ~10 TH/s
+- Hardware (ASIC): ~$1,000,000
+- Energy: ~$50,000/hour
+- 1-hour attack cost: **~$1,050,000**
 
-**Defense**:
-- Checkpoint system prevents deep reorgs
-- High block reward attracts honest miners
-- Social layer: exchanges require many confirmations
+**Defense Layers**:
+1. Checkpoint system prevents deep reorgs below checkpoint heights
+2. High block reward attracts honest miners (stronger network hashrate)
+3. Exchange social consensus — require 20+ confirmations for large deposits
 
-### 7.2 Miner Profitability
+### 7.2 Miner Profitability (Year 1 Estimates)
 
-**Revenue Sources**:
-1. Block reward (declining over time)
-2. 10% of transaction fees (growing over time)
-3. Locked rewards (vest over 6 months)
-
-**Break-even Analysis** (Year 1):
+**Revenue Per Block**:
 ```
-Block reward: 100 QUA
-Estimated QUA price: $0.10 (conservative)
-Block value: $10
+Block reward (immediate): 47.5 QUA
+Miner fee share (10%):     ~0.01 QUA (typical)
+Total immediate revenue:  ~47.51 QUA per block
 
-Average fee per block: 0.1 QUA
-Miner fee share: 0.01 QUA
-Additional fee revenue: $0.001
-
-Total revenue per block: $10.001
-
-Cost per block (energy): ~$5
-Profit per block: ~$5
-Daily profit (8,640 blocks): ~$43,200
+At $0.10/QUA:  ~$4.75 per block immediate
+               ~$4.75 per block locked (vests over 6 months)
+               ~$9.50 total value per block
 ```
 
-Remains profitable as long as:
+**Break-Even**:
 ```
-(Block Reward + Fee Share) * QUA Price > Mining Cost
+Energy cost per block:     ~$5 (estimated)
+Immediate revenue:         $4.75
+Locked revenue (6-month):  $4.75 (deferred)
+Net daily profit (immediate only): variable
+Long-term ROI (including locked): positive at $0.10+ per QUA
 ```
+
+Miners who HODL their locked rewards benefit from both network security and appreciation.
 
 ### 7.3 Fee Market Dynamics
 
-**Low Activity** (Early network):
+**Low Activity (Early Network)**:
 - Minimum fees only (0.0001 QUA)
 - All transactions included
 - No priority bidding needed
 
-**High Activity** (Mature network):
-- Mempool fills up (5,000 tx limit)
+**High Activity (Mature Network)**:
+- Mempool fills (5,000 TX limit)
 - Users bid higher fees for inclusion
 - Fee market emerges naturally
-- Miner revenue shifts from block reward to fees (Bitcoin-like transition)
+- Miner revenue transitions from block reward to fees (Bitcoin's long-term model)
 
 ---
 
@@ -411,51 +429,48 @@ Remains profitable as long as:
 
 ### 8.1 Supply Growth Projection
 
-**Total Supply Over Time**:
 ```
-Year 1:  315.4 million QUA
-Year 2:  583.4 million QUA
+Year 1:  315.4 million QUA   (100 QUA/block, 3.15M blocks)
+Year 2:  583.4 million QUA   (85 QUA/block, cumulative)
 Year 3:  811.3 million QUA
 Year 5:  1,169.6 million QUA
 Year 10: 1,417.6 million QUA
-Year 20: 1,503.8 million QUA
+Year 20: 1,503.8 million QUA  (floor reached ~year 18)
 Year 50: 1,977.1 million QUA
 ```
 
-**Inflation Rate**:
+**Inflation Rate** (excluding fee burn):
 ```
-Year 1:  N/A (genesis)
-Year 2:  84.9% (high early growth)
+Year 2:  84.9%   (early growth phase)
 Year 3:  39.0%
 Year 5:  14.1%
-Year 10: 4.4%
-Year 20: 1.0%
-Year 50: 0.8%
+Year 10:  4.4%
+Year 20:  1.0%
+Year 50:  0.8%   (Bitcoin-like long-term inflation)
 ```
 
-Approaches Bitcoin-like ~2% inflation, but never reaches zero (perpetual security budget).
+### 8.2 Circulating vs. Locked Supply
 
-### 8.2 Fee Burn Impact
+Due to 6-month vesting, effective circulating supply is significantly lower than total mined:
 
-**Conservative Scenario** (Low activity):
-- Year 5: 50,000 QUA burned
-- Year 10: 200,000 QUA burned
-- Year 20: 1,000,000 QUA burned
+| Month | Total Mined | Circulating | Locked | Ratio Circulating |
+|---|---|---|---|---|
+| 1 | 21.6M QUA | 10.3M QUA | 10.3M QUA | 47.5% |
+| 6 | 130M QUA | 97M QUA | 33M QUA | 75% |
+| 12 | 315M QUA | 275M QUA | 40M QUA | 87% |
+| Steady State | — | ~87% | ~13% | 87% |
 
-**Optimistic Scenario** (High activity):
-- Year 5: 500,000 QUA burned
-- Year 10: 5,000,000 QUA burned
-- Year 20: 50,000,000 QUA burned
+### 8.3 Fee Burn Impact
 
-At high adoption, fee burning could make QUANTA deflationary by year 15-20.
+**Conservative Scenario** (10M TX/year):
+- Year 5: ~50,000 QUA burned
+- Year 10: ~200,000 QUA burned
+- Year 20: ~1,000,000 QUA burned
 
-### 8.3 Circulating Supply vs Locked Supply
-
-**Month 1**: 50% circulating, 50% locked
-**Month 6**: 75% circulating, 25% locked (first locks expire)
-**Month 12**: 87.5% circulating, 12.5% locked (steady state)
-
-After first 6 months, locked supply stabilizes at ~12-13% of total supply (6-month rolling lock).
+**Optimistic Scenario** (100M+ TX/year at maturity):
+- Year 5: ~500,000 QUA burned
+- Year 10: ~5,000,000 QUA burned
+- Year 20: ~50,000,000 QUA burned — net deflationary by year 20
 
 ---
 
@@ -464,58 +479,42 @@ After first 6 months, locked supply stabilizes at ~12-13% of total supply (6-mon
 ### 9.1 vs Bitcoin
 
 | Feature | Bitcoin | QUANTA |
-|---------|---------|--------|
+|---|---|---|
 | Initial Reward | 50 BTC | 100 QUA |
-| Reduction Method | 50% halving every 4 years | 15% decay annually |
-| Final Supply | 21 million (hard cap) | ~1.5 billion (soft cap, 5 QUA floor) |
-| Security Budget | Ends ~2140 | Perpetual (5 QUA/block minimum) |
-| Fee Burning | None | 70% of fees |
+| Reduction Method | 50% halving every 4 years | 15% smooth annual decay |
+| Final Supply | 21M (hard cap, ~2140) | ~1.5B soft cap (5 QUA floor) |
+| Security Budget | Ends ~2140 | Perpetual (never zero) |
+| Fee Burning | None | 70% of all fees |
 | Pre-mine | None | None |
+| Anti-dump | None | 50% locked 6 months |
+| Treasury | None | 5% block + 20% fees |
+| Quantum Resistance | ❌ ECDSA | ✅ Falcon-512 (NIST) |
 
-**Advantages**:
-- Smoother emission curve (no halving shocks)
+**QUANTA Advantages over Bitcoin**:
+- Smoother emission (no halving shocks)
 - Perpetual mining incentive
-- Deflationary pressure through burn
-
-**Tradeoffs**:
-- Higher initial inflation
-- Larger total supply
+- Strong deflationary pressure via burn
+- Quantum-resistant by design
 
 ### 9.2 vs Ethereum
 
 | Feature | Ethereum (PoS) | QUANTA |
-|---------|----------------|--------|
-| Consensus | Proof-of-Stake | Proof-of-Work |
-| Issuance | ~0.5% annual | 15% → 1% over 20 years |
-| Fee Burning | EIP-1559 (variable) | 70% (fixed) |
-| Staking Lock | Variable | 50% of mining rewards |
+|---|---|---|
+| Consensus | Proof-of-Stake | Proof-of-Work (ASIC-resistant) |
+| Issuance | ~0.5% annual | 15% → 0.8% over 20 years |
+| Fee Burning | EIP-1559 (variable) | 70% (fixed, predictable) |
+| Mining Lock | N/A | 50% of rewards, 6 months |
 | Initial Distribution | ICO + pre-mine | Fair launch mining |
-
-**Advantages**:
-- No pre-mine
-- More aggressive burning
-- Simpler economic model
-
-**Tradeoffs**:
-- Higher energy cost (PoW)
-- Slower initial distribution
+| Quantum Resistance | ❌ ECDSA | ✅ Falcon-512 (NIST) |
 
 ### 9.3 vs Monero
 
 | Feature | Monero | QUANTA |
-|---------|--------|--------|
+|---|---|---|
 | Initial Emission | Fast (18.4M in 4 years) | Gradual (1.5B over 15 years) |
 | Tail Emission | 0.6 XMR/block | 5 QUA/block |
-| Privacy | Native | Planned (future) |
-| Quantum Resistance | None | Full (PQC) |
-
-**Advantages**:
-- Quantum-resistant today
-- Lower tail inflation rate
-
-**Tradeoffs**:
-- Slower initial distribution
-- No native privacy (yet)
+| Privacy | Native (Ring Signatures) | Planned (future) |
+| Quantum Resistance | ❌ None | ✅ Full PQC |
 
 ---
 
@@ -523,38 +522,23 @@ After first 6 months, locked supply stabilizes at ~12-13% of total supply (6-mon
 
 ### 10.1 Transition to Fee-Based Security
 
-As block rewards decline, network security must transition to fee-based model:
+As block rewards decline, network security transitions to fee-based model (as Bitcoin is designed to do by ~2140, QUANTA achieves this organically by ~year 20):
 
-**Year 10**:
-- Block reward: ~20 QUA
-- Expected fees: ~5 QUA (10% to miner = 0.5 QUA)
-- Total miner revenue: 20.5 QUA
+| Year | Block Reward | Expected Fees (10% miner) | Total Miner Revenue |
+|---|---|---|---|
+| 5 | 52 QUA | ~0.5 QUA | 52.5 QUA |
+| 10 | 20 QUA | ~5 QUA | 25 QUA |
+| 20 | 5 QUA | ~50 QUA | 55 QUA |
 
-**Year 20**:
-- Block reward: 5 QUA (floor)
-- Expected fees: ~50 QUA (10% to miner = 5 QUA)
-- Total miner revenue: 10 QUA
+By year 20, **fees exceed block rewards** — a fully sustainable fee economy.
 
-By year 20, half of miner revenue comes from fees (Bitcoin is targeting this by 2140).
+### 10.2 Potential Governance-Driven Adjustments
 
-### 10.2 Potential Adjustments
-
-If network conditions change significantly, governance may propose:
-
-**Fee Structure Changes**:
-- Adjust burn rate (70% → 60-80%)
-- Modify treasury allocation
-- Implement fee tiers
-
-**Reward Schedule Changes**:
-- Adjust floor (5 QUA → higher if needed)
-- Modify decay rate (15% → faster/slower)
-
-**Lock Mechanism Changes**:
-- Adjust lock percentage (50% → 30-70%)
-- Modify lock duration (6 months → 3-12 months)
-
-All changes require hard fork and community consensus.
+All changes require hard fork + community consensus:
+- Fee burn rate: 70% ± 10% (range 60–80%)
+- Lock percentage: 50% ± 20% (range 30–70%)
+- Lock duration: 6 months ± 3 months (range 3–12 months)
+- Treasury allocation: 5% ± 2% (range 3–7%)
 
 ---
 
@@ -562,103 +546,103 @@ All changes require hard fork and community consensus.
 
 ### 11.1 Fee Market Manipulation
 
-**Attack**: Miner includes own zero-fee transactions to manipulate usage multiplier
-
-**Mitigation**: 
-- Fees are burned (attacker pays 70% cost)
-- 1000-block lookback averages out single-block manipulation
-- Only affects bootstrap phase (first 36 days)
-
-**Cost**: Spending 100 QUA in fees gains at most 100 QUA in bonus (net zero)
+**Attack**: Miner includes own transactions to inflate usage multiplier during bootstrap  
+**Mitigation**: 70% burn cost — spending 10 QUA gains ≤ 10 QUA bonus (net zero or negative)  
+**Scope**: Only affects first 315,360 blocks (~36 days)
 
 ### 11.2 Selfish Mining
 
-**Attack**: Miner withholds blocks to gain advantage
-
-**Mitigation**:
-- Standard PoW mitigations apply
-- Fast block time (10s) reduces impact
-- Checkpoint system prevents deep reorgs
+**Attack**: Withhold valid blocks to gain advantage over competing miners  
+**Mitigation**: 10-second block time minimizes orphan risk; checkpoint system prevents deep reorgs  
+**Economics**: Selfish mining requires >25% hashrate to be profitable — very high barrier
 
 ### 11.3 Long-Range Attack
 
-**Attack**: Rewrite chain from genesis with quantum computer in future
+**Attack**: Rewrite chain from genesis with a quantum computer  
+**Mitigation**: Falcon-512 signatures resist quantum forgery; hardcoded checkpoints in all node binaries; social consensus at exchanges and wallets
 
-**Mitigation**:
-- Quantum-resistant signatures prevent forgery
-- Checkpoints embedded in software
-- Social consensus (exchanges/wallets reject fake chains)
+### 11.4 Treasury Drain
+
+**Attack**: Compromise treasury multisig signers  
+**Mitigation**: 3-of-5 Falcon-512 multisig; major expenses require all 5 signers + public announcement; on-chain visibility of all treasury transactions
 
 ---
 
-## Appendix A: Economic Formulas
+## Appendix A: Economic Formulas (Code-Accurate)
 
-### Block Reward Calculation
-```python
-def calculate_block_reward(height):
-    blocks_per_year = 3_153_600
-    year = height / blocks_per_year
-    
-    # Base reward
-    base = 100_000_000 * (0.85 ** year)
-    base = max(base, 5_000_000)
-    
-    # Network usage multiplier during bootstrap
-    if height < 315_360:
-        base *= usage_multiplier(height)
-    
-    return base
+### Block Reward (Integer Math)
+```rust
+// From blockchain.rs — consensus-critical, no f64
+fn get_mining_reward(&self) -> u64 {
+    let years_elapsed = self.get_height() / BLOCKS_PER_YEAR;
+    let mut reward = YEAR_1_REWARD; // 100 QUA = 100_000_000 microunits
+    let keep_pct = 100 - ANNUAL_REDUCTION_PERCENT; // = 85
+    for _ in 0..years_elapsed {
+        reward = reward * keep_pct / 100;
+        if reward <= MIN_REWARD { return MIN_REWARD; } // 5 QUA floor
+    }
+    reward
+}
+```
 
-def usage_multiplier(height):
-    lookback = min(1000, height)
-    blocks = get_blocks(height - lookback, height)
-    total_fees = sum(sum(tx.fee for tx in b.transactions) for b in blocks)
-    
-    expected = 10_000_000
-    multiplier = 1.0 + min(1.0, total_fees / expected)
-    return multiplier
+### Block Reward Distribution
+```rust
+// 5% treasury allocation
+let treasury_allocation = (reward * TREASURY_ALLOCATION_PERCENT) / 100;
+// = reward × 5 / 100
+
+// 95% to miner (split 50/50)
+let miner_reward = reward - treasury_allocation;
+let immediate_reward = (miner_reward * (100 - MINING_REWARD_LOCK_PERCENT)) / 100;
+// = miner_reward × 50 / 100
+// = (reward × 95 / 100) × 50 / 100
+// ≈ 47.5% of total block reward
+
+let locked_reward = miner_reward - immediate_reward;
+// ≈ 47.5% of total block reward, locked for 157,680 blocks
 ```
 
 ### Fee Distribution
-```python
-def distribute_fees(total_fees):
-    burn_amount = total_fees * 0.70
-    treasury_amount = total_fees * 0.20
-    miner_amount = total_fees * 0.10
-    
-    burn(burn_amount)
-    send_to_treasury(treasury_amount)
-    return miner_amount  # Added to miner's reward
+```rust
+// Integers only — rounding remainder goes to miner
+let fee_burned      = (total_fees * FEE_BURN_PERCENT) / 100;      // 70%
+let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100;  // 20%
+let fee_to_miner    = total_fees - fee_burned - fee_to_treasury;   // 10% + remainder
 ```
 
-### Lock Mechanism
-```python
-def process_mining_reward(miner_address, reward, height):
-    immediate = reward * 0.5
-    locked = reward * 0.5
-    
-    add_balance(miner_address, immediate)
-    add_locked_balance(miner_address, locked, height + 157_680)
+### Mining Lock
+```rust
+// Account state stores locked balances
+account_state.add_locked_balance(
+    miner_address,
+    locked_reward,
+    current_height + MINING_REWARD_LOCK_BLOCKS  // current + 157,680
+);
 ```
 
 ---
 
-## Appendix B: Treasury Multisig
+## Appendix B: Treasury Multisig Configuration
 
-**Current Signers** (3-of-5):
-1. Core Developer 1
+**Treasury Address**: `0x0000000000000000000000000000000000000001`
+
+**Multisig Arrangement (3-of-5 Falcon-512)**:
+1. Kishore K — Founder (admin@quantachain.org)
 2. Core Developer 2
 3. Core Developer 3
 4. Community Representative 1
 5. Community Representative 2
 
-**Signing Policy**:
-- Routine expenses (<10,000 QUA): Any 3 signers
-- Major expenses (>10,000 QUA): All 5 signers + public announcement
-- Emergency expenses: 3 signers + post-facto disclosure
+**Signing Thresholds**:
+| Expense Level | Required Signatures | Public Notice |
+|---|---|---|
+| < 10,000 QUA | Any 3 of 5 | Optional |
+| > 10,000 QUA | All 5 | Required (7-day notice) |
+| Emergency | Any 3 of 5 | Post-facto disclosure |
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: January 6, 2026  
+**Document Version**: 2.0  
+**Last Updated**: March 2026  
+**Founder**: Kishore K (admin@quantachain.org)  
 **License**: CC BY 4.0
