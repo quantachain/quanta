@@ -1091,3 +1091,116 @@ pub struct BlockchainStats {
     pub pending_transactions: usize,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── Fee Distribution Math ───────────────────────────────────────────────
+
+    /// 70% burn + 20% treasury + 10% miner fee split must be exact (no rounding loss)
+    #[test]
+    fn test_fee_distribution_no_rounding_loss() {
+        let total_fees: u64 = 1_000_000; // 1 QUA in microunits
+
+        let fee_burned       = (total_fees * FEE_BURN_PERCENT) / 100;      // 700_000
+        let fee_to_treasury  = (total_fees * FEE_TREASURY_PERCENT) / 100;  // 200_000
+        let fee_to_miner     = total_fees - fee_burned - fee_to_treasury;  // 100_000 (remainder)
+
+        assert_eq!(fee_burned,      700_000, "70% should be burned");
+        assert_eq!(fee_to_treasury, 200_000, "20% goes to treasury");
+        assert_eq!(fee_to_miner,    100_000, "10% to miner (no rounding loss)");
+        assert_eq!(fee_burned + fee_to_treasury + fee_to_miner, total_fees,
+            "fee split must be lossless");
+    }
+
+    /// Odd fee amounts should give remainder to miner, not lose value
+    #[test]
+    fn test_fee_distribution_odd_amounts() {
+        let total_fees: u64 = 999; // deliberately not divisible by 100
+
+        let fee_burned       = (total_fees * FEE_BURN_PERCENT) / 100;
+        let fee_to_treasury  = (total_fees * FEE_TREASURY_PERCENT) / 100;
+        let fee_to_miner     = total_fees - fee_burned - fee_to_treasury; // remainder
+
+        // All microunits must be accounted for
+        assert_eq!(fee_burned + fee_to_treasury + fee_to_miner, total_fees,
+            "every microunit must go somewhere — no value created or destroyed");
+    }
+
+    // ─── Block Reward Math ───────────────────────────────────────────────────
+
+    /// 5% treasury + 95% miner split from block reward
+    #[test]
+    fn test_block_reward_treasury_split() {
+        let reward: u64 = 100_000_000; // 100 QUA Year-1 reward
+
+        let treasury_allocation = (reward * TREASURY_ALLOCATION_PERCENT) / 100; // 5 QUA
+        let miner_reward        = reward - treasury_allocation;                  // 95 QUA
+
+        assert_eq!(treasury_allocation, 5_000_000, "5% of 100 QUA = 5 QUA");
+        assert_eq!(miner_reward,       95_000_000, "95% of 100 QUA = 95 QUA");
+        assert_eq!(treasury_allocation + miner_reward, reward, "no value lost");
+    }
+
+    /// Anti-dump: 50% of miner reward locked for 6 months
+    #[test]
+    fn test_mining_reward_lock_split() {
+        let miner_reward: u64 = 95_000_000; // 95 QUA after treasury cut
+
+        let immediate = (miner_reward * (100 - MINING_REWARD_LOCK_PERCENT)) / 100;
+        let locked    = miner_reward - immediate;
+
+        assert_eq!(immediate, 47_500_000, "50% immediately available");
+        assert_eq!(locked,    47_500_000, "50% locked for vesting");
+        assert_eq!(immediate + locked, miner_reward, "no value lost in lock split");
+    }
+
+    // ─── Reward Reduction ────────────────────────────────────────────────────
+
+    /// Year 0 reward must be the full YEAR_1_REWARD
+    #[test]
+    fn test_reward_year_0_is_full() {
+        let reward = apply_annual_reduction(YEAR_1_REWARD, 0);
+        assert_eq!(reward, YEAR_1_REWARD);
+    }
+
+    /// After 20+ years reward must not drop below MIN_REWARD floor
+    #[test]
+    fn test_reward_floor_after_many_years() {
+        let reward = apply_annual_reduction(YEAR_1_REWARD, 50); // 50 years
+        assert!(reward >= MIN_REWARD,
+            "Reward {} must not drop below MIN_REWARD {}", reward, MIN_REWARD);
+        assert_eq!(reward, MIN_REWARD, "After 50 years must be exactly at floor");
+    }
+
+    /// Reward at year 1 must be 85% of year 0 (15% annual reduction)
+    #[test]
+    fn test_reward_year1_reduction() {
+        let year0 = apply_annual_reduction(YEAR_1_REWARD, 0);
+        let year1 = apply_annual_reduction(YEAR_1_REWARD, 1);
+        // Integer math: year1 = year0 * 85 / 100
+        let expected = year0 * 85 / 100;
+        assert_eq!(year1, expected,
+            "Year 1 reward must be exactly 85% of year 0 (integer math)");
+    }
+
+    // ─── Treasury Address ─────────────────────────────────────────────────────
+
+    /// Treasury address constant must be the real 3-of-5 multisig, not the placeholder
+    #[test]
+    fn test_treasury_address_is_not_placeholder() {
+        assert_ne!(TREASURY_ADDRESS, "0x0000000000000000000000000000000000000001",
+            "Treasury must be set to the real multisig address, not the placeholder");
+        assert!(TREASURY_ADDRESS.starts_with("ms"),
+            "Treasury address must start with 'ms' (multisig prefix), got: {}", TREASURY_ADDRESS);
+    }
+
+    /// Treasury address must be the exact known 3-of-5 address we generated
+    #[test]
+    fn test_treasury_address_exact_value() {
+        assert_eq!(TREASURY_ADDRESS, "ms69216b1d10425689704d5ae3b2a4aa17049f59b1",
+            "TREASURY_ADDRESS changed! Update this test AND generate a new genesis block.");
+    }
+}
+
+

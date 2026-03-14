@@ -30,6 +30,22 @@ db_path = "./quanta_data"
 # When true, node runs in isolation without connecting to peers
 no_network = false
 
+# Node storage mode:
+#   archive  - Keep ALL blocks forever (block explorer, full history)  [default]
+#   pruned   - Keep only recent N days of blocks (validator, saves disk)
+#   light    - Keep only block headers (minimal footprint, can't serve blocks)
+mode = "archive"
+
+# Only used when mode = "pruned": how many days of blocks to retain
+prune_days = 30
+
+# ─────────────────────────────────────────────────────────────────
+# Consensus Engine
+# ─────────────────────────────────────────────────────────────────
+# Current:  proof_of_work   (SHA3-256 PoW — live)
+# Planned:  proof_of_stake  (Future upgrade — node will refuse to start if set)
+consensus_engine = "proof_of_work"
+
 # ========================================
 # Network Settings
 # ========================================

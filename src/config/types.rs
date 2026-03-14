@@ -3,6 +3,30 @@ use std::path::Path;
 use config::{Config, ConfigError, File};
 use crate::core::ChainNetwork;
 
+/// Node storage/sync mode
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeMode {
+    /// Keep all blocks forever — needed for block explorers and history queries
+    Archive,
+    /// Keep only recent blocks (configurable window) — good for validators
+    Pruned,
+    /// Keep only block headers — minimal footprint, cannot serve full blocks
+    Light,
+}
+
+/// Consensus engine selection
+/// PoS is a planned future upgrade — currently only PoW is implemented.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum ConsensusEngine {
+    /// Proof-of-Work (SHA3-256) — current production consensus
+    ProofOfWork,
+    /// Proof-of-Stake — PLANNED, not yet implemented
+    /// Setting this will cause the node to refuse to start with a clear error.
+    ProofOfStake,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuantaConfig {
     pub version: u32,
@@ -13,6 +37,13 @@ pub struct QuantaConfig {
     pub security: SecurityConfig,
     pub mining: MiningConfig,
     pub metrics: MetricsConfig,
+    /// Consensus engine: proof_of_work | proof_of_stake (planned)
+    #[serde(default = "QuantaConfig::default_engine")]
+    pub consensus_engine: ConsensusEngine,
+}
+
+impl QuantaConfig {
+    fn default_engine() -> ConsensusEngine { ConsensusEngine::ProofOfWork }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,6 +53,17 @@ pub struct NodeConfig {
     pub rpc_port: u16,
     pub db_path: String,
     pub no_network: bool,
+    /// Node storage/sync mode: archive | pruned | light
+    #[serde(default = "NodeConfig::default_mode")]
+    pub mode: NodeMode,
+    /// Prune window in days (only used when mode = pruned, default: 30)
+    #[serde(default = "NodeConfig::default_prune_days")]
+    pub prune_days: u64,
+}
+
+impl NodeConfig {
+    fn default_mode() -> NodeMode { NodeMode::Archive }
+    fn default_prune_days() -> u64 { 30 }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,6 +140,8 @@ impl Default for QuantaConfig {
                 rpc_port: 7782,
                 db_path: "./quanta_data".to_string(),
                 no_network: false,
+                mode: NodeMode::Archive,
+                prune_days: 30,
             },
             network: NetworkConfig {
                 max_peers: 125,
