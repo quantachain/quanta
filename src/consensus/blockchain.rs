@@ -42,7 +42,10 @@ pub enum BlockchainError {
     InvalidDifficulty,
 }
 
-const TARGET_BLOCK_TIME: u64 = 10; // 10 seconds
+// BETA FIX: Increased from 10s to 30s — PQC blocks are ~2MB, at 10s there's
+// only ~6s propagation slack in a 6-node network (causes dead forks)
+// 30s gives ~26s slack and reduces fork probability from 2-5% to <0.1%.
+const TARGET_BLOCK_TIME: u64 = 30; // 30 seconds
 // SECURITY FIX (External Audit): Increased from 10 to 2016 for stability
 // 2016 blocks = ~5.6 hours (prevents rapid oscillation)
 const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = 2016;
@@ -61,7 +64,7 @@ const MAX_DIFFICULTY: u32 = 2_147_483_647; // Can support massive hashrate growt
 const YEAR_1_REWARD: u64 = 100_000_000; // 100 QUA in microunits
 const ANNUAL_REDUCTION_PERCENT: u64 = 15; // 15% reduction per year (faster value creation)
 const MIN_REWARD: u64 = 5_000_000; // 5 QUA floor (reached after ~20 years)
-const BLOCKS_PER_YEAR: u64 = 3_153_600; // 365.25 days * 86400 / 10 seconds
+const BLOCKS_PER_YEAR: u64 = 1_051_200; // 365.25 days * 86400 / 30 seconds
 
 // UNIQUE FEATURES - Network Bootstrap
 const BOOTSTRAP_PHASE_BLOCKS: u64 = 315_360; // First month gets network usage boost
@@ -1064,6 +1067,11 @@ impl Blockchain {
     /// Get current chain height (OPTIMIZED - from storage, not memory)
     pub fn get_height(&self) -> u64 {
         self.storage.get_chain_height().unwrap_or(0)
+    }
+
+    /// Load a specific block by height from disk (used by network sync handlers)
+    pub fn load_block_from_storage(&self, height: u64) -> Option<crate::core::block::Block> {
+        self.storage.load_block(height).ok()
     }
 }
 

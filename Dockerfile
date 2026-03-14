@@ -29,9 +29,10 @@ RUN useradd -m -u 1000 quanta
 
 WORKDIR /home/quanta
 
-# Copy binary from builder
-COPY --from=builder /app/target/release/quanta /usr/local/bin/quanta
-COPY --from=builder /app/target/release/quanta-wallet-cli /usr/local/bin/quanta-wallet-cli
+# Copy all binaries from builder
+COPY --from=builder /app/target/release/quanta        /usr/local/bin/quanta
+COPY --from=builder /app/target/release/quanta-wallet /usr/local/bin/quanta-wallet
+COPY --from=builder /app/target/release/quanta-miner  /usr/local/bin/quanta-miner
 COPY --chown=quanta:quanta quanta.toml /home/quanta/quanta.toml
 
 # Create data directories and set permissions

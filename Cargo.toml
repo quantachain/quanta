@@ -1,6 +1,6 @@
 [package]
 name = "quanta"
-version = "1.0.0"
+version = "1.0.0-beta"
 edition = "2021"
 description = "QUANTA - Quantum-resistant blockchain with Falcon signatures"
 
@@ -13,8 +13,12 @@ name = "quanta"
 path = "src/main.rs"
 
 [[bin]]
-name = "quanta-wallet-cli"
+name = "quanta-wallet"
 path = "src/bin/wallet_cli.rs"
+
+[[bin]]
+name = "quanta-miner"
+path = "src/bin/miner.rs"
 
 [dependencies]
 # Post-Quantum Cryptography - Falcon signatures

@@ -16,4 +16,4 @@ pub use signatures::{
 };
 pub use wallet::QuantumWallet;
 pub use hd_wallet::HDWallet;
-pub use multisig::MultiSigTransaction;
+pub use multisig::{MultiSigTransaction, TreasuryMultisig, multisig_address};

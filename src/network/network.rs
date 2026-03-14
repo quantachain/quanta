@@ -10,6 +10,9 @@ use tokio::sync::{mpsc, RwLock};
 use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+use std::sync::Mutex;
+use lru::LruCache;
+use std::num::NonZeroUsize;
 
 /// Network configuration
 #[derive(Clone, Debug)]
@@ -40,6 +43,11 @@ pub struct Network {
     peer_manager: Arc<PeerManager>,
     message_tx: mpsc::UnboundedSender<(SocketAddr, P2PMessage)>,
     message_rx: Arc<RwLock<mpsc::UnboundedReceiver<(SocketAddr, P2PMessage)>>>,
+    // BETA FIX: Deduplication caches — prevent broadcast storms.
+    // A node only re-propagates a block/tx the FIRST time it sees it.
+    // LRU(1024) keeps ~10+ minutes of blocks at 30s block time.
+    seen_blocks: Arc<Mutex<LruCache<String, ()>>>,
+    seen_txs:    Arc<Mutex<LruCache<String, ()>>>,
 }
 
 impl Network {
@@ -53,6 +61,10 @@ impl Network {
             peer_manager: Arc::new(PeerManager::new(125)),
             message_tx,
             message_rx: Arc::new(RwLock::new(message_rx)),
+            // 1024 entries ≈ 30+ minutes of blocks at 30s block time
+            seen_blocks: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(1024).unwrap()))),
+            // 10k tx entries ≈ handles a full mempool cycle without re-flooding
+            seen_txs: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(10_000).unwrap()))),
         }
     }
 
@@ -321,37 +333,49 @@ impl Network {
 
     /// Handle new transaction
     async fn handle_new_transaction(&self, tx: Transaction) -> Result<(), String> {
-        let blockchain = self.blockchain.write().await;
-        
-        // Check for duplicates (replay attack prevention)
+        // BETA FIX: Deduplication — only add + re-broadcast if not seen before
         let tx_hash = tx.hash();
-        let pending_txs: Vec<String> = {
-            let pending = blockchain.get_pending_transactions();
-            pending.iter().map(|t| t.hash()).collect()
+        let already_seen = {
+            let mut seen = self.seen_txs.lock().unwrap();
+            seen.put(tx_hash.clone(), ()).is_some()
         };
-        if pending_txs.iter().any(|h| *h == tx_hash) {
-            return Ok(()); // Already have this tx
+        if already_seen {
+            return Ok(());
+        }
+
+        let blockchain = self.blockchain.write().await;
+        // Check for duplicates in mempool (extra safety)
+        {
+            let pending = blockchain.get_pending_transactions();
+            if pending.iter().any(|t| t.hash() == tx_hash) {
+                return Ok(()); // Already in mempool
+            }
         }
         
         // Add to pending transactions
         if blockchain.add_transaction(tx.clone()).is_ok() {
-            info!("Added new transaction to mempool");
-            
-            // NOTE: Do NOT re-broadcast - tx came from peer who already broadcast it
-            // self.broadcast_transaction(tx).await;
+            info!("Added new transaction to mempool, re-broadcasting");
+            drop(blockchain);
+            // BETA FIX: Re-broadcast to propagate across all nodes in the mesh
+            self.broadcast_transaction(tx).await;
         }
         
         Ok(())
     }
 
-    /// Handle new block (WITH HARDENED VALIDATION)
+    /// Handle new block (WITH HARDENED VALIDATION + RE-BROADCAST FIX)
     async fn handle_new_block(&self, block: Block) -> Result<(), String> {
-        let blockchain = self.blockchain.write().await;
-        
-        // Check if we already have this block
-        if blockchain.get_chain().iter().any(|b| b.hash == block.hash) {
+        // BETA FIX: Deduplication — only process + re-broadcast if not seen before.
+        // This prevents broadcast storms while still propagating to the full mesh.
+        let already_seen = {
+            let mut seen = self.seen_blocks.lock().unwrap();
+            seen.put(block.hash.clone(), ()).is_some()
+        };
+        if already_seen {
             return Ok(());
         }
+
+        let blockchain = self.blockchain.write().await;
         
         // SECURITY: Reject blocks that are too far ahead (prevents time-warp attacks)
         let latest = blockchain.get_latest_block();
@@ -359,53 +383,34 @@ impl Network {
             return Err(format!("Block too far ahead: {} vs our {}", block.index, latest.index));
         }
         
-        // Allow blocks that are the next in sequence OR fill a gap
-        // This handles out-of-order arrival during sync
-        if block.index <= latest.index {
-            // Block is older than our chain tip - might fill a gap, let add_network_block decide
-            drop(blockchain);
-            let bc = self.blockchain.write().await;
-            return match bc.add_network_block(block) {
-                Ok(_) => Ok(()),
-                Err(e) => Err(format!("Failed to add historical block: {}", e)),
-            };
-        }
-        
-        // For next block, validate linkage
-        if block.index == latest.index + 1 {
-            if block.previous_hash != latest.hash {
-                return Err("Invalid previous hash".to_string());
-            }
-            
-            // Cryptographic validation
-            if !block.is_valid(Some(&latest)) {
-                return Err("Block failed validation".to_string());
-            }
-        }
-        
-        // Add block to chain (use add_network_block for full validation)
+        // Add block to chain (full validation inside add_network_block)
         drop(blockchain);
         let bc = self.blockchain.write().await;
         match bc.add_network_block(block.clone()) {
             Ok(_) => {
-                info!("Added new block {} at height {}", &block.hash[..8], block.index);
-                
-                // NOTE: Do NOT re-broadcast - block came from peer who already broadcast it
-                // self.broadcast_block(block).await;
+                info!("Block {} accepted at height {} — re-broadcasting to peers",
+                    &block.hash[..8], block.index);
+                drop(bc);
+                // BETA FIX: Re-broadcast so nodes NOT directly connected to the miner
+                // also receive the block (essential for mesh topology with 6+ nodes).
+                self.broadcast_block(block).await;
                 Ok(())
             }
             Err(e) => Err(format!("Failed to add block: {}", e)),
         }
     }
 
-    /// Handle get blocks request
+    /// Handle get blocks request — BETA FIX: serve from storage, not genesis-only in-memory vec
     async fn handle_get_blocks(&self, addr: SocketAddr, start: u64, end: u64) -> Result<(), String> {
         let blockchain = self.blockchain.read().await;
+        // Cap batch size to 500 blocks to avoid flooding the peer
+        let end = end.min(start + 499);
         let blocks: Vec<Block> = (start..=end)
-            .filter_map(|i| blockchain.get_chain().get(i as usize).cloned())
+            .filter_map(|i| blockchain.load_block_from_storage(i))
             .collect();
         drop(blockchain);
         
+        info!("Serving {} blocks [{}-{}] to peer {}", blocks.len(), start, end, addr);
         for block in blocks {
             self.send_to_peer(addr, P2PMessage::Block(block)).await?;
         }
@@ -413,10 +418,11 @@ impl Network {
         Ok(())
     }
 
-    /// Handle get height request
+    /// Handle get height request — BETA FIX: use storage height, not in-memory chain length
     async fn handle_get_height(&self, addr: SocketAddr) -> Result<(), String> {
         let blockchain = self.blockchain.read().await;
-        let height = blockchain.get_chain().len() as u64;
+        // get_height() reads from storage — correct even after thousands of blocks
+        let height = blockchain.get_height();
         
         self.send_to_peer(addr, P2PMessage::Height(height)).await
     }
@@ -462,8 +468,8 @@ impl Network {
         
         info!("Starting blockchain synchronization");
         
-        // Get our height
-        let our_height = self.blockchain.read().await.get_chain().len() as u64;
+        // BETA FIX: use storage height (get_chain().len() is always 1 - genesis only in memory)
+        let our_height = self.blockchain.read().await.get_height();
         
         // Ask all peers for their height
         for peer in &peers {
