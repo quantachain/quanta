@@ -63,19 +63,19 @@ pub struct MiningConfig {
     pub annual_reduction_percent: u8,
     pub min_reward_microunits: u64,
     pub blocks_per_year: u64,
-    
+
     // Network bootstrap
     pub bootstrap_phase_blocks: u64,
-    
+
     // Mining reward vesting (anti-dump mechanism)
     pub mining_reward_lock_percent: u8,
     pub mining_reward_lock_blocks: u64,
-    
+
     // Fee distribution
     pub fee_burn_percent: u8,
     pub fee_treasury_percent: u8,
     pub fee_validator_percent: u8,
-    
+
     // Blockchain timing
     pub target_block_time: u64,
     pub difficulty_adjustment_interval: u64,

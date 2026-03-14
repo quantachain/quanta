@@ -77,7 +77,13 @@ const FEE_VALIDATOR_PERCENT: u64 = 10; // 10% to block validator (miner)
 
 // TREASURY FUND - Development, Marketing, Listings
 const TREASURY_ALLOCATION_PERCENT: u64 = 5; // 5% of block rewards → treasury
-const TREASURY_ADDRESS: &str = "0x0000000000000000000000000000000000000001"; // Hardcoded treasury
+
+// CONSENSUS-CRITICAL: Treasury multisig address (3-of-5 Falcon-512, generated 2026-03-14)
+// This address is hardcoded in consensus — it CANNOT be changed by editing quanta.toml.
+// Any node that changes this constant will be rejected by the network (invalid treasury tx).
+// To move treasury funds, use: quanta-wallet treasury-propose / treasury-sign / treasury-broadcast
+// Keyset: treasury_key0.qua … treasury_key4.qua — any 3 of 5 must sign.
+const TREASURY_ADDRESS: &str = "ms69216b1d10425689704d5ae3b2a4aa17049f59b1";
 
 // ANTI-DUMP MECHANISM - Mining Reward Lockup
 const MINING_REWARD_LOCK_PERCENT: u64 = 50; // 50% of mining rewards locked
