@@ -1,5 +1,30 @@
-# Dockerfile for QUANTA Blockchain Node
-FROM rust:latest as builder
+# ============================================================
+# Dockerfile — QUANTA Blockchain Node
+# ============================================================
+# Beta v0.1 — Initial release for single-node testnet testing
+#
+# Image : xd637/quanta-node:v0.1-beta
+# Repo  : https://hub.docker.com/r/xd637/quanta-node
+#
+# Quick start (single node):
+#   docker compose -f docker-compose.single.yml up -d
+#
+# Ports:
+#   3000 — REST API
+#   8333 — P2P network
+#   7782 — RPC
+#   9090 — Prometheus metrics
+# ============================================================
+
+FROM rust:latest AS builder
+
+# Image metadata (OCI standard)
+LABEL org.opencontainers.image.title="quanta-node" \
+      org.opencontainers.image.description="QuantaChain blockchain node — post-quantum secure, PoW/PoS hybrid. Beta v0.1 initial release." \
+      org.opencontainers.image.version="0.1-beta" \
+      org.opencontainers.image.vendor="QuantaChain" \
+      org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
+      org.opencontainers.image.licenses="MIT"
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
@@ -17,7 +42,7 @@ COPY src ./src
 RUN cargo build --release
 
 # Runtime stage
-FROM debian:sid-slim
+FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
