@@ -45,6 +45,7 @@ Current blockchains rely on elliptic curve cryptography (ECDSA/EdDSA) that quant
 |----------|-------------|
 | [Whitepaper](WHITEPAPER.md) | Complete technical specification and architecture |
 | [Tokenomics](TOKENOMICS.md) | Economic model, supply schedule, and incentive design |
+| [Governance](GOVERNANCE.md) | Treasury multisig, PoS transition, on-chain voting roadmap |
 | [Contributing](CONTRIBUTING.md) | Development guidelines and how to contribute |
 | [Security Policy](SECURITY.md) | Vulnerability reporting and security practices |
 | [Website](https://www.quantachain.org) | Official project website |
@@ -168,9 +169,12 @@ quanta/
 #### Performance Optimizations
 | Optimization | Before | After | Speedup |
 |---|---|---|---|
-| Rayon parallel sig verify (8-core) | 1,800 ms | 225 ms | **8×** |
+| Rayon parallel sig verify (physical cores) | 1,800 ms | 225 ms | **8×** |
 | LRU signature cache (100k entries, ~80% hit) | 225 ms | ~45 ms | **5×** |
-| zstd block compression | 2 MB/block | 500 KB/wire | **4×** bandwidth |
+| Bloom filter mempool dedup (50k cap, 0.01% FP) | O(n) scan | O(1) | **∞** |
+| Pubkey cache (897-byte Falcon key, DashMap) | Re-derive every tx | O(1) after 1st | **High on busy blocks** |
+| Rayon thread pool (physical vs logical CPUs) | Logical cores | Physical cores | **+15% crypto throughput** |
+| zstd block compression | 2 MB/block | 500 KB/wire | **4× bandwidth** |
 | bincode serialization | JSON baseline | 22% smaller, 8× faster | **8×** |
 
 #### Transaction Types
@@ -184,7 +188,8 @@ TransactionType::CallContract { contract, function, args } // Call contract
 - **Standard Wallet**: Single Falcon-512 keypair, Kyber-1024 encrypted storage
 - **HD Wallet**: BIP39 24-word mnemonic + BIP32 derivation with Falcon-512 keys
 - **Multisig**: M-of-N Falcon-512 threshold signatures for treasury and team wallets
-- **Address Format**: `0x` + hex(SHA3-256(pubkey)[:20])
+- **Treasury Multisig (3-of-5)**: Live — `ms69216b1d10425689704d5ae3b2a4aa17049f59b1`. Any 3 of 5 keyholders must sign a spend. Address hardcoded in consensus, cannot be redirected by node operators.
+- **Address Format**: `0x` + hex(SHA3-256(pubkey)[:20]) for single-key; `ms` + hex(SHA3-256(sorted_pubkeys)) for multisig
 
 ### REST API Endpoints (Port 7777)
 
@@ -436,6 +441,9 @@ api_port = 7777        # REST API port (default: 7777)
 network_port = 8333    # P2P TCP port (default: 8333)
 db_path = "./quanta_data"
 no_network = false
+# Node storage mode: archive | pruned | light
+mode = "archive"       # archive = keep all blocks, pruned = keep last N days, light = headers only
+prune_days = 30        # only used when mode = "pruned"
 
 [network]
 max_peers = 125
@@ -455,6 +463,9 @@ transaction_expiry_seconds = 86400 # 24 hours
 [metrics]
 enabled = true
 port = 9090
+
+# Consensus engine: proof_of_work (live) | proof_of_stake (planned — node refuses to start)
+consensus_engine = "proof_of_work"
 ```
 
 **Node Ports**:
@@ -568,11 +579,14 @@ See [SECURITY.md](SECURITY.md) for our security policy and responsible disclosur
 - ✅ P2P networking with DNS seed discovery
 - ✅ REST API (Axum, port 7777) + RPC server (port 7782)
 - ✅ HD Wallet (BIP39/BIP32) + Multisig (M-of-N Falcon-512)
-- ✅ Performance: parallel verify (Rayon), LRU cache (100k), zstd compression
+- ✅ **3-of-5 Treasury Multisig** — live on-chain, hardcoded in consensus, 3 keyholders required to spend
+- ✅ Performance: parallel verify (Rayon/physical cores), LRU sig cache, bloom filter mempool, pubkey cache, zstd compression
+- ✅ Node modes: Archive / Pruned / Light (configurable in quanta.toml)
+- ✅ Consensus engine enum: `proof_of_work` live, `proof_of_stake` stub ready for future implementation
 - ✅ Security: strict pre-checks, domain separation, build determinism
 - ✅ Block explorer (`explorer.html`)
 - ✅ Docker + monitoring setup
-- ✅ Documentation and guides
+- ✅ Documentation: Whitepaper, Tokenomics, Governance, Security
 
 ### 🔄 Phase 2: Public Testnet Launch (Q2 2026)
 
@@ -657,7 +671,7 @@ A: Planned Q1 2027, after public testnet (Q2 2026) and security hardening (Q3 20
 A: No. 100% fair launch through mining. No pre-mine, no ICO, no insider allocation.
 
 **Q: Why Proof-of-Work instead of Proof-of-Stake?**  
-A: PoW enables a fair launch without pre-existing token distribution, has 15+ years of proven security history, and provides Sybil resistance without stake centralization.
+A: PoW enables a fair launch without pre-existing token distribution, has 15+ years of proven security history, and provides Sybil resistance without stake centralization. PoS is planned as a future upgrade — see [GOVERNANCE.md](GOVERNANCE.md) for the transition roadmap. When ready, set `consensus_engine = "proof_of_stake"` in `quanta.toml` to activate it.
 
 **Q: Why Falcon-512 (Level 1) and not higher?**  
 A: Level 1 gives 64-bit post-quantum security (after Grover's). Attacking this requires millions of error-corrected qubits — estimated 30+ years away. Larger keys (Falcon-1024) would increase block sizes dramatically, hurting throughput. The `sig_scheme` field allows soft-fork upgrades if needed.

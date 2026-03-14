@@ -213,7 +213,7 @@ Each block's total transaction fees (`F`) are split in fixed proportions:
 | Recipient | Percentage | Destination |
 |---|---|---|
 | **Burn (destroyed)** | **70%** | Sent to unspendable address — permanent deflation |
-| **Treasury** | **20%** | `0x0000000000000000000000000000000000000001` |
+| **Treasury** | **20%** | `ms69216b1d10425689704d5ae3b2a4aa17049f59b1` (3-of-5 multisig) |
 | **Block Miner** | **10%** | Miner's coinbase address (added to immediate reward) |
 
 > **Rounding**: `fee_burned + fee_to_treasury + fee_to_miner = total_fees` is guaranteed arithmetically. Any rounding remainder goes to the miner (preventing loss of microunits).
@@ -319,10 +319,14 @@ The treasury receives two distinct income streams:
 ### 6.2 Treasury Address
 
 ```
-Treasury Address: 0x0000000000000000000000000000000000000001
+Treasury Address: ms69216b1d10425689704d5ae3b2a4aa17049f59b1
+Type:             3-of-5 Falcon-512 multisig (generated 2026-03-14)
+Threshold:        Any 3 of 5 keyholders must sign to spend
 ```
 
-This is a **hardcoded consensus constant** (`TREASURY_ADDRESS` in `blockchain.rs`). Every node enforces that the treasury transaction in each block targets this exact address. Tampering with the treasury address is an automatic block rejection.
+This is a **consensus constant** hardcoded in `src/consensus/blockchain.rs`. Every node enforces that the treasury transaction in each block targets exactly this address. Tampering with the address causes instant block rejection. The address cannot be changed via `quanta.toml` — only a coordinated network upgrade (hard fork) can change it.
+
+See [GOVERNANCE.md](GOVERNANCE.md) for spending procedures and keyholder policy.
 
 ### 6.3 Allocation Guidelines
 
@@ -540,6 +544,19 @@ All changes require hard fork + community consensus:
 - Lock duration: 6 months ± 3 months (range 3–12 months)
 - Treasury allocation: 5% ± 2% (range 3–7%)
 
+### 10.3 PoW → PoS Transition (Planned)
+
+Consensus engine is configurable via `quanta.toml`:
+
+```toml
+consensus_engine = "proof_of_work"   # current (live)
+# consensus_engine = "proof_of_stake"  # planned — node will refuse to start until implemented
+```
+
+When PoS is implemented, validator staking rewards will supplement (then replace) PoW mining rewards. The treasury model (5% allocation + 20% fee share) remains unchanged across both consensus engines.
+
+See [GOVERNANCE.md §4](GOVERNANCE.md) for the full PoS transition roadmap and validator economics.
+
 ---
 
 ## 11. Economic Attack Vectors
@@ -624,25 +641,28 @@ account_state.add_locked_balance(
 
 ## Appendix B: Treasury Multisig Configuration
 
-**Treasury Address**: `0x0000000000000000000000000000000000000001`
+**Treasury Address**: `ms69216b1d10425689704d5ae3b2a4aa17049f59b1`  
+**Type**: 3-of-5 Falcon-512 multisig — generated 2026-03-14
 
-**Multisig Arrangement (3-of-5 Falcon-512)**:
-1. Kishore K — Founder (admin@quantachain.org)
-2. Core Developer 2
-3. Core Developer 3
-4. Community Representative 1
-5. Community Representative 2
+**Keyholder Keys** (from `treasury_keys/treasury_setup.json`):
+1. `treasury_key0.qua` — address `0x5372c47e617180f95c6e8a957b3e3c3a7c17ec7a`
+2. `treasury_key1.qua` — address `0x9430dc395f9be6d76873dc6fa703f1ebb4acb4e5`
+3. `treasury_key2.qua` — address `0x6f64731ab168a114ed1a39aa6beeb4b59202239e`
+4. `treasury_key3.qua` — address `0x9e5995fab9d6246e37d9e9bb30c10a1dfeff17f7`
+5. `treasury_key4.qua` — address `0x1160d8504f9cb2b4b3e621114c90c7a8a0bc41d8`
 
 **Signing Thresholds**:
 | Expense Level | Required Signatures | Public Notice |
 |---|---|---|
 | < 10,000 QUA | Any 3 of 5 | Optional |
-| > 10,000 QUA | All 5 | Required (7-day notice) |
-| Emergency | Any 3 of 5 | Post-facto disclosure |
+| > 10,000 QUA | All 5 signers | Required (7-day public notice) |
+| Emergency | Any 3 of 5 | Post-facto public disclosure |
+
+Full spending procedures: [GOVERNANCE.md](GOVERNANCE.md)
 
 ---
 
-**Document Version**: 2.0  
-**Last Updated**: March 2026  
+**Document Version**: 2.1  
+**Last Updated**: 2026-03-14  
 **Founder**: Kishore K (admin@quantachain.org)  
 **License**: CC BY 4.0
