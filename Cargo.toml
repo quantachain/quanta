@@ -80,6 +80,8 @@ thiserror = "1.0"
 rayon = "1.8" # Parallel signature verification (3s → 0.5s validation)
 zstd = "0.13" # Block compression (2 MB → 0.5 MB network transfer)
 lru = "0.12"  # Signature verification cache (skip re-verification)
+bloomfilter = "1.0" # O(1) mempool duplicate detection (PQC: avoids iterating large txs)
+num_cpus = "1.16"   # Tuned rayon thread pool (matches physical cores for PQC verification)
 
 # CLI
 clap = { version = "4.4", features = ["derive"] }
