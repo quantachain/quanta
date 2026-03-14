@@ -1,4 +1,4 @@
-use quanta::crypto::{QuantumWallet, HDWallet, FalconKeypair, TreasuryMultisig, MultiSigTransaction};
+use quanta::crypto::{QuantumWallet, HDWallet, FalconKeypair, TreasuryMultisig, TreasuryMultisigV2, MultiSigTransaction};
 use quanta::core::transaction::{Transaction, TransactionType, SignatureScheme};
 use clap::{Parser, Subcommand};
 use chrono::Utc;
@@ -78,17 +78,21 @@ enum Commands {
     },
 
     // ──────────────────────────────────────────────────────────────────────
-    // Treasury multisig (2-of-3, founder holds all 3 keys)
+    // Treasury multisig (3-of-N)
     // ──────────────────────────────────────────────────────────────────────
-    /// Initialize 2-of-3 treasury multisig (generates 3 Falcon-512 keys)
+    /// Initialize a 3-of-N treasury multisig (generates N Falcon-512 keys, requires 3 to spend)
     TreasuryInit {
         /// Output path for treasury setup JSON (keep alongside your wallet files)
         #[arg(long, default_value = "treasury_setup.json")]
         out: String,
-        /// Prefix for the 3 key wallet files
+        /// Prefix for the N key wallet files
         #[arg(long, default_value = "treasury")]
         key_prefix: String,
-        /// Password for the 3 key files (use TREASURY_KEY_PASSWORD env var to avoid prompt)
+        /// Total number of keyholders N (must be ≥ 3). Any 3 of N can sign a spend.
+        /// Common choices: 5 (2 keys can be lost safely), 7 (4 keys can be lost safely)
+        #[arg(long, default_value = "5")]
+        signers: usize,
+        /// Password for all N key files (use TREASURY_KEY_PASSWORD env var to avoid prompt)
         #[arg(long)]
         password: Option<String>,
     },
@@ -237,77 +241,121 @@ async fn main() {
         }
 
         // ──────────────────── Treasury ────────────────────
-        Commands::TreasuryInit { out, key_prefix, password } => {
-            println!("\n Generating 2-of-3 treasury multisig (Falcon-512)...\n");
+        Commands::TreasuryInit { out, key_prefix, signers, password } => {
+            // Validate
+            if signers < TreasuryMultisigV2::REQUIRED {
+                eprintln!(
+                    " --signers must be >= {} (got {}). A 3-of-N treasury needs at least 3 keyholders.",
+                    TreasuryMultisigV2::REQUIRED, signers
+                );
+                std::process::exit(1);
+            }
 
-            let (setup, [k0, k1, k2]) = TreasuryMultisig::generate();
+            println!("\n Generating 3-of-{} treasury multisig (Falcon-512)...\n", signers);
 
-            println!("  Treasury Address : {}", setup.address);
-            println!("\n  NEXT STEP: Set this in quanta.toml:");
+            let (setup, keypairs) = TreasuryMultisigV2::generate(signers);
+
+            println!("  Policy          : {}", setup.policy_string());
+            println!("  Treasury Address: {}", setup.address);
+            println!("\n  NEXT STEP: Add this to quanta.toml:");
             println!("    treasury_address = \"{}\"", setup.address);
 
             // Save treasury setup JSON
             std::fs::write(&out, setup.to_json()).expect("Failed to save treasury setup");
-            println!("\n  Setup saved   : {}", out);
+            println!("\n  Setup saved     : {}", out);
 
             // Determine password
             let pwd = password
                 .or_else(|| std::env::var("TREASURY_KEY_PASSWORD").ok())
                 .unwrap_or_else(|| {
-                    println!("\n  Enter password for all 3 treasury key files:");
+                    println!("\n  Enter password for all {} treasury key files:", signers);
                     rpassword::read_password().expect("Failed to read password")
                 });
 
-            // Save 3 key wallet files
-            for (i, kp) in [&k0, &k1, &k2].iter().enumerate() {
+            // Save N key wallet files
+            println!();
+            for (i, kp) in keypairs.iter().enumerate() {
                 let keyfile = format!("{}_key{}.qua", key_prefix, i);
                 let wallet = QuantumWallet {
-                    keypair: (*kp).clone(),
+                    keypair: kp.clone(),
                     address: kp.get_address(),
                 };
                 wallet.save_quantum_safe(&keyfile, &pwd).expect("Failed to save key file");
-                println!("  Key {} saved   : {} (address: {})", i, keyfile, kp.get_address());
+                println!("  Key {} saved : {} (address: {})", i, keyfile, kp.get_address());
             }
 
             println!("\n SECURITY CHECKLIST:");
-            println!("  [ ] Copy the 3 key files to 3 SEPARATE USB drives / backup locations");
-            println!("  [ ] Add treasury_address to quanta.toml and restart node");
+            println!("  [ ] Distribute the {} key files to {} SEPARATE secure locations", signers, signers);
+            println!("  [ ] Add treasury_address to quanta.toml and restart the node");
             println!("  [ ] Test with a small treasury-propose before accumulating large balance");
-            println!("  [ ] Never store all 3 keys on the same machine in production");
+            println!("  [ ] Never store more than 2 keys on the same machine in production");
+            println!("  [ ] Any {} of {} keyholders can authorize a spend", TreasuryMultisigV2::REQUIRED, signers);
         }
 
         Commands::TreasuryInfo { setup, node } => {
             let json = std::fs::read_to_string(&setup).expect("Could not read treasury setup");
-            let ts = TreasuryMultisig::from_json(&json).expect("Invalid treasury setup JSON");
-            let balance = fetch_balance(&node, &ts.address).await;
+
+            // Try V2 format first (3-of-N), fall back to legacy V1 (2-of-3)
+            let (address, required, total) =
+                if let Ok(ts) = TreasuryMultisigV2::from_json(&json) {
+                    (ts.address, ts.required, ts.public_keys.len())
+                } else {
+                    #[allow(deprecated)]
+                    let ts = TreasuryMultisig::from_json(&json)
+                        .expect("Invalid treasury setup JSON (tried both V2 and legacy V1 formats)");
+                    (ts.address, ts.required, ts.public_keys.len())
+                };
+
+            let balance = fetch_balance(&node, &address).await;
             println!("\n Treasury Info");
-            println!("  Address : {}", ts.address);
-            println!("  Policy  : {}-of-{} Falcon-512 multisig", ts.required, ts.public_keys.len());
+            println!("  Address : {}", address);
+            println!("  Policy  : {}-of-{} Falcon-512 multisig", required, total);
             println!("  Balance : {:.6} QUA ({} microunits)", balance as f64 / 1_000_000.0, balance);
         }
 
         Commands::TreasuryPropose { setup, to, amount, fee, nonce, out } => {
             let json = std::fs::read_to_string(&setup).expect("Could not read treasury setup");
-            let ts = TreasuryMultisig::from_json(&json).expect("Invalid treasury setup JSON");
 
-            let proposal = ts.propose_spend(
-                to.clone(),
-                qua_to_microunits(amount),
-                qua_to_microunits(fee),
-                nonce,
-                Utc::now().timestamp(),
-            );
+            // Try V2 format first (3-of-N), fall back to legacy V1 (2-of-3)
+            let proposal = if let Ok(ts) = TreasuryMultisigV2::from_json(&json) {
+                ts.propose_spend(
+                    to.clone(),
+                    qua_to_microunits(amount),
+                    qua_to_microunits(fee),
+                    nonce,
+                    Utc::now().timestamp(),
+                )
+            } else {
+                #[allow(deprecated)]
+                let ts = TreasuryMultisig::from_json(&json)
+                    .expect("Invalid treasury setup JSON (tried both V2 and legacy V1 formats)");
+                ts.propose_spend(
+                    to.clone(),
+                    qua_to_microunits(amount),
+                    qua_to_microunits(fee),
+                    nonce,
+                    Utc::now().timestamp(),
+                )
+            };
+
+            let from_addr  = proposal.base_tx.sender.clone();
+            let req_sigs   = proposal.required_signatures;
+            let total_keys = proposal.public_keys.len();
 
             std::fs::write(&out, proposal.to_json()).expect("Failed to save proposal");
             println!("\n Treasury spend proposal created!");
-            println!("  From    : {}", ts.address);
+            println!("  From    : {}", from_addr);
             println!("  To      : {}", to);
             println!("  Amount  : {:.6} QUA", amount);
             println!("  Nonce   : {}", nonce);
             println!("  Out     : {}", out);
-            println!("\n  Next: sign with 2 of 3 treasury keys:");
-            println!("   quanta-wallet treasury-sign --proposal {} --key treasury_key0.qua --index 0", out);
-            println!("   quanta-wallet treasury-sign --proposal {} --key treasury_key1.qua --index 1", out);
+            println!("\n  Next: sign with any {} of {} treasury keys:", req_sigs, total_keys);
+            for i in 0..req_sigs {
+                println!(
+                    "   quanta-wallet treasury-sign --proposal {} --key treasury_key{}.qua --index {}",
+                    out, i, i
+                );
+            }
         }
 
         Commands::TreasurySign { proposal, key, index } => {
