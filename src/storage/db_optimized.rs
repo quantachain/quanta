@@ -286,12 +286,12 @@ impl BlockchainStorage {
         let cutoff = match self.prune_mode {
             PruneMode::ArchiveFull => return Ok(0), // Don't prune
             PruneMode::Pruned6Months => {
-                // 6 months = ~180 days = 180 * 8640 blocks
-                height.saturating_sub(180 * 8640)
+                // 6 months = ~180 days = 180 * 2880 blocks
+                height.saturating_sub(180 * 2880)
             }
             PruneMode::Pruned1Month => {
-                // 1 month = ~30 days = 30 * 8640 blocks
-                height.saturating_sub(30 * 8640)
+                // 1 month = ~30 days = 30 * 2880 blocks
+                height.saturating_sub(30 * 2880)
             }
             PruneMode::HeadersOnly => {
                 //Keep all headers but prune transaction data

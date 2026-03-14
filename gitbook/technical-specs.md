@@ -26,7 +26,7 @@
 ### Proof-of-Work
 
 - Algorithm: SHA3-256 double hash
-- Block time: 10 seconds
+- Block time: 30 seconds
 - Difficulty adjustment: Every 2016 blocks (~5.6 hours) - SECURITY FIX
 - Maximum increase: 1.15x per adjustment (15%) - SECURITY FIX
 - Maximum decrease: 0.85x per adjustment (15%) - SECURITY FIX

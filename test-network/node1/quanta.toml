@@ -47,7 +47,7 @@ dns_seeds = []
 max_block_transactions = 2000
 max_block_size_bytes = 1048576
 min_transaction_fee_microunits = 100
-transaction_expiry_blocks = 8640
+transaction_expiry_blocks = 2880
 coinbase_maturity = 100
 
 # ========================================
@@ -68,14 +68,14 @@ require_tls = false
 year_1_reward_microunits = 100000000
 annual_reduction_percent = 15
 min_reward_microunits = 5000000
-blocks_per_year = 3153600
-bootstrap_phase_blocks = 315360
+blocks_per_year = 1051200
+bootstrap_phase_blocks = 105120
 mining_reward_lock_percent = 50
-mining_reward_lock_blocks = 157680
+mining_reward_lock_blocks = 52560
 fee_burn_percent = 70
 fee_treasury_percent = 20
 fee_validator_percent = 10
-target_block_time = 10
+target_block_time = 30
 difficulty_adjustment_interval = 2016
 
 # ========================================

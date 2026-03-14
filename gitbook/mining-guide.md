@@ -95,14 +95,14 @@ curl -X POST http://localhost:3000/api/balance \
 ### Year 1 Economics
 
 - Base reward: 100 QUA per block
-- Block time: 10 seconds
+- Block time: 30 seconds
 - Daily blocks: ~8,640
 - Daily emission: ~864,000 QUA
 - Plus 10% of transaction fees
 
 ### Reward Lock
 
-50% of mining rewards are locked for 6 months (157,680 blocks) to prevent dumping and encourage long-term participation.
+50% of mining rewards are locked for 6 months (52,560 blocks) to prevent dumping and encourage long-term participation.
 
 ## Profitability
 
@@ -110,7 +110,7 @@ curl -X POST http://localhost:3000/api/balance \
 
 ```
 Block Reward: 100 QUA
-Block Time: 10 seconds
+Block Time: 30 seconds
 Blocks per Day: 8,640
 Daily Potential: 864,000 QUA (network-wide)
 Your Share: (Your Hashrate / Network Hashrate) * Daily Potential

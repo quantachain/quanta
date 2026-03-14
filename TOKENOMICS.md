@@ -44,14 +44,14 @@ The QUANTA economic model achieves:
 | Initial Block Reward | 100 QUA | `YEAR_1_REWARD = 100_000_000` |
 | Annual Reduction | 15% | `ANNUAL_REDUCTION_PERCENT = 15` |
 | Minimum Reward Floor | 5 QUA | `MIN_REWARD = 5_000_000` |
-| Block Time Target | 10 seconds | `TARGET_BLOCK_TIME = 10` |
-| Blocks Per Year | 3,153,600 | `BLOCKS_PER_YEAR = 3_153_600` |
+| Block Time Target | 30 seconds | `TARGET_BLOCK_TIME = 30` |
+| Blocks Per Year | 1,051,200 | `BLOCKS_PER_YEAR = 1_051_200` |
 | Fee Burn Rate | **70%** | `FEE_BURN_PERCENT = 70` |
 | Fee to Treasury | **20%** | `FEE_TREASURY_PERCENT = 20` |
 | Fee to Miner | **10%** | `FEE_VALIDATOR_PERCENT = 10` |
 | Block Reward to Treasury | **5%** | `TREASURY_ALLOCATION_PERCENT = 5` |
 | Mining Reward Lock | **50% for 6 months** | `MINING_REWARD_LOCK_PERCENT = 50` |
-| Lock Duration | 157,680 blocks | `MINING_REWARD_LOCK_BLOCKS = 157_680` |
+| Lock Duration | 52,560 blocks | `MINING_REWARD_LOCK_BLOCKS = 52_560` |
 | Coinbase Maturity | 100 blocks | `COINBASE_MATURITY = 100` |
 | Min Transaction Fee | 100 microunits (0.0001 QUA) | `MIN_TRANSACTION_FEE = 100` |
 | Mempool Limit | 5,000 transactions | `MAX_MEMPOOL_SIZE = 5000` |
@@ -127,7 +127,7 @@ The anti-dump vesting mechanism means **not all mined QUA is immediately circula
 
 Of 100 QUA mined per block in Year 1:
 - 47.5 QUA → miner wallet immediately spendable
-- 47.5 QUA → miner wallet locked for 157,680 blocks (~6 months)
+- 47.5 QUA → miner wallet locked for 52,560 blocks (~6 months)
 - 5.0 QUA → treasury (immediately spendable for operations)
 
 ---
@@ -151,7 +151,7 @@ Miner Base Reward:    R × 95%           → available to miner
 
   Of Miner Base Reward:
     Immediate:        (R × 95%) × 50%   → credited to miner immediately
-    Locked:           (R × 95%) × 50%   → locked until height + 157,680
+    Locked:           (R × 95%) × 50%   → locked until height + 52,560
 
 Example at R = 100 QUA:
   Treasury:       5.0 QUA  (hardcoded address)
@@ -262,7 +262,7 @@ Treasury receives 20% of all transaction fees, creating a sustainable independen
 **Parameters**:
 ```
 MINING_REWARD_LOCK_PERCENT  = 50  (% of miner's share that is locked)
-MINING_REWARD_LOCK_BLOCKS   = 157,680  (≈ 6 months at 10-second blocks)
+MINING_REWARD_LOCK_BLOCKS   = 52,560  (≈ 6 months at 30-second blocks)
 ```
 
 **Mechanism** (as implemented in `blockchain.rs`):
@@ -309,11 +309,11 @@ The treasury receives two distinct income streams:
 
 | Source | Amount | Frequency |
 |---|---|---|
-| Block Reward Allocation | 5% of each block reward | Every block (~10 seconds) |
+| Block Reward Allocation | 5% of each block reward | Every block (~30 seconds) |
 | Fee Share | 20% of block's total transaction fees | Every block (when fees > 0) |
 
 **Year 1 projections**:
-- Block allocation: 3,153,600 blocks × 5 QUA = **~15,768,000 QUA/year** from blocks
+- Block allocation: 1,051,200 blocks × 5 QUA = **~5,256,000 QUA/year** from blocks
 - Fee share: ~10M TX × 0.001 QUA × 20% = **~2,000 QUA/year** from fees (initially modest)
 
 ### 6.2 Treasury Address
@@ -553,7 +553,7 @@ All changes require hard fork + community consensus:
 ### 11.2 Selfish Mining
 
 **Attack**: Withhold valid blocks to gain advantage over competing miners  
-**Mitigation**: 10-second block time minimizes orphan risk; checkpoint system prevents deep reorgs  
+**Mitigation**: 30-second block time minimizes orphan risk; checkpoint system prevents deep reorgs  
 **Economics**: Selfish mining requires >25% hashrate to be profitable — very high barrier
 
 ### 11.3 Long-Range Attack
@@ -599,7 +599,7 @@ let immediate_reward = (miner_reward * (100 - MINING_REWARD_LOCK_PERCENT)) / 100
 // ≈ 47.5% of total block reward
 
 let locked_reward = miner_reward - immediate_reward;
-// ≈ 47.5% of total block reward, locked for 157,680 blocks
+// ≈ 47.5% of total block reward, locked for 52,560 blocks
 ```
 
 ### Fee Distribution
@@ -616,7 +616,7 @@ let fee_to_miner    = total_fees - fee_burned - fee_to_treasury;   // 10% + rema
 account_state.add_locked_balance(
     miner_address,
     locked_reward,
-    current_height + MINING_REWARD_LOCK_BLOCKS  // current + 157,680
+    current_height + MINING_REWARD_LOCK_BLOCKS  // current + 52,560
 );
 ```
 

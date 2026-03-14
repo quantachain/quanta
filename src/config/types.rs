@@ -113,7 +113,7 @@ impl Default for QuantaConfig {
                 max_block_transactions: 2000,
                 max_block_size_bytes: 1_048_576,
                 min_transaction_fee_microunits: 100, // 0.0001 QUA
-                transaction_expiry_blocks: 8640, // ~24 hours at 10s blocks
+                transaction_expiry_blocks: 2880, // ~24 hours at 30s blocks
                 coinbase_maturity: 100,
             },
             security: SecurityConfig {
@@ -128,14 +128,14 @@ impl Default for QuantaConfig {
                 year_1_reward_microunits: 100_000_000, // 100 QUA
                 annual_reduction_percent: 15,
                 min_reward_microunits: 5_000_000, // 5 QUA floor
-                blocks_per_year: 3_153_600,
-                bootstrap_phase_blocks: 315_360,
+                blocks_per_year: 1_051_200,
+                bootstrap_phase_blocks: 105_120,
                 mining_reward_lock_percent: 50,
-                mining_reward_lock_blocks: 157_680,
+                mining_reward_lock_blocks: 52_560,
                 fee_burn_percent: 70,
                 fee_treasury_percent: 20,
                 fee_validator_percent: 10,
-                target_block_time: 10,
+                target_block_time: 30,
                 difficulty_adjustment_interval: 10,
             },
             metrics: MetricsConfig {

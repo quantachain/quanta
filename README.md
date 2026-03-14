@@ -72,7 +72,7 @@ QUANTA addresses a trillion-dollar problem: the quantum computing threat to bloc
 | Annual Reduction | 15% | Gradual, predictable emission |
 | Minimum Reward | 5 QUA | Perpetual security budget |
 | Fee Burn Rate | 70% | Deflationary pressure |
-| Block Time | 10 seconds | Fast transaction finality |
+| Block Time | 30 seconds | Fast transaction finality |
 
 **Supply Projection:**
 - Year 1: 315 million QUA
@@ -158,9 +158,9 @@ quanta/
 #### Consensus & Blockchain
 - Adaptive Proof-of-Work (SHA3-256/SHA3-256 double hash, CPU-friendly)
 - **Account-based model** (not UTXO): balance + nonce + locked_balances per address
-- 10-second block time target
+- 30-second block time target
 - **1,200 TX per block max** (2 MB limit — Falcon-512 tx ≈ 1,713 bytes)
-- **120 TPS** sustained throughput
+- **40 TPS** sustained throughput
 - Nonce-based replay protection + 24-hour expiry window
 - Merkle tree (SHA3-256) for transaction inclusion proofs
 - Checkpoint system: hardcoded hashes prevent deep chain reorgs
@@ -247,7 +247,7 @@ The RPC server is used by the CLI to control a running node:
 | Daily blocks | ~8,640 |
 | Daily immediate emission | ~410,400 QUA |
 
-**Anti-Dump Vesting**: 50% of the miner's 95% reward share (= 47.5% of block reward) is locked for 157,680 blocks (~6 months). This prevents price-damaging sell cascades at launch and aligns miner incentives with long-term network health.
+**Anti-Dump Vesting**: 50% of the miner's 95% reward share (= 47.5% of block reward) is locked for 52,560 blocks (~6 months). This prevents price-damaging sell cascades at launch and aligns miner incentives with long-term network health.
 
 **Coinbase Maturity**: Mining rewards require 100 block confirmations before they can be spent.
 

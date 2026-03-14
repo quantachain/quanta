@@ -302,13 +302,13 @@ Double-SHA3 provides a two-layer pre-image resistance barrier and eliminates len
 #### Difficulty Adjustment
 - **Interval**: Every **2,016 blocks** (~5.6 hours at 10-second average)
   - *Why 2,016?* Security fix from original design (was 10 blocks). 2,016 prevents rapid oscillation — matches Bitcoin's proven stability window.
-- **Target Block Time**: 10 seconds
+- **Target Block Time**: 30 seconds
 - **Formula (pure integer math — no floats)**:
   ```
   scaled = round(current_difficulty × expected_time / actual_time)
   
   Where:
-    expected_time = 2,016 blocks × 10 seconds = 20,160 seconds
+    expected_time = 2,016 blocks × 30 seconds = 60,480 seconds
     actual_time   = median_time_past(latest_block) - median_time_past(2016_blocks_ago)
     # Median-Time-Past (MTP) prevents timestamp manipulation attacks
   ```
@@ -439,7 +439,7 @@ Network daily data:  ~13 GB → ~3.25 GB
 ```
 
 **Throughput**:
-- **120 TPS** (1,200 tx ÷ 10 seconds)
+- **40 TPS** (1,200 tx ÷ 30 seconds)
 - 17× higher than Bitcoin (~7 TPS)
 - 8× higher than Ethereum (~15 TPS)
 - Achieved despite 10.4× larger signatures than ECDSA
@@ -460,7 +460,7 @@ See [TOKENOMICS.md](./TOKENOMICS.md) for the complete economic specification.
 ### 5.2 Block Reward Formula (Integer Math — Consensus Critical)
 
 ```
-year = block_height / 3,153,600    (integer division)
+year = block_height / 1,051,200    (integer division)
 base  = 100 QUA × (85/100)^year   (applied iteratively using integer ops)
 reward = max(base, 5 QUA)
 
@@ -478,7 +478,7 @@ Miner reward:         R × 95% → Miner address
 
   Of miner reward:
     Immediate:  (R × 95%) × 50% = 47.5% of R  (spendable now)
-    Locked:     (R × 95%) × 50% = 47.5% of R  (locked for 157,680 blocks / ~6 months)
+    Locked:     (R × 95%) × 50% = 47.5% of R  (locked for 52,560 blocks / ~6 months)
 ```
 
 ### 5.4 Fee Distribution Per Block
@@ -824,7 +824,7 @@ Hard forks will be:
 - Continuous network monitoring
 - Exchange listing coordination
 
-**Success Criteria**: 25+ independent nodes, 95%+ uptime, consistent block times 10–15 seconds
+**Success Criteria**: 25+ independent nodes, 95%+ uptime, consistent block times 30–35 seconds
 
 ### Phase 6: Expansion (Q2–Q4 2027)
 

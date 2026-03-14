@@ -61,9 +61,9 @@ max_block_size_bytes = 1048576
 # Prevents spam attacks
 min_transaction_fee_microunits = 100
 
-# Transaction expiry in blocks (~24 hours at 10s blocks)
+# Transaction expiry in blocks (~24 hours at 30s blocks)
 # Prevents mempool bloat
-transaction_expiry_blocks = 8640
+transaction_expiry_blocks = 2880
 
 # Coinbase maturity - Blocks before mining rewards can be spent
 # Prevents chain reorganization attacks
@@ -106,19 +106,19 @@ annual_reduction_percent = 15
 # Minimum reward floor in microunits (5 QUA)
 min_reward_microunits = 5000000
 
-# Expected blocks per year (365.25 days * 8640 blocks/day)
-blocks_per_year = 3153600
+# Expected blocks per year (365.25 days * 2880 blocks/day)
+blocks_per_year = 1051200
 
 # Bootstrap phase blocks (~100 days)
 # Higher rewards during initial network growth
-bootstrap_phase_blocks = 315360
+bootstrap_phase_blocks = 105120
 
 # Mining reward vesting (anti-dump mechanism)
 # Percentage of reward locked for vesting period
 mining_reward_lock_percent = 50
 
 # Number of blocks rewards remain locked (~50 days)
-mining_reward_lock_blocks = 157680
+mining_reward_lock_blocks = 52560
 
 # Fee distribution percentages (must sum to 100)
 # Burn percentage - Reduces total supply (deflationary)
@@ -131,7 +131,7 @@ fee_treasury_percent = 20
 fee_validator_percent = 10
 
 # Target block time in seconds
-target_block_time = 10
+target_block_time = 30
 
 # Difficulty adjustment interval in blocks (Bitcoin-style ~2 weeks)
 difficulty_adjustment_interval = 2016
