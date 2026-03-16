@@ -116,8 +116,7 @@ const MAX_FUTURE_BLOCK_TIME: i64 = 7200; // 2 hours maximum future timestamp
 // CONSENSUS-CRITICAL: Genesis block hash (prevents chain split attacks)
 // Generated from Block::genesis() with timestamp 1735689600 (2026-01-01 00:00:00 UTC)
 // Difficulty: 6 (PRODUCTION)
-//  VERIFIED: 2026-01-04 - Hash regenerated with correct parameters
-const GENESIS_HASH: &str = "527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d";
+const GENESIS_HASH: &str = "2c8490a8bfd4d8bbef7315fcf47bab8fa8b3a1d1c8ed2239512ad5191e0ddc22";
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)

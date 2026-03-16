@@ -2,6 +2,7 @@ use crate::core::block::Block;
 use crate::core::transaction::Transaction;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
+use std::io::Read;
 
 /// P2P protocol messages for blockchain network communication
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -144,8 +145,18 @@ pub fn deserialize_message(data: &[u8]) -> Result<P2PMessage, String> {
         data[0] == 0x28 && data[1] == 0xB5 && data[2] == 0x2F && data[3] == 0xFD;
 
     let decompressed = if is_compressed {
-        zstd::decode_all(data)
-            .map_err(|e| format!("Decompression error: {}", e))?
+        let mut decoder = zstd::stream::Decoder::new(data)
+            .map_err(|e| format!("Decompression error: {}", e))?;
+        let mut decomp_data = Vec::new();
+        // Limit to MAX_MESSAGE_SIZE to prevent Zip Bomb OOM
+        std::io::Read::take(&mut decoder, MAX_MESSAGE_SIZE as u64 + 1)
+            .read_to_end(&mut decomp_data)
+            .map_err(|e| format!("Decompression read error: {}", e))?;
+            
+        if decomp_data.len() > MAX_MESSAGE_SIZE {
+            return Err("Decompressed message too large".to_string());
+        }
+        decomp_data
     } else {
         data.to_vec()
     };

@@ -1,6 +1,5 @@
 use super::types::*;
 use crate::consensus::Blockchain;
-use crate::core::block::Block;
 use crate::network::Network;
 use axum::{
     extract::State,
