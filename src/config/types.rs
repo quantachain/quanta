@@ -186,6 +186,7 @@ impl Default for QuantaConfig {
                 enabled: true,
                 port: 9090,
             },
+            consensus_engine: ConsensusEngine::ProofOfWork,
         }
     }
 }

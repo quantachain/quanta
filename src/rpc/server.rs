@@ -417,7 +417,7 @@ async fn handle_get_mempool(state: &AppState) -> JsonRpcResponse {
     JsonRpcResponse::success(1, serde_json::json!({ "transactions": tx_data }))
 }
 
-async fn handle_shutdown(state: &AppState) -> JsonRpcResponse {
+async fn handle_shutdown(_state: &AppState) -> JsonRpcResponse {
     tracing::info!("Shutdown requested via RPC");
     
     // Spawn a task to shutdown after a brief delay
