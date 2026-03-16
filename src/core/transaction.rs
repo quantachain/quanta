@@ -68,8 +68,7 @@ pub struct Transaction {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum TransactionType {
     Transfer,
-    DeployContract { code: Vec<u8> },
-    CallContract { contract: String, function: String, args: Vec<u8> },
+    TimeLockTransfer { unlock_height: u64 },
 }
 
 impl Transaction {
@@ -89,43 +88,25 @@ impl Transaction {
         }
     }
 
-    /// Create an unsigned DeployContract transaction.
-    #[allow(dead_code)]
-    pub fn new_deploy_contract(sender: String, code: Vec<u8>, timestamp: i64, nonce: u64) -> Self {
-        Self {
-            sender,
-            recipient: String::new(),
-            amount: 0,
-            timestamp,
-            signature: vec![],
-            public_key: vec![],
-            fee: 10_000,
-            nonce,
-            tx_type: TransactionType::DeployContract { code },
-            sig_scheme: SignatureScheme::Falcon512,
-        }
-    }
-
-    /// Create an unsigned CallContract transaction.
-    #[allow(dead_code)]
-    pub fn new_call_contract(
+    /// Create an unsigned TimeLockTransfer transaction.
+    pub fn new_time_lock(
         sender: String,
-        contract: String,
-        function: String,
-        args: Vec<u8>,
+        recipient: String,
+        amount: u64,
+        unlock_height: u64,
         timestamp: i64,
         nonce: u64,
     ) -> Self {
         Self {
             sender,
-            recipient: contract.clone(),
-            amount: 0,
+            recipient,
+            amount,
             timestamp,
             signature: vec![],
             public_key: vec![],
-            fee: 5000,
+            fee: 5000, // Higher fee for time-locked transfers
             nonce,
-            tx_type: TransactionType::CallContract { contract, function, args },
+            tx_type: TransactionType::TimeLockTransfer { unlock_height },
             sig_scheme: SignatureScheme::Falcon512,
         }
     }
@@ -162,15 +143,9 @@ impl Transaction {
 
         match &self.tx_type {
             TransactionType::Transfer => buf.push(0u8),
-            TransactionType::DeployContract { code } => {
+            TransactionType::TimeLockTransfer { unlock_height } => {
                 buf.push(1u8);
-                buf.extend_from_slice(code);
-            }
-            TransactionType::CallContract { contract, function, args } => {
-                buf.push(2u8);
-                buf.extend_from_slice(contract.as_bytes());
-                buf.extend_from_slice(function.as_bytes());
-                buf.extend_from_slice(args);
+                buf.extend_from_slice(&unlock_height.to_le_bytes());
             }
         }
 
@@ -216,15 +191,9 @@ impl Transaction {
 
         match &self.tx_type {
             TransactionType::Transfer => hasher.update(&[0u8]),
-            TransactionType::DeployContract { code } => {
+            TransactionType::TimeLockTransfer { unlock_height } => {
                 hasher.update(&[1u8]);
-                hasher.update(code);
-            }
-            TransactionType::CallContract { contract, function, args } => {
-                hasher.update(&[2u8]);
-                hasher.update(contract.as_bytes());
-                hasher.update(function.as_bytes());
-                hasher.update(args);
+                hasher.update(&unlock_height.to_le_bytes());
             }
         }
 
@@ -350,6 +319,11 @@ impl AccountState {
             account.locked_balances.push(LockedBalance {
                 amount: tx.amount,
                 unlock_height: current_height + coinbase_maturity,
+            });
+        } else if let TransactionType::TimeLockTransfer { unlock_height } = tx.tx_type {
+            account.locked_balances.push(LockedBalance {
+                amount: tx.amount,
+                unlock_height,
             });
         } else {
             account.balance = account.balance.saturating_add(tx.amount);
