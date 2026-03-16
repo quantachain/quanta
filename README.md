@@ -14,7 +14,9 @@
 
 ## What is QUANTA?
 
-QUANTA is a production-ready blockchain that protects against quantum computer attacks through NIST-standardized post-quantum cryptography. While Bitcoin, Ethereum, and other blockchains use cryptography vulnerable to future quantum computers, QUANTA is built from the ground up to remain secure for decades.
+QUANTA is an ultra-secure, production-ready blockchain operating as a **Post-Quantum Institutional Settlement Layer**. While Bitcoin and Ethereum use cryptography vulnerable to future quantum computers, QUANTA is designed as an impenetrable digital vault for institutional capital and sovereign wealth.
+
+It deliberately **omits smart contracts** to minimize attack surfaces, focusing entirely on providing the most secure store-of-value network ever built.
 
 **Built with:**
 - **Falcon-512** post-quantum signatures
@@ -59,9 +61,10 @@ Current blockchains rely on elliptic curve cryptography (ECDSA/EdDSA) that quant
 
 QUANTA addresses a trillion-dollar problem: the quantum computing threat to blockchain infrastructure. As institutions and governments invest in quantum computing, existing blockchains face obsolescence. QUANTA provides:
 
-1. **First-Mover Advantage**: The first production-ready quantum-resistant blockchain
-2. **Fair Launch Model**: No insider allocation, transparent distribution
-3. **Deflationary Economics**: 70% of transaction fees are permanently burned
+1. **First-Mover Advantage**: The first institutional-grade, quantum-resistant settlement network
+2. **Minimal Attack Surface**: No Turing-complete smart contracts means no contract exploits or multi-billion dollar hacks
+3. **Native Crypto-Vaulting**: Built-in protocol-level Time-Locks for escrow and vesting
+4. **Deflationary Economics**: 70% of transaction fees are permanently burned
 4. **Sustainable Growth**: Perpetual mining incentives prevent Bitcoin's "final block" problem
 
 ### Tokenomics Summary
@@ -180,8 +183,7 @@ quanta/
 #### Transaction Types
 ```rust
 TransactionType::Transfer                              // Value transfer
-TransactionType::DeployContract { code: Vec<u8> }      // Deploy smart contract
-TransactionType::CallContract { contract, function, args } // Call contract
+TransactionType::TimeLockTransfer { unlock_height }    // Cryptographic Escrow/Vaulting
 ```
 
 #### Wallet Features
@@ -611,7 +613,7 @@ Genesis event, block explorer live, production wallets, exchange integrations
 
 ### Phase 6: Expansion (2027+)
 
-Light client (SPV), mobile wallets, hardware wallet support, smart contract VM, Layer 2 research
+Light client (SPV), mobile wallets, hardware wallet support, advanced Multisig, and Institutional Custodian Integrations
 
 ---
 
@@ -662,7 +664,7 @@ git push origin feature/your-feature-name
 ## Frequently Asked Questions
 
 **Q: What makes QUANTA different from other PQ blockchains (QRL, QAN)?**  
-A: QUANTA uses NIST-standardized Falcon-512 (stateless, not XMSS's stateful 2,500-byte signatures), delivers 120 TPS, is written in production-grade Rust, has a fair launch with no pre-mine, and includes DeployContract/CallContract smart contract support.
+A: QUANTA uses NIST-standardized Falcon-512, delivers 40+ TPS, is written in production-grade Rust, and deliberately removes smart contracts to serve exclusively as a hyper-secure Institutional Settlement Vault.
 
 **Q: When is mainnet?**  
 A: Planned Q1 2027, after public testnet (Q2 2026) and security hardening (Q3 2026).

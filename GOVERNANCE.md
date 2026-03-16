@@ -82,7 +82,7 @@ quanta-wallet treasury-broadcast --proposal proposal.json --node http://localhos
 |---|---|---|
 | Infrastructure | Servers, DNS, bootstrap nodes | 3-of-5 multisig |
 | Security audits | External code audits, pentests | 3-of-5 multisig |
-| Developer grants | Bounties, contributor rewards | 3-of-5 multisig + public announcement |
+| Developer grants | Bounties, core contributor rewards | 3-of-5 multisig + public announcement |
 | Exchange listings | Listing fees, market making | 3-of-5 multisig + community notice |
 | Marketing | Events, content, community | 3-of-5 multisig |
 

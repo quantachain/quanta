@@ -201,8 +201,7 @@ def usage_multiplier(block_height):
 | Transaction Type | Recommended Fee |
 |---|---|
 | Transfer | 1,000 microunits (0.001 QUA) |
-| DeployContract | 10,000 microunits (0.01 QUA) |
-| CallContract | 5,000 microunits (0.005 QUA) |
+| TimeLockTransfer | 5,000 microunits (0.005 QUA) |
 
 **Fee Market**: Transactions are sorted highest-fee-first for block inclusion. A natural fee market emerges as mempool fills (5,000 TX cap).
 

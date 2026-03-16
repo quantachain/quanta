@@ -19,7 +19,8 @@ QUANTA is the first production-ready blockchain purpose-built with post-quantum 
 - **Sustainable Economics**: Adaptive tokenomics with 70% fee burning, 50% anti-dump vesting, and perpetual mining incentives
 - **Production-Ready**: Built in Rust with parallel signature verification, bloom filter mempool, LRU sig cache, pubkey cache, zstd compression, and sled embedded storage
 - **3-of-5 Treasury Multisig**: Live on-chain — `ms69216b1d10425689704d5ae3b2a4aa17049f59b1`. Any 3 of 5 keyholders must sign to spend. Address consensus-enforced, not configurable.
-- **Smart Contract Foundation**: Transfer, DeployContract, and CallContract transaction types with crypto-agile signature scheme field
+- **Minimal Attack Surface**: No Turing-complete virtual machine. Zero risk of smart contract exploits.
+- **Institutional Vault Capabilities**: Transfer and TimeLockTransfer (Escrow/Vesting) natively built into the protocol.
 - **Open Development**: Transparent roadmap, fully open-source codebase, and active security audits
 
 This whitepaper presents the technical architecture, cryptographic foundations, consensus mechanism, economic model, and implementation details of the QUANTA blockchain.
@@ -343,24 +344,20 @@ The genesis hash is hardcoded in `blockchain.rs`. Any mismatch immediately panic
 
 ### 4.3 Transaction Types
 
-QUANTA supports three transaction types, all signed with Falcon-512:
+QUANTA supports two extremely strict transaction types, both signed with Falcon-512:
 
 ```rust
 TransactionType {
     Transfer,
     // Standard value transfer between two accounts
 
-    DeployContract { code: Vec<u8> },
-    // Deploy on-chain program bytecode
-    // Minimum fee: 10,000 microunits (0.01 QUA)
-
-    CallContract { contract: String, function: String, args: Vec<u8> },
-    // Invoke deployed contract function with arguments
-    // Minimum fee: 5,000 microunits (0.005 QUA)
+    TimeLockTransfer { unlock_height: u64 },
+    // Cryptographic Escrow/Vaulting
+    // Locks funds on the recipient's account until a specific block height
 }
 ```
 
-All transaction types share the identical signing pipeline (same domain prefix, same Falcon-512 verification). The `tx_type` discriminant byte and any type-specific payload are included in `signing_bytes` and thus covered by the signature.
+By explicitly rejecting Turing-complete smart contracts, QUANTA eliminates the risk of re-entrancy attacks, logic bugs, and platform-level exploits that cost the industry billions annually.
 
 ### 4.4 Transaction Structure
 
@@ -884,7 +881,7 @@ Planned timeline: PoW/PoS hybrid by Q1 2027, PoS primary by Q3 2027. See [GOVERN
 | Security Budget | Ends ~2140 | Perpetual (5 QUA/block minimum) |
 | Fee Burning | None | 70% of fees |
 | Block TPS | ~7 TPS | 120 TPS |
-| Smart Contracts | No (only UTXO scripts) | Transfer + DeployContract + CallContract |
+| Smart Contracts | No | **Intentionally omitted for security** |
 | HD Wallet | BIP32/39 (ECDSA) | BIP32/39 (Falcon-512) |
 | Multisig | ECDSA multisig | Falcon-512 M-of-N |
 | Quantum Risk | **HIGH** — ECDSA breakable | **NONE** — native PQ from genesis |
@@ -899,7 +896,7 @@ Planned timeline: PoW/PoS hybrid by Q1 2027, PoS primary by Q3 2027. See [GOVERN
 | Issuance | ~0.5% annual | 15% → 0.8% over 20 years |
 | Fee Burning | EIP-1559 (variable burn) | 70% fixed burn |
 | Initial Distribution | ICO + pre-mine (~72M ETH founders) | Fair launch — zero pre-mine |
-| Smart Contracts | Solidity EVM | Native TX types + future QUANTA VM |
+| Smart Contracts | Solidity EVM (High Risk) | None (Maximum Security) |
 
 ### 11.3 vs QRL (Quantum Resistant Ledger)
 
@@ -909,7 +906,7 @@ Planned timeline: PoW/PoS hybrid by Q1 2027, PoS primary by Q3 2027. See [GOVERN
 | Signature Size | ~2,500 bytes | ~666 bytes (3.75× smaller) |
 | Key State | Stateful (limited uses) | Stateless (unlimited reuse) |
 | TPS | ~10 | 120 |
-| Smart Contracts | Limited | Transfer + Deploy + Call |
+| Smart Contracts | Limited | Intentionally Omitted |
 | Language | Python + Go | Rust (memory-safe, high-performance) |
 
 ### 11.4 vs QANplatform
@@ -921,7 +918,7 @@ Planned timeline: PoW/PoS hybrid by Q1 2027, PoS primary by Q3 2027. See [GOVERN
 | Fair Launch | No (ICO) | Yes (100% mining, no pre-mine) |
 | Open Source | Partial | Fully open source (GitHub) |
 
-**QUANTA's unique position**: Purpose-built PQ blockchain, fully open source, fair launch, production-ready Rust implementation, 120 TPS, smart contract foundations, and the only PQ chain using NIST-standardized Falcon-512 as its native and only signature scheme.
+**QUANTA's unique position**: Purpose-built PQ blockchain, fully open source, fair launch, production-ready Rust implementation, 120 TPS, zero smart contract risk, and the only PQ chain using NIST-standardized Falcon-512 as its native and only signature scheme.
 
 ---
 
@@ -961,7 +958,7 @@ A: Level 1 provides 128-bit classical / 64-bit quantum security. A quantum compu
 
 **Q: What is the `tx_type` field and why does it matter for investors?**
 
-A: QUANTA supports three transaction types: `Transfer`, `DeployContract`, and `CallContract`. This means QUANTA is not just a value-transfer layer — it is a foundation for quantum-resistant decentralized applications. Smart contracts deployed on QUANTA inherit full Falcon-512 security, unlike EVM contracts on quantum-vulnerable Ethereum.
+A: QUANTA supports two transaction types: `Transfer` and `TimeLockTransfer`. By explicitly omitting smart contracts, QUANTA guarantees that funds cannot be lost to code exploits, re-entrancy attacks, or "rug pulls". It is a true cryptographic vault. The `TimeLockTransfer` functionality provides native protocol-level escrow and vesting without relying on vulnerable third-party code.
 
 **Q: What is the HD wallet and why does it matter?**
 
