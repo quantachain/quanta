@@ -148,6 +148,10 @@ impl Transaction {
                 buf.push(1u8);
                 buf.extend_from_slice(&unlock_height.to_le_bytes());
             }
+            TransactionType::MultiSigTransfer { signers_required } => {
+                buf.push(2u8);
+                buf.push(*signers_required);
+            }
         }
 
         buf

@@ -294,16 +294,7 @@ impl Blockchain {
                         "Checkpoint violation at height {}: expected {}, got {}",
                         height, checkpoint_hash, hash
                     );
-                    // The following lines are syntactically incorrect as match arms are not valid here.
-                    // This part of the instruction seems to be misplaced.
-                    // TransactionType::Transfer => {
-                    //     // Handled implicitly by credit/debit
-                    // }
-                    // TransactionType::TimeLockTransfer { unlock_height } => {
-                    //     // Handled implicitly by credit/debit, but we enforce the lock height
-                    //     // The funds will be transferred to the recipient, but locked.
-                    //     // (We will handle the locked credit in the account state logic)
-                    // }
+                    return false;
                 }
                 tracing::debug!("Checkpoint validated at height {}", height);
                 return true;
