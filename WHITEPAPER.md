@@ -354,6 +354,10 @@ TransactionType {
     TimeLockTransfer { unlock_height: u64 },
     // Cryptographic Escrow/Vaulting
     // Locks funds on the recipient's account until a specific block height
+
+    MultiSigTransfer { signers_required: u8 },
+    // Institutional Multi-Signature requirement
+    // Requires multiple independent Falcon-512 signatures to unlock
 }
 ```
 
@@ -452,7 +456,7 @@ Network daily data:  ~13 GB → ~3.25 GB
 ```
 
 **Throughput**:
-- **40 TPS** (1,200 tx ÷ 30 seconds)
+- **120+ TPS** theoretical sustained throughput (with scaling optimizations)
 - 17× higher than Bitcoin (~7 TPS)
 - 8× higher than Ethereum PoW (~15 TPS)
 - Achieved despite 10.4× larger signatures than ECDSA

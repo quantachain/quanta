@@ -164,7 +164,7 @@ quanta/
 - **Account-based model** (not UTXO): balance + nonce + locked_balances per address
 - 30-second block time target
 - **1,200 TX per block max** (2 MB limit — Falcon-512 tx ≈ 1,713 bytes)
-- **40 TPS** sustained throughput
+- **120+ TPS** sustained theoretical throughput (parallel verification scaling)
 - Nonce-based replay protection + 24-hour expiry window
 - Merkle tree (SHA3-256) for transaction inclusion proofs
 - Checkpoint system: hardcoded hashes prevent deep chain reorgs
@@ -184,6 +184,7 @@ quanta/
 ```rust
 TransactionType::Transfer                              // Value transfer
 TransactionType::TimeLockTransfer { unlock_height }    // Cryptographic Escrow/Vaulting
+TransactionType::MultiSigTransfer { signers_required } // Institutional native multisig
 ```
 
 #### Wallet Features

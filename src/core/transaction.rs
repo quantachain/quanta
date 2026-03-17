@@ -69,6 +69,7 @@ pub struct Transaction {
 pub enum TransactionType {
     Transfer,
     TimeLockTransfer { unlock_height: u64 },
+    MultiSigTransfer { signers_required: u8 },
 }
 
 impl Transaction {
@@ -194,6 +195,10 @@ impl Transaction {
             TransactionType::TimeLockTransfer { unlock_height } => {
                 hasher.update(&[1u8]);
                 hasher.update(&unlock_height.to_le_bytes());
+            }
+            TransactionType::MultiSigTransfer { signers_required } => {
+                hasher.update(&[2u8]);
+                hasher.update(&[*signers_required]);
             }
         }
 
