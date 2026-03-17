@@ -116,7 +116,7 @@ const MAX_FUTURE_BLOCK_TIME: i64 = 7200; // 2 hours maximum future timestamp
 // CONSENSUS-CRITICAL: Genesis block hash (prevents chain split attacks)
 // Generated from Block::genesis() with timestamp 1735689600 (2026-01-01 00:00:00 UTC)
 // Difficulty: 6 (PRODUCTION)
-const GENESIS_HASH: &str = "2c8490a8bfd4d8bbef7315fcf47bab8fa8b3a1d1c8ed2239512ad5191e0ddc22";
+const GENESIS_HASH: &str = "527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d";
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)
@@ -496,7 +496,7 @@ impl Blockchain {
 
         // Create new block (unmined)
         let previous_hash = self.get_latest_block().hash.clone();
-        let index = self.chain.read().len() as u64;
+        let index = self.get_height();
         let new_block = Block::new(index, all_transactions, previous_hash, difficulty);
         
         // Don't mine or save here. Just return the template.
@@ -517,7 +517,7 @@ impl Blockchain {
     /// Reduction formula: reward = YEAR_1_REWARD * (85/100)^years_elapsed
     /// Applied iteratively to avoid any floating-point divergence.
     fn get_mining_reward(&self) -> u64 {
-        let chain_len = self.chain.read().len() as u64;
+        let chain_len = self.get_height();
         let years_elapsed = chain_len / BLOCKS_PER_YEAR;
         apply_annual_reduction(YEAR_1_REWARD, years_elapsed).max(MIN_REWARD)
     }
