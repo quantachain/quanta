@@ -137,12 +137,12 @@ impl PeerDiscovery {
             // Ban logic: 3 strikes with low reputation
             if (failures > 3 && reputation < -20) || failures > 10 {
                 if !is_seed {
-                    // Temporary ban: 1 hour for first ban, exponential backoff
-                    let ban_duration = 3600 * (failures as i64 / 3);
+                    // SECURE: 24-hour ban for malicious or severely failing nodes
+                    let ban_duration = 24 * 3600; // 24 hours in seconds
                     let ban_until = chrono::Utc::now().timestamp() + ban_duration;
                     meta.banned_until = Some(ban_until);
-                    warn!("Peer {} BANNED until {} (reputation: {}, failures: {})", 
-                        addr, ban_until, reputation, failures);
+                    warn!("Peer {} BANNED for 24 hours (reputation: {}, failures: {})", 
+                        addr, reputation, failures);
                 } else {
                     warn!("Seed node {} has {} failures (not banning seed)", addr, failures);
                 }

@@ -16,6 +16,7 @@ pub struct PeerInfo {
     pub height: u64,
     pub connected_at: i64,
     pub last_seen: i64,
+    pub strikes: u8,
 }
 
 /// Represents a connection to a peer in the network
@@ -41,6 +42,7 @@ impl Peer {
             height: 0,
             connected_at: chrono::Utc::now().timestamp(),
             last_seen: chrono::Utc::now().timestamp(),
+            strikes: 0,
         };
 
         // CRITICAL: Split stream to avoid read/write lock contention
@@ -139,6 +141,13 @@ impl Peer {
         self.info.read().await.clone()
     }
 
+    /// Add a strike to a peer for bad behavior. If strikes >= 3, flag for disconnect.
+    pub async fn add_strike(&self) -> bool {
+        let mut info = self.info.write().await;
+        info.strikes += 1;
+        info.strikes >= 3 // Return true if peer should be banned
+    }
+
     /// Get peer address
     pub async fn address(&self) -> SocketAddr {
         self.info.read().await.address
@@ -205,7 +214,7 @@ impl PeerManager {
         }
     }
 
-    /// Add a new peer connection
+    /// Add a new peer connection (With Sybil Protection)
     pub async fn add_peer(&self, peer: Arc<Peer>) -> Result<(), String> {
         let mut peers = self.peers.write().await;
         
@@ -213,12 +222,28 @@ impl PeerManager {
             return Err("Max peers reached".to_string());
         }
         
-        // Check if already connected
+        // Ensure no more than 2 connections from the same /24 subnet (Sybil Protection)
         let peer_addr = peer.address().await;
-        if peers.iter().any(|p| {
-            matches!(p.info.try_read(), Ok(info) if info.address == peer_addr)
-        }) {
-            return Err("Already connected to this peer".to_string());
+        let mut subnet_count = 0;
+        
+        for p in peers.iter() {
+            if let Ok(info) = p.info.try_read() {
+                // 1. Check exact match
+                if info.address == peer_addr {
+                    return Err("Already connected to this peer".to_string());
+                }
+                
+                // 2. Check subnet match (IPv4 /24)
+                if let (std::net::IpAddr::V4(a), std::net::IpAddr::V4(b)) = (info.address.ip(), peer_addr.ip()) {
+                    if a.octets()[0..3] == b.octets()[0..3] {
+                        subnet_count += 1;
+                    }
+                }
+            }
+        }
+        
+        if subnet_count >= 2 {
+            return Err("Too many connections from this subnet (Sybil Protection)".to_string());
         }
         
         peers.push(peer);

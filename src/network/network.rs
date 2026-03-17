@@ -280,9 +280,18 @@ impl Network {
         let mut rx = self.message_rx.write().await;
         
         while let Some((addr, msg)) = rx.recv().await {
+            // Find the peer object to pass to the handler for strike management
+            let mut peer = None;
+            for p in self.peer_manager.get_peers().await {
+                if p.address().await == addr {
+                    peer = Some(p);
+                    break;
+                }
+            }
+
             let network = Arc::clone(&self);
             tokio::spawn(async move {
-                if let Err(e) = network.handle_message(addr, msg).await {
+                if let Err(e) = network.handle_message(addr, msg, peer).await {
                     error!("Error handling message from {}: {}", addr, e);
                 }
             });
@@ -290,13 +299,13 @@ impl Network {
     }
 
     /// Handle a single message
-    async fn handle_message(&self, addr: SocketAddr, msg: P2PMessage) -> Result<(), String> {
+    async fn handle_message(&self, addr: SocketAddr, msg: P2PMessage, peer: Option<Arc<Peer>>) -> Result<(), String> {
         match msg {
             P2PMessage::NewTx(tx) => {
-                self.handle_new_transaction(tx).await?;
+                self.handle_new_transaction(tx, peer).await?;
             }
             P2PMessage::Block(block) => {
-                self.handle_new_block(block).await?;
+                self.handle_new_block(block, peer).await?;
             }
             P2PMessage::GetBlocks { start_height, end_height } => {
                 self.handle_get_blocks(addr, start_height, end_height).await?;
@@ -312,7 +321,7 @@ impl Network {
             }
             P2PMessage::Mempool(txs) => {
                 for tx in txs {
-                    let _ = self.handle_new_transaction(tx).await;
+                    let _ = self.handle_new_transaction(tx, peer.clone()).await;
                 }
             }
             P2PMessage::Ping(nonce) => {
@@ -332,7 +341,7 @@ impl Network {
     }
 
     /// Handle new transaction
-    async fn handle_new_transaction(&self, tx: Transaction) -> Result<(), String> {
+    async fn handle_new_transaction(&self, tx: Transaction, peer: Option<Arc<Peer>>) -> Result<(), String> {
         // BETA FIX: Deduplication — only add + re-broadcast if not seen before
         let tx_hash = tx.hash();
         let already_seen = {
@@ -353,18 +362,27 @@ impl Network {
         }
         
         // Add to pending transactions
-        if blockchain.add_transaction(tx.clone()).is_ok() {
+        if let Err(e) = blockchain.add_transaction(tx.clone()) {
+            warn!("Rejected transaction from peer: {}", e);
+            if let Some(p) = peer {
+                if p.add_strike().await {
+                    warn!("Banning peer {} for invalid transactions", p.address().await);
+                    p.disconnect().await;
+                    self.peer_manager.remove_peer(p.address().await).await;
+                }
+            }
+        } else {
             info!("Added new transaction to mempool, re-broadcasting");
             drop(blockchain);
             // BETA FIX: Re-broadcast to propagate across all nodes in the mesh
             self.broadcast_transaction(tx).await;
         }
-        
+
         Ok(())
     }
 
     /// Handle new block (WITH HARDENED VALIDATION + RE-BROADCAST FIX)
-    async fn handle_new_block(&self, block: Block) -> Result<(), String> {
+    async fn handle_new_block(&self, block: Block, peer: Option<Arc<Peer>>) -> Result<(), String> {
         // BETA FIX: Deduplication — only process + re-broadcast if not seen before.
         // This prevents broadcast storms while still propagating to the full mesh.
         let already_seen = {
@@ -393,10 +411,35 @@ impl Network {
                 drop(bc);
                 // BETA FIX: Re-broadcast so nodes NOT directly connected to the miner
                 // also receive the block (essential for mesh topology with 6+ nodes).
-                self.broadcast_block(block).await;
+                self.broadcast_block(block.clone()).await;
+
+                // BETA FIX: Recursive Synchronization
+                // Check if the peer that sent this block has more blocks we need.
+                // If they are ahead of us, request the next batch natively.
+                if let Some(p) = peer {
+                    let peer_info = p.get_info().await;
+                    if peer_info.height > block.index {
+                        info!("Recursive sync: We are at {}, peer is at {}. Requesting next batch...", block.index, peer_info.height);
+                        let _ = p.send_message(P2PMessage::GetBlocks {
+                            start_height: block.index + 1,
+                            end_height: peer_info.height,
+                        }).await;
+                    }
+                }
+
                 Ok(())
             }
-            Err(e) => Err(format!("Failed to add block: {}", e)),
+            Err(e) => {
+                warn!("Rejected block from peer: {}", e);
+                if let Some(p) = peer {
+                    if p.add_strike().await {
+                        warn!("Banning peer {} for invalid network blocks", p.address().await);
+                        p.disconnect().await;
+                        self.peer_manager.remove_peer(p.address().await).await;
+                    }
+                }
+                Err(format!("Failed to add block: {}", e))
+            }
         }
     }
 

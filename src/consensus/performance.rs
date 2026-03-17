@@ -140,11 +140,11 @@ mod tests {
         assert_eq!(metrics.parallel_time_ms, 375.0);
         
         // 2000 tx * (1.5ms * 0.2) = 600ms with 80% cache hit
-        assert_eq!(metrics.cached_time_ms, 600.0);
+        assert!((metrics.cached_time_ms - 600.0).abs() < 0.001, "Expected 600.0, got {}", metrics.cached_time_ms);
         
         // Speedups
-        assert_eq!(metrics.speedup_parallel, 8.0);  // 8x on 8 cores
-        assert_eq!(metrics.speedup_cached, 5.0);     // 5x with caching
+        assert!((metrics.speedup_parallel - 8.0).abs() < 0.001, "Expected 8.0, got {}", metrics.speedup_parallel);
+        assert!((metrics.speedup_cached - 5.0).abs() < 0.001, "Expected 5.0, got {}", metrics.speedup_cached);
     }
     
     #[test]

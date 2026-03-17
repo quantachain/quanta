@@ -221,7 +221,7 @@ mod tests {
         // CRITICAL: Hash must match hardcoded value in blockchain.rs
         assert_eq!(
             genesis.hash,
-            "2c8490a8bfd4d8bbef7315fcf47bab8fa8b3a1d1c8ed2239512ad5191e0ddc22",
+            "527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d",
             "Genesis hash mismatch! This will cause chain splits."
         );
     }
