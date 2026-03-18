@@ -177,6 +177,7 @@ impl TreasuryMultisig {
             public_key: vec![],  // Multisig — no single pubkey
             fee,
             nonce,
+            lock_time: 0,
             tx_type:    crate::core::transaction::TransactionType::Transfer,
             sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
         };
@@ -348,6 +349,7 @@ impl TreasuryMultisigV2 {
             public_key: vec![], // Multisig — no single pubkey
             fee,
             nonce,
+            lock_time: 0,
             tx_type:    crate::core::transaction::TransactionType::Transfer,
             sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
         };

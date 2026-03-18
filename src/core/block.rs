@@ -15,6 +15,9 @@ pub struct Block {
     pub hash: String,
     pub difficulty: u32,
     pub merkle_root: String,
+    /// Cryptographic commitment to the global account state after this block
+    #[serde(default)]
+    pub state_root: String,
 }
 
 impl Block {
@@ -40,6 +43,7 @@ impl Block {
             hash: String::new(),
             difficulty,
             merkle_root,
+            state_root: String::new(), // Will be set by create_block_template
         };
         block.hash = block.calculate_hash();
         block
@@ -65,6 +69,7 @@ impl Block {
             hash: String::new(),
             difficulty,
             merkle_root: "0".repeat(64),
+            state_root: "0".repeat(64), // Empty state root for genesis
         };
         genesis.hash = genesis.calculate_hash();
         genesis
@@ -80,14 +85,15 @@ impl Block {
             .join(",");
 
         let data = format!(
-            "{}:{}:{}:{}:{}:{}:{}",
+            "{}:{}:{}:{}:{}:{}:{}:{}",
             self.index,
             self.timestamp,
             transactions_str,
             self.previous_hash,
             self.nonce,
             self.difficulty,
-            self.merkle_root
+            self.merkle_root,
+            self.state_root
         );
 
         double_sha3(data.as_bytes())
@@ -216,12 +222,13 @@ mod tests {
         assert_eq!(genesis.difficulty, 6);
         assert_eq!(genesis.previous_hash, "0".repeat(64));
         assert_eq!(genesis.merkle_root, "0".repeat(64));
+        assert_eq!(genesis.state_root, "0".repeat(64));
         assert_eq!(genesis.transactions.len(), 0);
         
         // CRITICAL: Hash must match hardcoded value in blockchain.rs
         assert_eq!(
             genesis.hash,
-            "527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d",
+            "1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0",
             "Genesis hash mismatch! This will cause chain splits."
         );
     }

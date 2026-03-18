@@ -3,7 +3,8 @@ use crate::consensus::blockchain::Blockchain;
 use crate::network::peer::{Peer, PeerManager};
 use crate::network::protocol::{P2PMessage, PROTOCOL_VERSION};
 use crate::core::transaction::Transaction;
-use std::net::{SocketAddr, ToSocketAddrs};
+use crate::network::PeerDiscovery;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, RwLock};
@@ -51,6 +52,7 @@ pub struct Network {
     // LRU(1024) keeps ~10+ minutes of blocks at 30s block time.
     seen_blocks: Arc<Mutex<LruCache<String, ()>>>,
     seen_txs:    Arc<Mutex<LruCache<String, ()>>>,
+    discovery: Arc<PeerDiscovery>,
 }
 
 impl Network {
@@ -59,6 +61,10 @@ impl Network {
         // CRIT-3 FIX: Bounded channel(10_000) prevents OOM via message flood.
         // An attacker sending millions of messages will now get dropped, not buffered.
         let (message_tx, message_rx) = mpsc::channel(10_000);
+        let discovery = Arc::new(PeerDiscovery::with_dns_seeds(
+            config.bootstrap_nodes.clone(),
+            config.dns_seeds.clone(),
+        ));
         Self {
             config,
             blockchain,
@@ -69,6 +75,7 @@ impl Network {
             seen_blocks: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(1024).unwrap()))),
             // 10k tx entries ≈ handles a full mempool cycle without re-flooding
             seen_txs: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(10_000).unwrap()))),
+            discovery,
         }
     }
 
@@ -119,25 +126,15 @@ impl Network {
         // Resolve DNS seeds to get additional bootstrap nodes
         if !self.config.dns_seeds.is_empty() {
             info!("Resolving {} DNS seeds...", self.config.dns_seeds.len());
-            for dns_seed in &self.config.dns_seeds {
-                let network = Arc::clone(&self);
-                let seed = dns_seed.clone();
-                tokio::spawn(async move {
-                    match network.resolve_dns_seed(&seed).await {
-                        Ok(addrs) => {
-                            info!("DNS seed {} resolved to {} peers", seed, addrs.len());
-                            for addr in addrs {
-                                if let Err(e) = network.connect_to_peer(addr).await {
-                                    debug!("Failed to connect to DNS peer {}: {}", addr, e);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            warn!("Failed to resolve DNS seed {}: {}", seed, e);
-                        }
+            let network = Arc::clone(&self);
+            tokio::spawn(async move {
+                let addrs = network.discovery.resolve_dns_seeds().await;
+                for addr in addrs {
+                    if let Err(e) = network.connect_to_peer(addr).await {
+                        debug!("Failed to connect to DNS peer {}: {}", addr, e);
                     }
-                });
-            }
+                }
+            });
         }
 
         // Connect to bootstrap nodes
@@ -235,23 +232,6 @@ impl Network {
     }
 
 
-    /// Resolve DNS seed to socket addresses
-    async fn resolve_dns_seed(&self, dns_seed: &str) -> Result<Vec<SocketAddr>, String> {
-        let lookup_addr = if dns_seed.contains(':') {
-            dns_seed.to_string()
-        } else {
-            format!("{}:8333", dns_seed) // Default Quanta P2P port
-        };
-        
-        tokio::task::spawn_blocking(move || {
-            lookup_addr
-                .to_socket_addrs()
-                .map(|addrs| addrs.collect())
-                .map_err(|e| format!("DNS resolution failed: {}", e))
-        })
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
-    }
 
     /// Connect to a peer
     pub async fn connect_to_peer(&self, addr: SocketAddr) -> Result<(), String> {
@@ -338,6 +318,15 @@ impl Network {
             }
             P2PMessage::Pong(_) => {
                 // Keep-alive response
+            }
+            P2PMessage::GetAddr => {
+                let addrs = self.discovery.get_random_peers(50).await;
+                if let Some(p) = peer {
+                    let _ = p.send_message(P2PMessage::Addr(addrs)).await;
+                }
+            }
+            P2PMessage::Addr(addrs) => {
+                self.discovery.process_addr_message(addrs, 50).await;
             }
             P2PMessage::Disconnect => {
                 self.peer_manager.remove_peer(addr).await;
@@ -571,7 +560,7 @@ impl Network {
     }
 
     /// Maintain peer connections
-    async fn maintain_peers(&self) {
+    async fn maintain_peers(self: Arc<Self>) {
         let mut ticker = interval(Duration::from_secs(10));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         
@@ -590,25 +579,22 @@ impl Network {
             
             // Try to maintain minimum peer count
             let peer_count = self.peer_manager.peer_count().await;
-            if peer_count < 3 && !self.config.bootstrap_nodes.is_empty() {
-                // Try reconnecting to bootstrap nodes
-                for &bootstrap_addr in &self.config.bootstrap_nodes {
-                    let message_tx = self.message_tx.clone();
-                    let peer_manager = Arc::clone(&self.peer_manager);
-                    let blockchain = Arc::clone(&self.blockchain);
-                    let node_id = self.config.node_id.clone();
-                    
+            if peer_count < self.config.max_peers {
+                let needed = self.config.max_peers.saturating_sub(peer_count);
+                // SECURITY FIX: Subnet bucketing strategy for outgoing connections
+                let mut target_peers = self.discovery.get_random_peers(needed).await;
+                
+                if target_peers.is_empty() && !self.config.bootstrap_nodes.is_empty() {
+                    target_peers.extend(self.config.bootstrap_nodes.iter().copied()); // Attempt bootstrap nodes if discovery empty
+                }
+
+                for addr in target_peers {
+                    let network = Arc::clone(&self);
                     tokio::spawn(async move {
-                        if let Ok(stream) = TcpStream::connect(bootstrap_addr).await {
-                            if let Ok(peer) = Peer::new(stream, bootstrap_addr).await {
-                                let peer = Arc::new(peer);
-                                let height = blockchain.read().await.get_height();
-                                if peer.handshake(PROTOCOL_VERSION, height, node_id).await.is_ok() {
-                                    if peer_manager.add_peer(Arc::clone(&peer)).await.is_ok() {
-                                        Self::start_peer_receive_task(peer, message_tx, peer_manager).await;
-                                    }
-                                }
-                            }
+                        if let Err(_) = network.connect_to_peer(addr).await {
+                            network.discovery.mark_peer_failed(addr).await;
+                        } else {
+                            network.discovery.update_peer_seen(addr).await;
                         }
                     });
                 }

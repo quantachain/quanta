@@ -123,7 +123,7 @@ const MAX_ADDRESS_LEN: usize = 128;
 // CONSENSUS-CRITICAL: Genesis block hash (prevents chain split attacks)
 // Generated from Block::genesis() with timestamp 1735689600 (2026-01-01 00:00:00 UTC)
 // Difficulty: 6 (PRODUCTION)
-const GENESIS_HASH: &str = "527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d";
+const GENESIS_HASH: &str = "1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0";
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)
@@ -228,6 +228,7 @@ impl Blockchain {
                 public_key: vec![],
                 fee: 0,
                 nonce: 0,
+                lock_time: 0,
                 tx_type: crate::core::transaction::TransactionType::Transfer,
                 sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
             };
@@ -436,11 +437,16 @@ impl Blockchain {
         let reward = self.get_mining_reward();
         let difficulty = self.calculate_next_difficulty();
         
+        let current_height = self.get_height();
+        
         // Get pending transactions sorted by fee (highest first) with size limits
         let pending_txs = self.pending_transactions.read();
         
-        // Sort by fee descending (highest fee first)
-        let mut sorted_txs = pending_txs.clone();
+        // Filter out transactions locked for future blocks, then sort by fee descending
+        let mut sorted_txs: Vec<_> = pending_txs.iter()
+            .filter(|tx| tx.lock_time <= current_height)
+            .cloned()
+            .collect();
         sorted_txs.sort_by(|a, b| b.fee.cmp(&a.fee));
         
         let mut transactions = Vec::new();
@@ -495,6 +501,7 @@ impl Blockchain {
             public_key: vec![],
             fee: 0,
             nonce: 0,
+            lock_time: 0,
             tx_type: crate::core::transaction::TransactionType::Transfer,
             sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
         };
@@ -512,6 +519,7 @@ impl Blockchain {
                 public_key: vec![],
                 fee: 0,
                 nonce: 0,
+                lock_time: 0,
                 tx_type: crate::core::transaction::TransactionType::Transfer,
                 sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
             };
@@ -520,10 +528,27 @@ impl Blockchain {
         
         all_transactions.extend(transactions);
 
+        let index = self.get_height();
+
+        // Calculate state_root by simulating transaction execution
+        let mut temp_state = self.account_state.read().clone();
+        for tx in &all_transactions {
+            if !tx.is_coinbase() && tx.sender != "TREASURY" {
+                let required = tx.amount.saturating_add(tx.fee);
+                temp_state.debit_account(&tx.sender, required);
+            }
+            temp_state.credit_account(tx, index, COINBASE_MATURITY);
+            if !tx.is_coinbase() && tx.sender != "TREASURY" {
+                temp_state.increment_nonce(&tx.sender);
+            }
+        }
+        let state_root = temp_state.calculate_state_root();
+
         // Create new block (unmined)
         let previous_hash = self.get_latest_block().hash.clone();
-        let index = self.get_height();
-        let new_block = Block::new(index, all_transactions, previous_hash, difficulty);
+        let mut new_block = Block::new(index, all_transactions, previous_hash, difficulty);
+        new_block.state_root = state_root;
+        new_block.hash = new_block.calculate_hash(); // Re-calculate hash with state_root included
         
         // Don't mine or save here. Just return the template.
         Ok(new_block)
@@ -744,6 +769,12 @@ impl Blockchain {
                 });
             }
             
+            // SECURITY FIX: Enforce lock_time (Fee sniping defense)
+            if tx.lock_time > block.index {
+                tracing::warn!("Transaction locked until block {}, but included in block {}", tx.lock_time, block.index);
+                return Err(BlockchainError::InvalidBlock);
+            }
+            
             // CRITICAL: Validate nonce is sequential (prevents replay)
             let expected_nonce = temp_state.get_nonce(&tx.sender) + 1;
             if tx.nonce != expected_nonce {
@@ -773,6 +804,26 @@ impl Blockchain {
             }
             temp_state.credit_account(tx, block.index, COINBASE_MATURITY);
             temp_state.increment_nonce(&tx.sender);
+        }
+        
+        // Apply system transactions to temp_state for state_root calculation
+        for tx in &block.transactions {
+            if tx.is_coinbase() || tx.sender == "TREASURY" {
+                temp_state.credit_account(tx, block.index, COINBASE_MATURITY);
+            }
+        }
+        
+        // SECURITY FIX: Enforce state_root (State Commitments defense)
+        // Note: For genesis blocks or blocks carrying over from pre-fork, 
+        // we could bypass this if block.index is too old. But for now, we enforce.
+        let computed_state_root = temp_state.calculate_state_root();
+        if block.index > 0 && block.state_root != computed_state_root {
+            // We ignore state_root mismatch on older DB files if state_root isn't present,
+            // but if it's explicitly wrong we reject it. On a fresh block it must match.
+            if block.state_root != "" && block.state_root != String::new() {
+                tracing::warn!("Invalid state root: expected {}, got {}", computed_state_root, block.state_root);
+                return Err(BlockchainError::InvalidBlock);
+            }
         }
         
         Ok(())

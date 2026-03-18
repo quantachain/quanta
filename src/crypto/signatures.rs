@@ -1,7 +1,6 @@
 use pqcrypto_falcon::falcon512::*;
 use pqcrypto_traits::sign::{PublicKey, SecretKey, SignedMessage};
 use sha3::{Digest, Sha3_256};
-use serde::Serialize;
 
 use zeroize::Zeroize;
 

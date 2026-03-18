@@ -57,6 +57,10 @@ pub struct Transaction {
     pub public_key: Vec<u8>,
     pub fee: u64,
     pub nonce: u64,
+    /// The block height before which this transaction cannot be included. 
+    /// Defaults to 0 (no lock time). Prevents fee sniping.
+    #[serde(default)]
+    pub lock_time: u64,
     pub tx_type: TransactionType,
     /// Signature scheme used. Defaults to `Falcon512`.
     /// Included in the signing payload so that scheme substitution is rejected.
@@ -84,6 +88,7 @@ impl Transaction {
             public_key: vec![],
             fee: 1000,
             nonce: 0,
+            lock_time: 0,
             tx_type: TransactionType::Transfer,
             sig_scheme: SignatureScheme::Falcon512,
         }
@@ -107,6 +112,7 @@ impl Transaction {
             public_key: vec![],
             fee: 5000, // Higher fee for time-locked transfers
             nonce,
+            lock_time: 0,
             tx_type: TransactionType::TimeLockTransfer { unlock_height },
             sig_scheme: SignatureScheme::Falcon512,
         }
@@ -138,6 +144,7 @@ impl Transaction {
         buf.extend_from_slice(&self.timestamp.to_le_bytes());
         buf.extend_from_slice(&self.fee.to_le_bytes());
         buf.extend_from_slice(&self.nonce.to_le_bytes());
+        buf.extend_from_slice(&self.lock_time.to_le_bytes());
         buf.extend_from_slice(&self.public_key);
         // Include sig_scheme so that scheme substitution attacks fail.
         buf.push(self.sig_scheme as u8);
@@ -191,6 +198,7 @@ impl Transaction {
         hasher.update(&self.timestamp.to_le_bytes());
         hasher.update(&self.fee.to_le_bytes());
         hasher.update(&self.nonce.to_le_bytes());
+        hasher.update(&self.lock_time.to_le_bytes());
         hasher.update(&self.public_key);
         hasher.update(&[self.sig_scheme as u8]);
 
@@ -307,6 +315,29 @@ pub struct AccountState {
 impl AccountState {
     pub fn new() -> Self {
         Self { accounts: HashMap::new() }
+    }
+
+    /// Calculate deterministic state root hash of all accounts
+    pub fn calculate_state_root(&self) -> String {
+        use sha3::{Digest, Sha3_256};
+        let mut hasher = Sha3_256::new();
+        
+        let mut keys: Vec<&String> = self.accounts.keys().collect();
+        keys.sort();
+        
+        for key in keys {
+            if let Some(acc) = self.accounts.get(key) {
+                hasher.update(acc.address.as_bytes());
+                hasher.update(&acc.balance.to_le_bytes());
+                hasher.update(&acc.nonce.to_le_bytes());
+                for locked in &acc.locked_balances {
+                    hasher.update(&locked.amount.to_le_bytes());
+                    hasher.update(&locked.unlock_height.to_le_bytes());
+                }
+            }
+        }
+        
+        hex::encode(hasher.finalize())
     }
 
     /// Credit an account from a transaction.

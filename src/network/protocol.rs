@@ -63,6 +63,8 @@ pub struct BlockHeader {
     pub hash: String,
     pub nonce: u64,
     pub difficulty: u32,
+    #[serde(default)]
+    pub state_root: String,
 }
 
 impl From<&Block> for BlockHeader {
@@ -74,6 +76,7 @@ impl From<&Block> for BlockHeader {
             hash: block.hash.clone(),
             nonce: block.nonce,
             difficulty: block.difficulty,
+            state_root: block.state_root.clone(),
         }
     }
 }

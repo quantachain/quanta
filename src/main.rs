@@ -921,6 +921,7 @@ async fn main() {
                 public_key: wallet.keypair.public_key.clone(),
                 fee: 1000, // 0.001 QUA default fee
                 nonce: next_nonce,
+                lock_time: 0,
                 tx_type: TransactionType::Transfer,
                 sig_scheme: SignatureScheme::Falcon512,
             };
@@ -1036,6 +1037,7 @@ async fn run_demo(db_path: &str) {
         public_key: wallet1.keypair.public_key.clone(),
         fee: 1000, // 0.001 QUA
         nonce: nonce1,
+        lock_time: 0,
         tx_type: TransactionType::Transfer,
         sig_scheme: SignatureScheme::Falcon512,
     };
@@ -1064,6 +1066,7 @@ async fn run_demo(db_path: &str) {
         public_key: wallet1.keypair.public_key.clone(),
         fee: 1000,
         nonce: nonce2,
+        lock_time: 0,
         tx_type: TransactionType::Transfer,
         sig_scheme: SignatureScheme::Falcon512,
     };
