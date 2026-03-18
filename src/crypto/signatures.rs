@@ -1,7 +1,8 @@
 use pqcrypto_falcon::falcon512::*;
 use pqcrypto_traits::sign::{PublicKey, SecretKey, SignedMessage};
 use sha3::{Digest, Sha3_256};
-use serde::{Serialize, Deserialize};
+use serde::Serialize;
+
 use zeroize::Zeroize;
 
 // ---------------------------------------------------------------------------
@@ -45,27 +46,45 @@ struct SecretKeyBytes(Vec<u8>);
 /// SECURITY: Secret key is zeroized on drop. Signing is intentionally
 /// separated from the consensus verification path — nodes only ever
 /// call verify functions inside consensus logic.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+///
+/// LOW-4 FIX: Serialize is implemented manually to exclude secret_key so it
+/// can never be leaked through logging, API responses, or bincode dumps.
+#[derive(Clone, Debug)]
 pub struct FalconKeypair {
     pub public_key: Vec<u8>,
-    #[serde(serialize_with = "serialize_secret", deserialize_with = "deserialize_secret")]
     secret_key: Vec<u8>,
 }
 
-fn serialize_secret<S>(secret: &Vec<u8>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.serialize_bytes(secret)
+/// On-wire / at-rest representation — public key ONLY.
+/// Deserializing this into FalconKeypair leaves secret_key empty;
+/// such a keypair can verify but not sign.
+#[derive(serde::Serialize)]
+struct FalconKeypairPublicView<'a> {
+    public_key: &'a Vec<u8>,
 }
 
-fn deserialize_secret<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let bytes: Vec<u8> = serde::Deserialize::deserialize(deserializer)?;
-    Ok(bytes)
+#[derive(serde::Deserialize)]
+struct FalconKeypairDeser {
+    public_key: Vec<u8>,
 }
+
+impl serde::Serialize for FalconKeypair {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        // Intentionally omits secret_key — never serialise private key material
+        FalconKeypairPublicView { public_key: &self.public_key }.serialize(s)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for FalconKeypair {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let view = FalconKeypairDeser::deserialize(d)?;
+        Ok(FalconKeypair {
+            public_key: view.public_key,
+            secret_key: Vec::new(), // secret key not round-tripped
+        })
+    }
+}
+
 
 impl Drop for FalconKeypair {
     fn drop(&mut self) {

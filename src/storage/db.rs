@@ -9,12 +9,14 @@
 
 use crate::core::block::Block;
 use crate::core::transaction::{AccountState, Transaction};
+use crate::consensus::blockchain::MAX_BLOCK_SIZE_BYTES;
 use std::path::Path;
 use thiserror::Error;
 use lru::LruCache;
 use std::sync::Mutex;
 use std::num::NonZeroUsize;
 use serde::{Serialize, Deserialize};
+use std::io::Read;
 
 #[derive(Error, Debug)]
 pub enum StorageError {
@@ -160,10 +162,21 @@ impl BlockchainStorage {
         let compressed = self.db.get(block_key.as_bytes())?
             .ok_or(StorageError::BlockNotFound(index))?;
         
-        // 3. Decompress (if enabled)
+        // 3. Decompress (if enabled) — MED-5: strict size cap prevents OOM
         let serialized = if self.compression {
-            zstd::decode_all(compressed.as_ref())
-                .map_err(|e| StorageError::Compression(e.to_string()))?
+            let decoder = zstd::stream::Decoder::new(compressed.as_ref())
+                .map_err(|e| StorageError::Compression(e.to_string()))?;
+            let cap = MAX_BLOCK_SIZE_BYTES * 2; // allow 2× headroom for overhead
+            let mut buf = Vec::with_capacity(cap);
+            decoder.take(cap as u64)
+                .read_to_end(&mut buf)
+                .map_err(|e| StorageError::Compression(e.to_string()))?;
+            if buf.len() > cap {
+                return Err(StorageError::Compression(
+                    "Decompressed block exceeds safety limit — possible DB corruption".into()
+                ));
+            }
+            buf
         } else {
             compressed.to_vec()
         };

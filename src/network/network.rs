@@ -14,6 +14,9 @@ use std::sync::Mutex;
 use lru::LruCache;
 use std::num::NonZeroUsize;
 
+/// Maximum blocks requested per sync batch (HIGH-2 FIX: prevents height-forgery storm)
+const MAX_SYNC_BATCH: u64 = 500;
+
 /// Network configuration
 #[derive(Clone, Debug)]
 pub struct NetworkConfig {
@@ -41,8 +44,8 @@ pub struct Network {
     config: NetworkConfig,
     blockchain: Arc<RwLock<Blockchain>>,
     peer_manager: Arc<PeerManager>,
-    message_tx: mpsc::UnboundedSender<(SocketAddr, P2PMessage)>,
-    message_rx: Arc<RwLock<mpsc::UnboundedReceiver<(SocketAddr, P2PMessage)>>>,
+    message_tx: mpsc::Sender<(SocketAddr, P2PMessage)>,
+    message_rx: Arc<RwLock<mpsc::Receiver<(SocketAddr, P2PMessage)>>>,
     // BETA FIX: Deduplication caches — prevent broadcast storms.
     // A node only re-propagates a block/tx the FIRST time it sees it.
     // LRU(1024) keeps ~10+ minutes of blocks at 30s block time.
@@ -53,8 +56,9 @@ pub struct Network {
 impl Network {
     /// Create a new network instance
     pub fn new(config: NetworkConfig, blockchain: Arc<RwLock<Blockchain>>) -> Self {
-        let (message_tx, message_rx) = mpsc::unbounded_channel();
-        
+        // CRIT-3 FIX: Bounded channel(10_000) prevents OOM via message flood.
+        // An attacker sending millions of messages will now get dropped, not buffered.
+        let (message_tx, message_rx) = mpsc::channel(10_000);
         Self {
             config,
             blockchain,
@@ -67,6 +71,7 @@ impl Network {
             seen_txs: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(10_000).unwrap()))),
         }
     }
+
 
     /// Start the network node
     pub async fn start(self: Arc<Self>) -> Result<(), String> {
@@ -202,7 +207,7 @@ impl Network {
     /// Start a single receive task for a peer (prevents duplicate loops)
     async fn start_peer_receive_task(
         peer: Arc<Peer>,
-        message_tx: mpsc::UnboundedSender<(SocketAddr, P2PMessage)>,
+        message_tx: mpsc::Sender<(SocketAddr, P2PMessage)>,
         peer_manager: Arc<PeerManager>
     ) {
         let addr = peer.address().await;
@@ -211,8 +216,11 @@ impl Network {
                 match peer.receive_message().await {
                     Ok(msg) => {
                         debug!("Received message from {}: {:?}", addr, msg);
-                        if let Err(e) = message_tx.send((addr, msg)) {
-                            error!("Failed to queue message: {}", e);
+                        // CRIT-3 FIX: Use try_send on bounded channel.
+                        // If full, add a strike to the misbehaving peer instead of buffering.
+                        if let Err(_) = message_tx.try_send((addr, msg)) {
+                            warn!("Message channel full — dropping message from {} and adding strike", addr);
+                            peer.add_strike().await;
                             break;
                         }
                     }
@@ -225,6 +233,7 @@ impl Network {
             peer_manager.remove_peer(addr).await;
         });
     }
+
 
     /// Resolve DNS seed to socket addresses
     async fn resolve_dns_seed(&self, dns_seed: &str) -> Result<Vec<SocketAddr>, String> {
@@ -413,16 +422,18 @@ impl Network {
                 // also receive the block (essential for mesh topology with 6+ nodes).
                 self.broadcast_block(block.clone()).await;
 
-                // BETA FIX: Recursive Synchronization
-                // Check if the peer that sent this block has more blocks we need.
-                // If they are ahead of us, request the next batch natively.
+                // Recursive Synchronization: request next batch if peer is ahead.
+                // HIGH-2 FIX: Clamp end_height to MAX_SYNC_BATCH to prevent
+                // a malicious peer from triggering a block-request storm via
+                // a forged height value.
                 if let Some(p) = peer {
                     let peer_info = p.get_info().await;
                     if peer_info.height > block.index {
-                        info!("Recursive sync: We are at {}, peer is at {}. Requesting next batch...", block.index, peer_info.height);
+                        let end_height = peer_info.height.min(block.index + MAX_SYNC_BATCH);
+                        info!("Recursive sync: height {} → requesting up to {}", block.index, end_height);
                         let _ = p.send_message(P2PMessage::GetBlocks {
                             start_height: block.index + 1,
-                            end_height: peer_info.height,
+                            end_height,
                         }).await;
                     }
                 }
@@ -443,11 +454,11 @@ impl Network {
         }
     }
 
-    /// Handle get blocks request — BETA FIX: serve from storage, not genesis-only in-memory vec
+    /// Handle get blocks request — serve from storage, cap batch to 500 blocks
     async fn handle_get_blocks(&self, addr: SocketAddr, start: u64, end: u64) -> Result<(), String> {
         let blockchain = self.blockchain.read().await;
-        // Cap batch size to 500 blocks to avoid flooding the peer
-        let end = end.min(start + 499);
+        // HIGH-2 FIX: Clamp batch to MAX_SYNC_BATCH regardless of what peer claims
+        let end = end.min(start + MAX_SYNC_BATCH - 1);
         let blocks: Vec<Block> = (start..=end)
             .filter_map(|i| blockchain.load_block_from_storage(i))
             .collect();
@@ -470,13 +481,21 @@ impl Network {
         self.send_to_peer(addr, P2PMessage::Height(height)).await
     }
 
-    /// Handle get mempool request
+    /// Handle get mempool request — HIGH-3 FIX: cap response to 100 txs
     async fn handle_get_mempool(&self, addr: SocketAddr) -> Result<(), String> {
         let blockchain = self.blockchain.read().await;
-        let txs = blockchain.get_pending_transactions().clone();
-        
+        // HIGH-3 FIX: Return at most 100 transactions to prevent ~8.5 MB bandwidth DoS.
+        // Peers needing more can send a second GetMempool request.
+        let txs: Vec<Transaction> = blockchain
+            .get_pending_transactions()
+            .iter()
+            .take(100)
+            .cloned()
+            .collect();
+        drop(blockchain);
         self.send_to_peer(addr, P2PMessage::Mempool(txs)).await
     }
+
 
     /// Send message to specific peer
     async fn send_to_peer(&self, addr: SocketAddr, msg: P2PMessage) -> Result<(), String> {
@@ -583,10 +602,9 @@ impl Network {
                         if let Ok(stream) = TcpStream::connect(bootstrap_addr).await {
                             if let Ok(peer) = Peer::new(stream, bootstrap_addr).await {
                                 let peer = Arc::new(peer);
-                                let height = blockchain.read().await.get_chain().len() as u64;
+                                let height = blockchain.read().await.get_height();
                                 if peer.handshake(PROTOCOL_VERSION, height, node_id).await.is_ok() {
                                     if peer_manager.add_peer(Arc::clone(&peer)).await.is_ok() {
-                                        // Use centralized receive task instead of inline loop
                                         Self::start_peer_receive_task(peer, message_tx, peer_manager).await;
                                     }
                                 }

@@ -1,11 +1,13 @@
 use crate::network::protocol::{P2PMessage, serialize_message, deserialize_message, MAX_MESSAGE_SIZE};
-use std::net::SocketAddr;
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, RwLock};
-use tokio::time::{timeout, Duration};
-use tracing::{debug, info, warn};
+use tokio::time::timeout;
+use tracing::{info, warn};
 
 /// Information about a connected peer
 #[derive(Debug, Clone)]
@@ -34,7 +36,7 @@ impl Peer {
         address: SocketAddr,
     ) -> Result<Self, String> {
         let (shutdown_tx, _) = mpsc::channel(1);
-        
+
         let info = PeerInfo {
             address,
             node_id: String::new(),
@@ -60,26 +62,25 @@ impl Peer {
     pub async fn send_message(&self, msg: P2PMessage) -> Result<(), String> {
         let data = serialize_message(&msg)?;
         let len = data.len() as u32;
-        
+
         let mut write = self.write_half.write().await;
-        
+
         // Write length prefix (4 bytes) then message data
         write
             .write_all(&len.to_be_bytes())
             .await
             .map_err(|e| format!("Failed to write message length: {}", e))?;
-        
+
         write
             .write_all(&data)
             .await
             .map_err(|e| format!("Failed to write message data: {}", e))?;
-        
+
         write
             .flush()
             .await
             .map_err(|e| format!("Failed to flush stream: {}", e))?;
 
-        debug!("Sent message to {}: {:?}", self.info.read().await.address, msg);
         Ok(())
     }
 
@@ -104,27 +105,28 @@ impl Peer {
     /// Internal message receiving logic
     async fn receive_message_internal(&self) -> Result<P2PMessage, String> {
         let mut read = self.read_half.write().await;
-        
+
         // Read length prefix (4 bytes)
         let mut len_bytes = [0u8; 4];
         read
             .read_exact(&mut len_bytes)
             .await
             .map_err(|e| format!("Failed to read message length: {}", e))?;
-        
+
         let len = u32::from_be_bytes(len_bytes) as usize;
-        
+
         if len > MAX_MESSAGE_SIZE {
             return Err(format!("Message too large: {} > {}", len, MAX_MESSAGE_SIZE));
         }
-        
+
         // Read message data
         let mut data = vec![0u8; len];
         read
             .read_exact(&mut data)
             .await
             .map_err(|e| format!("Failed to read message data: {}", e))?;
-        
+
+        // CRIT-6: magic bytes verified inside deserialize_message (protocol.rs)
         deserialize_message(&data)
     }
 
@@ -141,7 +143,7 @@ impl Peer {
         self.info.read().await.clone()
     }
 
-    /// Add a strike to a peer for bad behavior. If strikes >= 3, flag for disconnect.
+    /// Add a strike to a peer for bad behavior. Returns true if the peer should be banned.
     pub async fn add_strike(&self) -> bool {
         let mut info = self.info.write().await;
         info.strikes += 1;
@@ -169,17 +171,17 @@ impl Peer {
             timestamp: chrono::Utc::now().timestamp(),
             node_id: our_node_id,
         };
-        
+
         self.send_message(version_msg).await?;
-        
+
         // Wait for their version
         match self.receive_message().await? {
             P2PMessage::Version { version, height, node_id, .. } => {
                 self.update_info(node_id, version, height).await;
-                
+
                 // Send verack
                 self.send_message(P2PMessage::VerAck).await?;
-                
+
                 // Wait for their verack
                 match self.receive_message().await? {
                     P2PMessage::VerAck => {
@@ -200,55 +202,112 @@ impl Peer {
     }
 }
 
-/// Peer connection manager for handling incoming/outgoing connections
+// ---------------------------------------------------------------------------
+// PeerManager
+// ---------------------------------------------------------------------------
+
+/// Peer connection manager for handling incoming/outgoing connections.
+///
+/// HIGH-4 FIX: Added persistent `banned_ips` map (IpAddr → Instant) so bans
+/// survive peer reconnections. An attacker can no longer reset their strike
+/// count by disconnecting and re-connecting.
+///
+/// MED-2 FIX: Sybil protection now covers both IPv4 /24 and IPv6 /48 subnets.
 pub struct PeerManager {
     peers: Arc<RwLock<Vec<Arc<Peer>>>>,
     max_peers: usize,
+    /// HIGH-4: Persistent IP ban list — IpAddr → ban expiry Instant
+    banned_ips: Arc<RwLock<HashMap<IpAddr, Instant>>>,
 }
+
+/// Duration of a peer ban triggered by 3+ strikes.
+const BAN_DURATION: Duration = Duration::from_secs(60 * 60); // 1 hour
 
 impl PeerManager {
     pub fn new(max_peers: usize) -> Self {
         Self {
             peers: Arc::new(RwLock::new(Vec::new())),
             max_peers,
+            banned_ips: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    /// Add a new peer connection (With Sybil Protection)
+    /// Add a new peer connection (Sybil Protection + IP Ban enforcement).
     pub async fn add_peer(&self, peer: Arc<Peer>) -> Result<(), String> {
+        let peer_addr = peer.address().await;
+        let peer_ip = peer_addr.ip();
+
+        // HIGH-4: Check persistent ban list BEFORE acquiring the peers write lock
+        {
+            let mut bans = self.banned_ips.write().await;
+            if let Some(&ban_expiry) = bans.get(&peer_ip) {
+                if Instant::now() < ban_expiry {
+                    return Err(format!(
+                        "IP {} is banned (ban expires in {}s)",
+                        peer_ip,
+                        ban_expiry.duration_since(Instant::now()).as_secs()
+                    ));
+                } else {
+                    // Ban has expired — remove it
+                    bans.remove(&peer_ip);
+                }
+            }
+        }
+
         let mut peers = self.peers.write().await;
-        
+
         if peers.len() >= self.max_peers {
             return Err("Max peers reached".to_string());
         }
-        
-        // Ensure no more than 2 connections from the same /24 subnet (Sybil Protection)
-        let peer_addr = peer.address().await;
+
+        // MED-2 + Existing FIX: Sybil subnet check for both IPv4 /24 and IPv6 /48
         let mut subnet_count = 0;
-        
+
         for p in peers.iter() {
             if let Ok(info) = p.info.try_read() {
                 // 1. Check exact match
                 if info.address == peer_addr {
                     return Err("Already connected to this peer".to_string());
                 }
-                
-                // 2. Check subnet match (IPv4 /24)
-                if let (std::net::IpAddr::V4(a), std::net::IpAddr::V4(b)) = (info.address.ip(), peer_addr.ip()) {
-                    if a.octets()[0..3] == b.octets()[0..3] {
-                        subnet_count += 1;
+
+                match (info.address.ip(), peer_ip) {
+                    // IPv4: compare first 3 octets (/24 subnet)
+                    (IpAddr::V4(a), IpAddr::V4(b)) => {
+                        if a.octets()[0..3] == b.octets()[0..3] {
+                            subnet_count += 1;
+                        }
                     }
+                    // MED-2 FIX: IPv6: compare first 6 bytes (/48 subnet)
+                    (IpAddr::V6(a), IpAddr::V6(b)) => {
+                        if a.octets()[0..6] == b.octets()[0..6] {
+                            subnet_count += 1;
+                        }
+                    }
+                    _ => {} // mixed IPv4/IPv6 — different subnets by definition
                 }
             }
         }
-        
+
         if subnet_count >= 2 {
-            return Err("Too many connections from this subnet (Sybil Protection)".to_string());
+            return Err(format!(
+                "Too many connections from subnet of {} (Sybil Protection — max 2 per /24 IPv4 or /48 IPv6)",
+                peer_ip
+            ));
         }
-        
+
         peers.push(peer);
-        info!("Peer added. Total peers: {}", peers.len());
+        info!("Peer {} added. Total peers: {}", peer_addr, peers.len());
         Ok(())
+    }
+
+    /// Ban an IP address for BAN_DURATION (HIGH-4).
+    ///
+    /// Called by the network layer when a peer accumulates 3+ strikes.
+    pub async fn ban_ip(&self, ip: IpAddr) {
+        let expiry = Instant::now() + BAN_DURATION;
+        self.banned_ips.write().await.insert(ip, expiry);
+        warn!("IP {} BANNED for {} minutes (persistent — survives reconnect)",
+            ip, BAN_DURATION.as_secs() / 60);
     }
 
     /// Remove a peer
@@ -273,8 +332,8 @@ impl PeerManager {
     /// Broadcast message to all peers (PARALLELIZED)
     pub async fn broadcast(&self, msg: P2PMessage) {
         let peers = self.peers.read().await.clone();
-        
-        // Spawn concurrent sends - don't let one slow peer block everyone
+
+        // Spawn concurrent sends — don't let one slow peer block everyone
         for peer in peers {
             let msg_clone = msg.clone();
             tokio::spawn(async move {
@@ -285,21 +344,27 @@ impl PeerManager {
         }
     }
 
-    /// Clean up dead peers
+    /// Clean up dead peers, banning IPs that have accumulated 3+ strikes.
     pub async fn cleanup_dead_peers(&self) {
-        let peers = self.peers.read().await;
+        let peers_snapshot = self.peers.read().await.clone();
         let mut alive_peers = Vec::new();
-        
-        for peer in peers.iter() {
+
+        for peer in peers_snapshot.iter() {
             if peer.is_alive().await {
                 alive_peers.push(Arc::clone(peer));
+            } else {
+                // HIGH-4: if peer was booted due to strikes, persist the ban
+                let info = peer.info.read().await;
+                if info.strikes >= 3 {
+                    self.ban_ip(info.address.ip()).await;
+                }
             }
         }
-        
-        let initial_count = peers.len();
-        drop(peers);
-        
+
+        let initial_count = peers_snapshot.len();
         let removed = initial_count - alive_peers.len();
+        drop(peers_snapshot);
+
         if removed > 0 {
             *self.peers.write().await = alive_peers;
             info!("Cleaned up {} dead peers", removed);

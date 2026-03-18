@@ -5,6 +5,7 @@ use crate::storage::{BlockchainStorage, StorageError};
 use serde::{Serialize, Deserialize};
 use parking_lot::RwLock;
 use std::sync::Arc;
+use std::collections::VecDeque;
 use thiserror::Error;
 use dashmap::DashMap;
 
@@ -97,6 +98,9 @@ const MINING_REWARD_LOCK_BLOCKS: u64 = 157_680; // 6 months vesting (182.5 days)
 
 // Security limits
 const MAX_MEMPOOL_SIZE: usize = 5000; // Maximum pending transactions
+/// HIGH-1 FIX: Per-sender limit — prevents a single address from griefing the
+/// mempool with thousands of incrementing-nonce transactions at zero cost.
+const MAX_MEMPOOL_TXS_PER_SENDER: usize = 25;
 // CRITICAL FIX (External Audit): Reduced from 2000 to 1200
 // Falcon-512 transactions are ~1713 bytes each (666 byte sig + 897 byte pubkey + overhead)
 // 2000 tx × 1713 bytes = 3.43 MB (exceeds 2 MB block size!)
@@ -105,13 +109,16 @@ const MAX_BLOCK_TRANSACTIONS: usize = 1200; // Maximum transactions per block
 // SECURITY FIX (External Audit): Increased from 1MB to 2MB
 // Falcon-512 signatures are 666 bytes each, so 1200 tx = ~2.06MB
 // Previous 1MB limit could only support ~583 transactions
-const MAX_BLOCK_SIZE_BYTES: usize = 2_097_152; // 2 MB max block size
+/// Exported so `storage::db` can enforce a matching decompress size cap (MED-5).
+pub const MAX_BLOCK_SIZE_BYTES: usize = 2_097_152; // 2 MB max block size
 const MAX_ORPHAN_BLOCKS: usize = 100; // Maximum orphaned blocks (prevents memory exhaustion)
 const MAX_TRANSACTION_SIZE_BYTES: usize = 102400; // 100KB max per transaction (prevents DOS)
 const MIN_TRANSACTION_FEE: u64 = 100; // 0.0001 QUA in microunits
 const TRANSACTION_EXPIRY_SECONDS: i64 = 86400; // 24 hours
 const COINBASE_MATURITY: u64 = 100; // Blocks before coinbase can be spent
 const MAX_FUTURE_BLOCK_TIME: i64 = 7200; // 2 hours maximum future timestamp
+/// LOW-1 FIX: Bound address string length to prevent unbounded HashMap key allocations.
+const MAX_ADDRESS_LEN: usize = 128;
 
 // CONSENSUS-CRITICAL: Genesis block hash (prevents chain split attacks)
 // Generated from Block::genesis() with timestamp 1735689600 (2026-01-01 00:00:00 UTC)
@@ -165,7 +172,7 @@ pub struct Blockchain {
     account_state: Arc<RwLock<AccountState>>,
     pending_nonces: Arc<DashMap<String, u64>>, // ATOMIC: Track highest pending nonce
     storage: Arc<BlockchainStorage>,
-    orphaned_blocks: Arc<RwLock<Vec<Block>>>,
+    orphaned_blocks: Arc<RwLock<VecDeque<Block>>>,
 
     // OPT-1: Signature verification cache
     // Saves ~1.5ms per cached Falcon-512 verification (80% hit rate in practice)
@@ -257,11 +264,14 @@ impl Blockchain {
         // Falcon-512 verification is CPU-bound, not I/O-bound.
         // Hyperthreading doubles logical CPUs but doesn't help for crypto — use physical only.
         // num_cpus::get_physical() returns real cores (e.g. 4 on an 8-logical-thread machine).
+        // LOW-5 FIX: Log rayon init errors (e.g. when running in tests where it's already initialized)
         let physical_cores = num_cpus::get_physical().max(1);
-        let _ = rayon::ThreadPoolBuilder::new()
+        if let Err(e) = rayon::ThreadPoolBuilder::new()
             .num_threads(physical_cores)
             .thread_name(|i| format!("quanta-verify-{}", i))
-            .build_global();
+            .build_global() {
+            tracing::warn!("Could not configure rayon thread pool: {} (using default config)", e);
+        }
         tracing::info!("Rayon thread pool: {} physical cores for Falcon-512 verification", physical_cores);
 
         Ok(Self {
@@ -270,7 +280,7 @@ impl Blockchain {
             account_state: Arc::new(RwLock::new(account_state)),
             pending_nonces: Arc::new(DashMap::new()),
             storage,
-            orphaned_blocks: Arc::new(RwLock::new(Vec::new())),
+            orphaned_blocks: Arc::new(RwLock::new(VecDeque::new())),
             // OPT-1: Signature verification cache (100k entries)
             signature_cache: Arc::new(Mutex::new(
                 LruCache::new(NonZeroUsize::new(100_000).unwrap())
@@ -321,6 +331,11 @@ impl Blockchain {
         if transaction.is_coinbase() {
             self.pending_transactions.write().push(transaction);
             return Ok(());
+        }
+
+        // LOW-1 FIX: Reject excessively long addresses to prevent unbounded key allocations
+        if transaction.sender.len() > MAX_ADDRESS_LEN || transaction.recipient.len() > MAX_ADDRESS_LEN {
+            return Err(BlockchainError::InvalidBlock);
         }
 
         // Check mempool size limit
@@ -379,6 +394,16 @@ impl Blockchain {
                 available,
             });
         }
+
+        // HIGH-1 FIX: Per-sender mempool limit — prevents griefing the mempool
+        // by submitting thousands of incrementing-nonce txs from a single address.
+        {
+            let pending = self.pending_transactions.read();
+            let sender_count = pending.iter().filter(|t| t.sender == transaction.sender).count();
+            if sender_count >= MAX_MEMPOOL_TXS_PER_SENDER {
+                return Err(BlockchainError::MempoolFull(sender_count));
+            }
+        }
         
         // OPT-2 (PQC): Bloom filter duplicate check — O(1) instead of O(n) scan
         // At 1200 pending txs × 1713 bytes each, O(n) scan wastes ~2MB of cache per add.
@@ -404,6 +429,7 @@ impl Blockchain {
         tracing::info!("Transaction added to mempool");
         Ok(())
     }
+
 
     /// Create a block template for mining (does not mine or save)
     pub fn create_block_template(&self, miner_address: String) -> Result<Block, BlockchainError> {
@@ -550,7 +576,21 @@ impl Blockchain {
                 block.timestamp - current_time, MAX_FUTURE_BLOCK_TIME);
             return Err(BlockchainError::InvalidBlock);
         }
-        // Prevent backdating/forward-dating (within 2 hours of previous block)
+        // MED-1 FIX: Apply Median-Time-Past (MTP) rule — classic time-warp defense.
+        // Block timestamp must be strictly greater than the median of the last 11 blocks.
+        // This prevents a majority miner from drifting timestamps forward to manipulate
+        // difficulty downward (Bitcoin BIP-113 equivalent).
+        if previous.index >= 10 {
+            let mtp = self.median_time_past(previous.index, 11);
+            if block.timestamp <= mtp {
+                tracing::warn!(
+                    "Block timestamp {} <= MTP {} (time-warp attack rejected)",
+                    block.timestamp, mtp
+                );
+                return Err(BlockchainError::InvalidBlock);
+            }
+        }
+        // Prevent large backward jumps (within 2 hours of previous block)
         // EXCEPTION: Allow large gap for block 1 (genesis to first mined block)
         const MAX_TIME_DELTA: i64 = 7200; // 2 hours
         if previous.index > 0 && (block.timestamp > previous.timestamp + MAX_TIME_DELTA ||
@@ -673,9 +713,13 @@ impl Blockchain {
 
                 // Cache miss — do full Falcon-512 verification
                 let is_valid = tx.verify();
-                {
+                // CRIT-4 FIX: Only cache SUCCESSFUL verifications.
+                // Caching false would let an attacker poison the cache:
+                // submit one invalid tx, then valid txs with the same hash
+                // are permanently rejected from this node (desync attack).
+                if is_valid {
                     let mut cache = self.signature_cache.lock().unwrap();
-                    cache.put(tx_hash, is_valid);
+                    cache.put(tx_hash, true);
                 }
                 is_valid
             });
@@ -903,31 +947,35 @@ impl Blockchain {
     }
 
     /// Calculate total coin supply (u64 microunits)
-    /// SECURITY FIX (CRITICAL-3): Accounts for burned fees (70% of transaction fees)
+    ///
+    /// HIGH-7 FIX: Previously scanned self.chain (genesis only!), always returning
+    /// a near-zero value and corrupting BlockchainStats / inflation monitoring.
+    /// Now derives supply from the block-reward formula using chain height — O(1),
+    /// no disk scan needed, and always correct regardless of pruning mode.
     fn calculate_total_supply(&self) -> u64 {
-        let chain = self.chain.read();
-        
-        // Sum all coinbase + treasury emissions (money created)
-        let total_minted: u64 = chain
-            .iter()
-            .flat_map(|block| &block.transactions)
-            .filter(|tx| tx.is_coinbase() || tx.sender == "TREASURY")
-            .map(|tx| tx.amount)
-            .sum();
-        
-        // Calculate all transaction fees
-        let total_fees: u64 = chain
-            .iter()
-            .flat_map(|block| &block.transactions)
-            .filter(|tx| !tx.is_coinbase() && tx.sender != "TREASURY")
-            .map(|tx| tx.fee)
-            .sum();
-        
-        // 70% of fees are burned (FEE_BURN_PERCENT constant)
-        let total_burned = (total_fees * FEE_BURN_PERCENT as u64) / 100;
-        
-        // Total supply = minted - burned
-        total_minted.saturating_sub(total_burned)
+        let height = self.get_height();
+        if height == 0 {
+            return 0;
+        }
+        let mut total_minted: u64 = 0;
+        let full_years = height / BLOCKS_PER_YEAR;
+        // Sum rewards year-by-year using the exact integer formula
+        for y in 0..full_years {
+            let reward = apply_annual_reduction(YEAR_1_REWARD, y);
+            // Each full year has BLOCKS_PER_YEAR blocks.
+            // Miner gets 95% of reward; split 50/50 immediate/locked.
+            // Supply counts ALL minted coins (immediate + locked).
+            total_minted = total_minted.saturating_add(
+                reward.saturating_mul(BLOCKS_PER_YEAR)
+            );
+        }
+        // Remaining blocks in the current year
+        let remaining = height % BLOCKS_PER_YEAR;
+        if remaining > 0 {
+            let reward = apply_annual_reduction(YEAR_1_REWARD, full_years);
+            total_minted = total_minted.saturating_add(reward.saturating_mul(remaining));
+        }
+        total_minted
     }
 
     /// Get balance for an address (u64 microunits)
@@ -956,21 +1004,27 @@ impl Blockchain {
         self.pending_transactions.write()
     }
 
-    /// Get account state (mutable)
+    /// Get account state (mutable) — for use by internal block-application logic.
     pub fn get_account_state_mut(&self) -> parking_lot::RwLockWriteGuard<'_, AccountState> {
         self.account_state.write()
+    }
+
+    /// Get account state (read-only) — HIGH-8 FIX: use this in API handlers to avoid
+    /// holding a write guard while the outer tokio read lock is held (deadlock risk).
+    pub fn get_account_state_read(&self) -> parking_lot::RwLockReadGuard<'_, AccountState> {
+        self.account_state.read()
     }
 
     /// Add a block received from the network (WITH FULL VALIDATION AND FORK RESOLUTION)
     pub fn add_network_block(&self, block: Block) -> Result<(), BlockchainError> {
         let latest = self.get_latest_block();
         
-        // 1. Check if we already have this block
-        let chain = self.chain.read();
-        if chain.iter().any(|b| b.hash == block.hash) {
+        // 1. HIGH-9 FIX: Check storage, not in-memory genesis-only chain.
+        // Previously, has_block returned false for every block except genesis,
+        // causing duplicate disk writes and tx-index corruption.
+        if self.has_block(&block.hash) {
             return Ok(()); // Already have it
         }
-        drop(chain);
         
         // 2. FORK DETECTION: Check if this block builds on our chain
         if block.previous_hash == latest.hash && block.index == latest.index + 1 {
@@ -981,8 +1035,13 @@ impl Blockchain {
             tracing::warn!("Fork detected: Block {} at height {}, we're at {}", 
                 &block.hash[..8], block.index, latest.index);
             
-            // SECURITY FIX (CRITICAL-6): Validate orphan blocks before storing (DoS prevention)
-            // Check basic cryptographic validity to prevent garbage storage
+            // MED-4 FIX: Verify PoW difficulty meets minimum BEFORE storing orphan.
+            // Previously, any block passing a cheap hash-format check could fill
+            // the orphan pool — now it must meet minimum difficulty too.
+            if block.difficulty < MIN_DIFFICULTY {
+                tracing::warn!("Rejecting orphan block: difficulty {} < minimum {}", block.difficulty, MIN_DIFFICULTY);
+                return Err(BlockchainError::InvalidBlock);
+            }
             if !block.has_valid_hash() {
                 tracing::warn!("Rejecting orphan block with invalid PoW");
                 return Err(BlockchainError::InvalidBlock);
@@ -996,25 +1055,27 @@ impl Blockchain {
                 return Err(BlockchainError::InvalidBlock);
             }
             
-            // Store as orphaned block (with size limit)
+            // Store as orphaned block (MED-3 FIX: VecDeque::pop_front is O(1) vs Vec::remove(0))
             let mut orphans = self.orphaned_blocks.write();
             if orphans.len() >= MAX_ORPHAN_BLOCKS {
                 tracing::warn!("Max orphan blocks reached, dropping oldest");
-                orphans.remove(0);
+                orphans.pop_front(); // O(1) instead of O(n) Vec::remove(0)
             }
-            orphans.push(block.clone());
+            orphans.push_back(block.clone());
             drop(orphans);
             
-            // Try to resolve fork by fetching missing blocks
-            // (This would trigger sync - simplified for now)
-            tracing::info!("Stored orphaned block, need to sync");
+            tracing::info!("Stored orphaned block at height {}, need to sync", block.index);
             return Ok(());
         } else if block.index == latest.index {
             // Competing block at same height - apply longest chain rule
             tracing::warn!("Competing block at height {}: {} vs {}", 
                 block.index, &block.hash[..8], &latest.hash[..8]);
             
-            // SECURITY FIX (CRITICAL-6): Validate before storing
+            // MED-4 FIX: same PoW check for competing blocks
+            if block.difficulty < MIN_DIFFICULTY {
+                tracing::warn!("Rejecting competing block: difficulty below minimum");
+                return Err(BlockchainError::InvalidBlock);
+            }
             if !block.has_valid_hash() {
                 tracing::warn!("Rejecting competing block with invalid PoW");
                 return Err(BlockchainError::InvalidBlock);
@@ -1027,14 +1088,13 @@ impl Blockchain {
                 return Err(BlockchainError::InvalidBlock);
             }
             
-            // For now, keep our block (in production: compare total work)
-            // TODO: Implement total difficulty comparison
+            // Keep our block (in production: compare total difficulty to pick longer chain)
             let mut orphans = self.orphaned_blocks.write();
             if orphans.len() >= MAX_ORPHAN_BLOCKS {
-                tracing::warn!("Max orphan blocks reached, dropping oldest");
-                orphans.remove(0);
+                tracing::warn!("Max competing blocks reached, dropping oldest");
+                orphans.pop_front();
             }
-            orphans.push(block);
+            orphans.push_back(block);
             drop(orphans);
             return Ok(());
         } else {
@@ -1108,11 +1168,29 @@ impl Blockchain {
         Ok(())
     }
 
-    /// Check if a block exists in the chain
+    /// Check if a block exists in the chain by hash.
+    ///
+    /// HIGH-9 FIX: Previously only checked the in-memory chain (genesis only!),
+    /// returning false for all mined blocks and causing duplicate disk saves +
+    /// tx-index corruption. Now checks storage directly.
     #[allow(dead_code)]
     pub fn has_block(&self, hash: &str) -> bool {
-        let chain = self.chain.read();
-        chain.iter().any(|b| b.hash == hash)
+        // Fast path: genesis is in memory
+        if let Some(genesis) = self.chain.read().first() {
+            if genesis.hash == hash {
+                return true;
+            }
+        }
+        // Check storage for all other heights
+        let height = self.get_height();
+        for i in 1..height {
+            if let Ok(b) = self.storage.load_block(i) {
+                if b.hash == hash {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Get block by height
@@ -1130,6 +1208,30 @@ impl Blockchain {
     /// Load a specific block by height from disk (used by network sync handlers)
     pub fn load_block_from_storage(&self, height: u64) -> Option<crate::core::block::Block> {
         self.storage.load_block(height).ok()
+    }
+
+    /// Compute Bitcoin-style Median Time Past (MTP) over the last `n` blocks.
+    ///
+    /// MED-1 FIX: Used by `validate_block_consensus` to enforce that incoming
+    /// block timestamps are strictly greater than the median of the preceding
+    /// `n` block timestamps (standard is 11). Prevents time-warp attacks.
+    fn median_time_past(&self, tip_index: u64, n: usize) -> i64 {
+        let count = (tip_index + 1).min(n as u64) as usize;
+        let mut timestamps: Vec<i64> = Vec::with_capacity(count);
+
+        for i in 0..count {
+            let height = tip_index.saturating_sub(i as u64);
+            if let Ok(b) = self.storage.load_block(height) {
+                timestamps.push(b.timestamp);
+            }
+        }
+
+        if timestamps.is_empty() {
+            return 0;
+        }
+
+        timestamps.sort_unstable();
+        timestamps[timestamps.len() / 2]
     }
 }
 

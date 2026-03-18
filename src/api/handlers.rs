@@ -5,7 +5,15 @@ use axum::{
     http::Method,
     response::IntoResponse,
 };
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::cors::CorsLayer;
+use tower::ServiceBuilder;
+use axum::middleware::{self, Next};
+use axum::extract::ConnectInfo;
+use axum::extract::Request;
+use axum::response::Response;
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -90,8 +98,59 @@ async fn get_balance(
     })
 }
 
-/// Create and submit a transaction
-async fn create_transaction(
+/// CRIT-1 FIX: Password-over-HTTP endpoint replaced with pre-signed submission.
+///
+/// `POST /api/transactions/submit` — accepts a fully-signed Transaction JSON.
+/// Clients must sign locally (CLI: `quanta-wallet sign`, or use a hardware wallet).
+/// No password or private key ever leaves the user's machine.
+async fn submit_signed_transaction(
+    State(state): State<Arc<ApiState>>,
+    Json(tx): Json<Transaction>,
+) -> (StatusCode, Json<TransactionResponse>) {
+    // Validate the transaction has a non-empty signature before accepting
+    if tx.signature.is_empty() || tx.public_key.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(TransactionResponse {
+                success: false,
+                tx_hash: None,
+                error: Some("Transaction must be pre-signed (signature and public_key required)".to_string()),
+            }),
+        );
+    }
+
+    let blockchain = state.blockchain.read().await;
+    match blockchain.add_transaction(tx.clone()) {
+        Ok(_) => {
+            let tx_hash = tx.hash();
+            drop(blockchain);
+            if let Some(ref network) = state.network {
+                network.broadcast_transaction(tx).await;
+            }
+            (
+                StatusCode::OK,
+                Json(TransactionResponse {
+                    success: true,
+                    tx_hash: Some(tx_hash),
+                    error: None,
+                }),
+            )
+        }
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(TransactionResponse {
+                success: false,
+                tx_hash: None,
+                error: Some(format!("Transaction failed: {}", e)),
+            }),
+        ),
+    }
+}
+
+/// DEPRECATED local-signing endpoint — kept for single-node dev use ONLY.
+/// MUST NOT be exposed to the public internet or used without TLS.
+#[deprecated(note = "Use POST /api/transactions/submit with pre-signed transactions")]
+async fn create_transaction_local_only(
     State(state): State<Arc<ApiState>>,
     Json(req): Json<CreateTransactionRequest>,
 ) -> (StatusCode, Json<TransactionResponse>) {
@@ -110,9 +169,9 @@ async fn create_transaction(
         }
     };
 
-    // Get current nonce
+    // Get current nonce using read-only accessor (HIGH-8 FIX: avoids write-lock deadlock)
     let blockchain = state.blockchain.read().await;
-    let current_nonce = blockchain.get_account_state_mut().get_nonce(&wallet.address);
+    let current_nonce = blockchain.get_account_state_read().get_nonce(&wallet.address);
     let next_nonce = current_nonce + 1;
     drop(blockchain);
 
@@ -125,24 +184,22 @@ async fn create_transaction(
     );
     tx.nonce = next_nonce;
 
-    // Sign transaction
-    let signature = wallet.keypair.sign_transaction_data(&tx.get_signing_data());
-    
+    // MED-6 FIX: Use sign_transaction_canonical(&get_signing_bytes()) to avoid
+    // the double-hash bug (sign_transaction_data was hashing an already-hashed input).
+    let signing_bytes = tx.get_signing_bytes();
+    let signature = wallet.keypair.sign_transaction_canonical(&signing_bytes);
     tx.signature = signature;
     tx.public_key = wallet.keypair.public_key.clone();
 
     // Submit to blockchain
-    let blockchain = state.blockchain.write().await;
+    let blockchain = state.blockchain.read().await;
     match blockchain.add_transaction(tx.clone()) {
         Ok(_) => {
             let tx_hash = tx.hash();
-            
-            // Broadcast to network if available
             drop(blockchain);
             if let Some(ref network) = state.network {
                 network.broadcast_transaction(tx).await;
             }
-            
             (
                 StatusCode::OK,
                 Json(TransactionResponse {
@@ -152,18 +209,17 @@ async fn create_transaction(
                 }),
             )
         }
-        Err(e) => {
-            (
-                StatusCode::BAD_REQUEST,
-                Json(TransactionResponse {
-                    success: false,
-                    tx_hash: None,
-                    error: Some(format!("Transaction failed: {}", e)),
-                }),
-            )
-        }
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(TransactionResponse {
+                success: false,
+                tx_hash: None,
+                error: Some(format!("Transaction failed: {}", e)),
+            }),
+        ),
     }
 }
+
 
 /// Mine request
 #[derive(Deserialize)]
@@ -182,6 +238,24 @@ async fn mine_block(
     State(state): State<Arc<ApiState>>,
     Json(req): Json<MineRequest>,
 ) -> (StatusCode, Json<MineResponse>) {
+    // HIGH-5 FIX: Validate miner_address format before mining.
+    // Prevents reward theft via malformed or adversarial addresses.
+    fn valid_miner_addr(addr: &str) -> bool {
+        addr.starts_with("0x")
+            && addr.len() == 42
+            && addr[2..].chars().all(|c| c.is_ascii_hexdigit())
+    }
+    if !valid_miner_addr(&req.miner_address) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(MineResponse {
+                success: false,
+                block_index: None,
+                error: Some("Invalid miner_address: must be 0x-prefixed 40-char hex (e.g. 0xabcdef...)".to_string()),
+            }),
+        );
+    }
+
     // 1. Create template (Lock held briefly)
     let template_res = state.blockchain.read().await.create_block_template(req.miner_address.clone());
 
@@ -250,6 +324,7 @@ async fn mine_block(
         }
     }
 }
+
 
 /// Start continuous mining
 async fn start_continuous_mining(
@@ -467,21 +542,21 @@ async fn get_metrics(
     )
 }
 
-/// Get specific block by height
+/// Get specific block by height — CRIT-5 FIX: reads from storage, not in-memory chain
 async fn get_block(
     State(state): State<Arc<ApiState>>,
     Path(height): Path<u64>,
 ) -> Result<Json<Block>, StatusCode> {
     let blockchain = state.blockchain.read().await;
-    let block = blockchain.get_chain().get(height as usize).cloned();
-    drop(blockchain);
-    
-    if let Some(block) = block {
-        Ok(Json(block))
-    } else {
-        Err(StatusCode::NOT_FOUND)
+    // CRIT-5 FIX: Previous implementation called get_chain().get(height) which
+    // only accessed the genesis block — every height > 0 returned 404.
+    // load_block_from_storage reads from sled disk DB (the actual chain).
+    match blockchain.load_block_from_storage(height) {
+        Some(block) => Ok(Json(block)),
+        None => Err(StatusCode::NOT_FOUND),
     }
 }
+
 
 /// Get mempool transactions
 #[derive(Serialize)]
@@ -540,7 +615,33 @@ async fn health_check(
     })
 }
 
-/// Create the API router with rate limiting (DOS protection)
+static RATE_LIMITS: std::sync::OnceLock<DashMap<std::net::IpAddr, (u32, Instant)>> = std::sync::OnceLock::new();
+
+/// Custom Rate Limiter (CRIT-2 FIX) — 10 requests/sec per IP burst limit.
+/// Used instead of tower_governor to avoid axum 0.7 compatibility issues.
+async fn rate_limiter(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    let limits = RATE_LIMITS.get_or_init(DashMap::new);
+    let mut entry = limits.entry(addr.ip()).or_insert((0, Instant::now()));
+    let (count, time) = entry.value_mut();
+
+    if time.elapsed() > Duration::from_secs(1) {
+        *count = 0;
+        *time = Instant::now();
+    }
+
+    *count += 1;
+    if *count > 10 {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    Ok(next.run(request).await)
+}
+
+/// Create the API router with rate limiting (DoS protection)
 pub fn create_router(
     blockchain: Arc<RwLock<Blockchain>>,
     metrics: Option<Arc<crate::consensus::mempool::MetricsCollector>>,
@@ -553,21 +654,25 @@ pub fn create_router(
         mining_active: Arc::new(AtomicBool::new(false)),
     });
 
-    // Configure CORS to allow requests from any origin
+    // CRIT-1 FIX: CORS restricted to localhost only (no wildcard origin).
+    // Public-internet nodes MUST configure an explicit allowed origin via config.
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin(
+            "http://localhost:3000"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid CORS origin"),
+        )
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers(Any);
-
-    // NOTE: Rate limiting commented out due to compatibility issues with axum 0.7
-    // TODO: Implement rate limiting using axum-compatible middleware
-    // Consider using tower::limit::RateLimitLayer or axum-specific rate limiting
+        .allow_headers(tower_http::cors::Any);
 
     Router::new()
         .route("/health", get(health_check))
         .route("/api/stats", get(get_stats))
         .route("/api/balance", post(get_balance))
-        .route("/api/transaction", post(create_transaction))
+        // CRIT-1: New pre-signed tx submission endpoint (no password needed)
+        .route("/api/transactions/submit", post(submit_signed_transaction))
+        // Old endpoint kept but hidden — disabled in public builds
+        // .route("/api/transaction", post(create_transaction_local_only))
         .route("/api/mine", post(mine_block))
         .route("/api/mine/start", post(start_continuous_mining))
         .route("/api/mine/stop", post(stop_continuous_mining))
@@ -577,39 +682,50 @@ pub fn create_router(
         .route("/api/metrics", get(get_metrics))
         .route("/api/block/:height", get(get_block))
         .route("/api/mempool", get(get_mempool))
-        .layer(cors)
+        .layer(
+            ServiceBuilder::new()
+                .layer(middleware::from_fn(rate_limiter))
+                .layer(cors)
+        )
         .with_state(state)
 }
 
-/// Start the API server
+
+/// Start the API server.
+///
+/// CRIT-1 FIX: Binds to `127.0.0.1` (localhost only) unless TLS is configured.
+/// Prevents password interception by blocking external access to the API port.
 pub async fn start_server(
     blockchain: Arc<RwLock<Blockchain>>,
     port: u16,
     metrics: Option<Arc<crate::consensus::mempool::MetricsCollector>>,
     network: Option<Arc<crate::network::Network>>,
+    tls_enabled: bool,
 ) {
     let app = create_router(blockchain, metrics, network);
-    let addr = format!("0.0.0.0:{}", port);
+
+    // CRIT-1 FIX: Only bind to 0.0.0.0 when TLS is active; otherwise localhost only.
+    let bind_host = if tls_enabled { "0.0.0.0" } else { "127.0.0.1" };
+    let addr = format!("{}:{}", bind_host, port);
     
-    tracing::info!("QUANTA API server starting on {}", addr);
+    tracing::info!("QUANTA API server starting on {} (TLS={})", addr, tls_enabled);
     tracing::info!("Endpoints:");
     tracing::info!("   GET  /health - Health check");
     tracing::info!("   GET  /api/stats - Get blockchain statistics");
     tracing::info!("   POST /api/balance - Get address balance");
-    tracing::info!("   POST /api/transaction - Create transaction");
+    tracing::info!("   POST /api/transactions/submit - Submit pre-signed transaction");
     tracing::info!("   POST /api/mine - Mine a block");
     tracing::info!("   GET  /api/validate - Validate blockchain");
     tracing::info!("   GET  /api/peers - Get connected peers");
     tracing::info!("   GET  /api/metrics - Get node metrics");
     tracing::info!("   GET  /api/block/:height - Get specific block");
     tracing::info!("   GET  /api/mempool - Get pending transactions");
-    tracing::info!("   POST /api/merkle/proof - Get Merkle proof for transaction");
     
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .expect("Failed to bind server");
     
-    axum::serve(listener, app)
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .expect("Server error");
 }

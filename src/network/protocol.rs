@@ -117,14 +117,20 @@ pub trait MessageHandler: Send + Sync {
     async fn handle_get_mempool(&self) -> Result<Vec<Transaction>, String>;
 }
 
-/// Serialize a message for network transmission (COMPRESSED)
+/// Serialize a P2P message with network magic bytes for transmission.
+///
+/// CRIT-6 FIX: Wraps every message in NetworkMessage with the correct magic
+/// bytes before compressing. Receiving nodes verify the magic before
+/// accepting — cross-network message injection is rejected.
 pub fn serialize_message(msg: &P2PMessage) -> Result<Vec<u8>, String> {
-    // 1. Serialize to bincode
-    let serialized = bincode::serialize(msg)
+    // 1. Wrap with magic bytes (prevents testnet/mainnet mixing)
+    let wrapped = NetworkMessage::create(msg.clone());
+    
+    // 2. Serialize wrapped message to bincode
+    let serialized = bincode::serialize(&wrapped)
         .map_err(|e| format!("Serialization error: {}", e))?;
     
-    // 2. Compress with Zstd (Level 3 - good balance)
-    // Only compress if > 1KB to avoid overhead on small/ping messages
+    // 3. Compress with Zstd (Level 3) only for messages > 1KB
     if serialized.len() > 1024 {
         zstd::encode_all(serialized.as_slice(), 3)
             .map_err(|e| format!("Compression error: {}", e))
@@ -133,7 +139,12 @@ pub fn serialize_message(msg: &P2PMessage) -> Result<Vec<u8>, String> {
     }
 }
 
-/// Deserialize a message from network data (DECOMPRESSED)
+/// Deserialize a P2P message from wire data, verifying network magic bytes.
+///
+/// CRIT-6 FIX: Decodes NetworkMessage wrapper and verifies magic bytes before
+/// returning the inner P2PMessage. Rejects cross-network injections.
+/// HIGH-6 FIX: take() limit is now strictly MAX_MESSAGE_SIZE (was +1), and
+/// decompressed buffer is pre-allocated with a capacity cap.
 pub fn deserialize_message(data: &[u8]) -> Result<P2PMessage, String> {
     if data.len() > MAX_MESSAGE_SIZE {
         return Err("Message too large".to_string());
@@ -141,18 +152,18 @@ pub fn deserialize_message(data: &[u8]) -> Result<P2PMessage, String> {
 
     // 1. Try to decompress (detect zstd magic bytes)
     // Zstd magic: 0xFD2FB528 (LE) -> [0x28, 0xB5, 0x2F, 0xFD]
-    let is_compressed = data.len() >= 4 && 
+    let is_compressed = data.len() >= 4 &&
         data[0] == 0x28 && data[1] == 0xB5 && data[2] == 0x2F && data[3] == 0xFD;
 
     let decompressed = if is_compressed {
         let mut decoder = zstd::stream::Decoder::new(data)
             .map_err(|e| format!("Decompression error: {}", e))?;
-        let mut decomp_data = Vec::new();
-        // Limit to MAX_MESSAGE_SIZE to prevent Zip Bomb OOM
-        std::io::Read::take(&mut decoder, MAX_MESSAGE_SIZE as u64 + 1)
+        // HIGH-6 FIX: Pre-allocate with strict cap; take() = MAX exactly (no +1)
+        let mut decomp_data = Vec::with_capacity(MAX_MESSAGE_SIZE);
+        std::io::Read::take(&mut decoder, MAX_MESSAGE_SIZE as u64)
             .read_to_end(&mut decomp_data)
             .map_err(|e| format!("Decompression read error: {}", e))?;
-            
+
         if decomp_data.len() > MAX_MESSAGE_SIZE {
             return Err("Decompressed message too large".to_string());
         }
@@ -160,9 +171,20 @@ pub fn deserialize_message(data: &[u8]) -> Result<P2PMessage, String> {
     } else {
         data.to_vec()
     };
-            
-    // 2. Deserialize from bincode
-    bincode::deserialize(&decompressed)
-        .map_err(|e| format!("Deserialization error: {}", e))
+
+    // 2. Deserialize the NetworkMessage wrapper
+    let wrapped: NetworkMessage = bincode::deserialize(&decompressed)
+        .map_err(|e| format!("Deserialization error: {}", e))?;
+
+    // 3. CRIT-6: Verify network magic bytes — reject cross-network messages
+    if !wrapped.verify() {
+        return Err(format!(
+            "Network magic mismatch: expected {:?}, got {:?}. \
+             Cross-network message injection rejected.",
+            NETWORK_MAGIC, wrapped.magic
+        ));
+    }
+
+    Ok(wrapped.message)
 }
 
