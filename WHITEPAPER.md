@@ -329,6 +329,7 @@ Block {
     transactions:  Vec<Tx>,      // Up to 1,200 transactions (2 MB limit with Falcon-512)
     previous_hash: String,       // SHA3-256 hash of prior block (chain linking)
     merkle_root:   String,       // SHA3-256 Merkle root of all transaction hashes
+    state_root:    String,       // SHA3-256 State commitment for SPV proofs
     nonce:         u64,          // Proof-of-work nonce
     difficulty:    u32,          // Leading-zero difficulty target
     hash:          String        // double-SHA3-256 of block header fields
@@ -372,6 +373,7 @@ Transaction {
     amount:     u64,          // Amount in microunits (1 QUA = 1,000,000 microunits)
     fee:        u64,          // Transaction fee in microunits (min: 100)
     nonce:      u64,          // Monotonic account nonce (replay prevention)
+    lock_time:  u64,          // Fee sniping defense (block height constraint)
     timestamp:  i64,          // Creation time; rejected if > 24 hours old
     signature:  Vec<u8>,      // Falcon-512 signed-message blob (33–698 bytes)
     public_key: Vec<u8>,      // Falcon-512 public key (must be exactly 897 bytes)
@@ -618,8 +620,9 @@ Initial sync speed: limited by bandwidth (~500 KB/block compressed) and CPU (225
 - Maximum transaction size: 100 KB
 - Strict pre-check rejection of malformed crypto inputs
 
-#### Sybil Attack
+#### Sybil Attack and Eclipse Attacks
 **Mitigation**:
+- Address Bucketing (Addrman): Outbound peer connections are rigorously bucketed across distinct network subnets, preventing IP clustering.
 - Proof-of-work requirement for block production (CPU investment required)
 - Maximum 125 peer connections (bounds sybil influence)
 - Peer diversity through multiple DNS seed domains

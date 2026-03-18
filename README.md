@@ -554,8 +554,11 @@ curl http://localhost:7777/health
 
 ### Network Security
 
+- **Address Bucketing (Eclipse Defense)**: P2P connections are strictly bucketed across diverse IP subnets (Addrman strategy), mitigating Eclipse and Sybil attacks.
+- **State Commitments (SPV Support)**: The `state_root` field is included in every block header, providing a tamper-proof cryptographic commitment to the global state for light clients.
 - **DoS Protection**: 2 MB message limit, 5000 transaction mempool cap
 - **Replay Protection**: Monotonic nonces, 24-hour transaction expiry
+- **Fee Sniping Defense**: `lock_time` bounds transaction execution to prevent block reorganization theft.
 - **51% Attack Mitigation**: Checkpoint system
 - **Timestamp Validation**: Blocks within 2 hours of current time
 
