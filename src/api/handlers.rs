@@ -13,7 +13,9 @@ use axum::extract::Request;
 use axum::response::Response;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use dashmap::DashMap;
+use std::num::NonZeroUsize;
+use lru::LruCache;
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -615,26 +617,42 @@ async fn health_check(
     })
 }
 
-static RATE_LIMITS: std::sync::OnceLock<DashMap<std::net::IpAddr, (u32, Instant)>> = std::sync::OnceLock::new();
+static RATE_LIMITS: std::sync::OnceLock<Mutex<LruCache<std::net::IpAddr, (u32, Instant)>>> = std::sync::OnceLock::new();
 
 /// Custom Rate Limiter (CRIT-2 FIX) — 10 requests/sec per IP burst limit.
-/// Used instead of tower_governor to avoid axum 0.7 compatibility issues.
+/// SECURITY: Wrapped in LruCache (max 100,000 IPs) instead of DashMap to 
+/// prevent memory exhaustion (OOM) under distributed botnet attacks.
 async fn rate_limiter(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let limits = RATE_LIMITS.get_or_init(DashMap::new);
-    let mut entry = limits.entry(addr.ip()).or_insert((0, Instant::now()));
-    let (count, time) = entry.value_mut();
+    let limits = RATE_LIMITS.get_or_init(|| Mutex::new(LruCache::new(NonZeroUsize::new(100_000).unwrap())));
+    
+    let allow = {
+        let mut cache = limits.lock();
+        let ip = addr.ip();
+        let now = Instant::now();
+        
+        match cache.get_mut(&ip) {
+            Some((count, time)) => {
+                if now.duration_since(*time) > Duration::from_secs(1) {
+                    *count = 1;
+                    *time = now;
+                    true
+                } else {
+                    *count += 1;
+                    *count <= 10
+                }
+            }
+            None => {
+                cache.put(ip, (1, now));
+                true
+            }
+        }
+    };
 
-    if time.elapsed() > Duration::from_secs(1) {
-        *count = 0;
-        *time = Instant::now();
-    }
-
-    *count += 1;
-    if *count > 10 {
+    if !allow {
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
 
