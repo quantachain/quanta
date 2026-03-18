@@ -554,6 +554,46 @@ mod tests {
     }
 
     #[test]
+    fn test_signing_data_changes_with_lock_time() {
+        let kp = FalconKeypair::generate();
+        let mut tx1 = Transaction::new(kp.get_address(), "0xrecip".into(), 100, 0);
+        tx1.public_key = kp.public_key.clone();
+        let mut tx2 = tx1.clone();
+        tx2.lock_time = 1_000_000;
+        assert_ne!(
+            tx1.get_signing_data(),
+            tx2.get_signing_data(),
+            "Different lock_times must produce different signing hashes"
+        );
+    }
+
+    fn insert_balance(state: &mut AccountState, address: &str, balance: u64) {
+        state.accounts.insert(address.to_string(), AccountBalance {
+            address: address.to_string(),
+            balance,
+            nonce: 0,
+            locked_balances: Vec::new(),
+        });
+    }
+
+    #[test]
+    fn test_calculate_state_root_deterministic() {
+        let mut state = AccountState::new();
+        insert_balance(&mut state, "0xAlice", 1000);
+        insert_balance(&mut state, "0xBob", 500);
+        let root1 = state.calculate_state_root();
+        
+        let mut state2 = AccountState::new();
+        // Insert in reverse order to ensure sorting works
+        insert_balance(&mut state2, "0xBob", 500);
+        insert_balance(&mut state2, "0xAlice", 1000);
+        let root2 = state2.calculate_state_root();
+        
+        assert_eq!(root1, root2, "State root must be deterministic regardless of insertion order");
+        assert_ne!(root1, "", "State root should not be empty");
+    }
+
+    #[test]
     fn test_coinbase_bypasses_signature_check() {
         let tx = Transaction {
             sender: "COINBASE".to_string(),
@@ -564,6 +604,7 @@ mod tests {
             public_key: vec![],
             fee: 0,
             nonce: 0,
+            lock_time: 0,
             tx_type: TransactionType::Transfer,
             sig_scheme: SignatureScheme::Falcon512,
         };

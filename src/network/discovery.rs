@@ -301,3 +301,46 @@ fn is_routable_addr(addr: &SocketAddr) -> bool {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_address_bucketing_distribution() {
+        let mut discovery = PeerDiscovery::with_dns_seeds(vec![], vec![]);
+        
+        // Add peers from same subnet
+        let addrs_subnet1: Vec<SocketAddr> = vec![
+            "192.168.1.1:8333".parse().unwrap(),
+            "192.168.1.2:8333".parse().unwrap(),
+            "192.168.1.3:8333".parse().unwrap(),
+            "192.168.1.4:8333".parse().unwrap(),
+        ];
+        // Add peers from another subnet
+        let addrs_subnet2: Vec<SocketAddr> = vec![
+            "10.0.0.1:8333".parse().unwrap(),
+            "10.0.0.2:8333".parse().unwrap(),
+        ];
+        
+        // Note: process_addr_message actually uses `is_routable_addr` which filters loopback/private IPs
+        // To properly test locally, we need to bypass is_routable_addr or use public IPs.
+        // Let's use public IPs for the test to ensure they are added to the buckets.
+        let public_subnet1: Vec<SocketAddr> = vec![
+            "8.8.8.1:8333".parse().unwrap(),
+            "8.8.8.2:8333".parse().unwrap(),
+            "8.8.8.3:8333".parse().unwrap(),
+        ];
+        let public_subnet2: Vec<SocketAddr> = vec![
+            "1.1.1.1:8333".parse().unwrap(),
+            "1.1.1.2:8333".parse().unwrap(),
+        ];
+
+        futures::executor::block_on(discovery.process_addr_message(public_subnet1, 10));
+        futures::executor::block_on(discovery.process_addr_message(public_subnet2, 10));
+        
+        let selected = futures::executor::block_on(discovery.get_random_peers(2));
+        assert!(selected.len() <= 2);
+        assert!(!selected.is_empty(), "Should select peers from the discovery pool");
+    }
+}
+

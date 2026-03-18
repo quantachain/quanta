@@ -217,6 +217,7 @@ async fn main() {
                 public_key: w.keypair.public_key.clone(),
                 fee:       qua_to_microunits(fee),
                 nonce,
+                lock_time: 0,
                 tx_type:   TransactionType::Transfer,
                 sig_scheme: SignatureScheme::Falcon512,
             };
