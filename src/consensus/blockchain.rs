@@ -124,6 +124,7 @@ const MAX_ADDRESS_LEN: usize = 128;
 // Generated from Block::genesis() with timestamp 1735689600 (2026-01-01 00:00:00 UTC)
 // Difficulty: 6 (PRODUCTION)
 const GENESIS_HASH: &str = "1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0";
+const TESTNET_GENESIS_HASH: &str = "fd1b98c04051c3f413dd605ca44f3b200a95752efada30a6e2d142bcfaf094d3";
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)
@@ -209,10 +210,11 @@ impl Blockchain {
             
             // SECURITY: Verify genesis hash matches hardcoded value (prevents chain split)
             if network == ChainNetwork::Mainnet && genesis.hash != GENESIS_HASH {
-                panic!("CRITICAL: Genesis block hash mismatch!\nExpected: {}\nGot: {}\nThis indicates tampering or incorrect genesis generation.", 
+                panic!("CRITICAL: Mainnet Genesis block hash mismatch!\nExpected: {}\nGot: {}\nThis indicates tampering or incorrect genesis generation.", 
                     GENESIS_HASH, genesis.hash);
-            } else if network == ChainNetwork::Testnet {
-                tracing::info!("Testnet Genesis Hash: {}", genesis.hash);
+            } else if network == ChainNetwork::Testnet && genesis.hash != TESTNET_GENESIS_HASH {
+                panic!("CRITICAL: Testnet Genesis block hash mismatch!\nExpected: {}\nGot: {}\nSomeone modified the Testnet Faucet code!", 
+                    TESTNET_GENESIS_HASH, genesis.hash);
             }
             
             let mut account_state = AccountState::new();
