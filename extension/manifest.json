@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "Quanta Wallet",
+  "version": "1.0.0",
+  "description": "Post-Quantum PQC wallet for QuantaChain (QUA) — Falcon-512 signatures, NIST PQC standard.",
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Quanta Wallet",
+    "default_icon": {
+      "16":  "icons/quanta-transparent-bg-logo.png",
+      "32":  "icons/quanta-transparent-bg-logo.png",
+      "48":  "icons/quanta-transparent-bg-logo.png",
+      "128": "icons/quanta-transparent-bg-logo.png"
+    }
+  },
+
+  "icons": {
+    "16":  "icons/quanta-transparent-bg-logo.png",
+    "32":  "icons/quanta-transparent-bg-logo.png",
+    "48":  "icons/quanta-transparent-bg-logo.png",
+    "128": "icons/quanta-transparent-bg-logo.png"
+  },
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "permissions": [
+    "storage",
+    "clipboardWrite",
+    "clipboardRead",
+    "alarms"
+  ],
+
+  "host_permissions": [],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["pkg/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

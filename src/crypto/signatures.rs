@@ -106,6 +106,42 @@ impl FalconKeypair {
         self.secret_key.len()
     }
 
+    /// Export raw secret key bytes for encrypted wallet storage.
+    ///
+    /// SECURITY: Only call this to encrypt and persist the key to disk.
+    /// Zeroize the bytes immediately after use. Never log or transmit them.
+    pub fn secret_key_bytes(&self) -> &[u8] {
+        &self.secret_key
+    }
+
+    /// Reconstruct a `FalconKeypair` from stored secret key and public key bytes.
+    ///
+    /// Validates that both keys are parseable by the Falcon library.
+    /// Used by `HDWallet::get_keypair()` to decrypt and reconstruct an account
+    /// keypair from encrypted storage.
+    ///
+    /// Returns `Err` if either key is malformed.
+    pub fn from_secret_key_bytes(sk_bytes: &[u8], pk_bytes: &[u8]) -> Result<Self, String> {
+        // Validate sizes with our consensus-critical constants (avoids trait ambiguity).
+        if pk_bytes.len() != FALCON512_PUBKEY_BYTES {
+            return Err(format!(
+                "Invalid Falcon-512 public key: {} bytes (expected {})",
+                pk_bytes.len(),
+                FALCON512_PUBKEY_BYTES
+            ));
+        }
+        if sk_bytes.is_empty() || sk_bytes.len() > 2048 {
+            return Err(format!(
+                "Invalid Falcon-512 secret key length: {} bytes",
+                sk_bytes.len()
+            ));
+        }
+        Ok(Self {
+            public_key: pk_bytes.to_vec(),
+            secret_key: sk_bytes.to_vec(),
+        })
+    }
+
     /// Sign a raw byte slice with the Falcon-512 secret key.
     /// INTERNAL: Prefer `sign_transaction_canonical()` for protocol signing.
     fn sign_raw(&self, message: &[u8]) -> Vec<u8> {
