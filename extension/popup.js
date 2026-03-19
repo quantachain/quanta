@@ -1,7 +1,6 @@
 /**
  * Quanta Wallet Extension — popup.js
  *
- * Extension-aware version of wallet.js.
  * MV3 CSP-compliant (no inline onclick).
  */
 
@@ -20,7 +19,7 @@ let state = {
   mnemonic:  null,
   settings: {
     rpc_url: 'http://localhost:3000',
-    network: 'mainnet',
+    network: 'testnet',
   },
 };
 
@@ -82,17 +81,30 @@ function switchTab(id, btn) {
 }
 
 function showPanel(id) {
-  closeAllPanels();
+  // If opening a new panel, hide others unless it's an overlay panel (export over account)
+  if (id !== 'export-panel') closeAllPanels();
+  
   const panel = document.getElementById(id);
-  if(panel) panel.classList.add('open');
+  if (panel) panel.classList.add('open');
   const overlay = document.getElementById('overlay');
-  if(overlay) overlay.classList.remove('hidden');
+  if (overlay) overlay.classList.remove('hidden');
+  
   if (id === 'receive-panel') renderQr();
 }
 
 function closePanel(id) {
   const panel = document.getElementById(id);
   if(panel) panel.classList.remove('open');
+  
+  // Custom reset for Export panel
+  if (id === 'export-panel') {
+    document.getElementById('export-pw-group').classList.remove('hidden');
+    document.getElementById('export-key-result').classList.add('hidden');
+    document.getElementById('export-password').value = '';
+    document.getElementById('export-error').classList.add('hidden');
+  }
+
+  // Hide overlay if no panels are open
   if (!document.querySelector('.side-panel.open')) {
     const overlay = document.getElementById('overlay');
     if(overlay) overlay.classList.add('hidden');
@@ -103,6 +115,14 @@ function closeAllPanels() {
   document.querySelectorAll('.side-panel').forEach(p => p.classList.remove('open'));
   const overlay = document.getElementById('overlay');
   if(overlay) overlay.classList.add('hidden');
+  
+  // Reset Export panel
+  const epw = document.getElementById('export-pw-group');
+  if (epw) epw.classList.remove('hidden');
+  const ekr = document.getElementById('export-key-result');
+  if (ekr) ekr.classList.add('hidden');
+  const epwd = document.getElementById('export-password');
+  if (epwd) epwd.value = '';
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -276,11 +296,10 @@ function validateImportPhrase() {
 
 async function importWallet() {
   const phrEl = document.getElementById('import-phrase');
-  const passpEl = document.getElementById('import-passphrase');
   const pwdEl = document.getElementById('import-password');
-  if(!phrEl || !passpEl || !pwdEl) return;
+  if(!phrEl || !pwdEl) return;
   const phrase     = phrEl.value.trim();
-  const passphrase = passpEl.value;
+  const passphrase = document.getElementById('import-passphrase')?.value || '';
   const password   = pwdEl.value;
   const errEl      = document.getElementById('import-error');
   if(errEl) errEl.classList.add('hidden');
@@ -360,7 +379,7 @@ async function enterMain() {
   await refreshBalance();
   await loadHistory();
   
-  // If we finished setup in a full tab, close it after a brief moment
+  // Clean up tab navigation if setup completed in full mode
   const params = new URLSearchParams(window.location.search);
   if (params.get('flow')) {
     toast('Wallet Setup Complete! Closing tab...', 2000);
@@ -371,13 +390,18 @@ async function enterMain() {
 function updateMainUI() {
   const a = state.address || '';
   const addrEl = document.getElementById('wallet-address');
-  if (addrEl) addrEl.textContent = a;
+  if (addrEl) addrEl.textContent = a ? a.slice(0, 8) + '...' + a.slice(-6) : '';
   const rAddr = document.getElementById('receive-address-text');
   if (rAddr) rAddr.textContent = a;
+  const menuAddr = document.getElementById('menu-wallet-address');
+  if (menuAddr) menuAddr.textContent = a;
+  
   const balEl = document.getElementById('asset-bal-val');
   if(balEl) balEl.textContent = (state.balance / MICROUNITS).toFixed(6);
+  
   const netBadge = document.getElementById('network-badge');
   if(netBadge) netBadge.textContent = state.settings.network === 'testnet' ? 'Testnet' : 'Mainnet';
+  
   const urlEl = document.getElementById('rpc-url');
   if(urlEl) urlEl.value = state.settings.rpc_url;
   const selEl = document.getElementById('network-select');
@@ -431,12 +455,12 @@ function renderHistory() {
     const time   = tx.timestamp ? new Date(tx.timestamp * 1000).toLocaleString() : '';
     return `
       <div class="tx-item">
-        <span class="tx-dir">${out ? '↑' : '↓'}</span>
-        <div class="tx-info">
-          <div class="tx-addr">${out ? 'To:' : 'From:'} ${short}</div>
-          <div class="tx-time">${time}</div>
+        <span class="tx-dir" style="font-size:1.2rem; color:var(--text-secondary)">${out ? '↑' : '↓'}</span>
+        <div class="tx-info" style="flex:1; margin-left:12px;">
+          <div class="tx-addr" style="font-family:var(--mono); font-size:0.75rem; color:var(--text-secondary)">${out ? 'To:' : 'From:'} ${short}</div>
+          <div class="tx-time" style="font-size:0.75rem; color:var(--text-muted)">${time}</div>
         </div>
-        <span class="tx-amount ${out ? 'outgoing' : 'incoming'}">${out ? '-' : '+'}${amount} QUA</span>
+        <span class="tx-amount" style="font-weight:600; color: ${out ? 'var(--text-primary)' : 'var(--success)'}">${out ? '-' : '+'}${amount} QUA</span>
       </div>`;
   }).join('');
 }
@@ -509,6 +533,36 @@ function renderQr() {
   c.innerHTML = `<div style="padding:16px;text-align:center;font-size:0.68rem;font-family:monospace;color:#333;word-break:break-all;max-width:180px">${addr}</div>`;
 }
 
+// ── Security & Export Keys ────────────────────────────────────────────────────
+
+async function revealPrivateKey() {
+  const pwdEl = document.getElementById('export-password');
+  const errEl = document.getElementById('export-error');
+  if(!pwdEl || !errEl) return;
+  const password = pwdEl.value;
+  errEl.classList.add('hidden');
+  
+  if (!password) { errEl.textContent = 'Enter password'; errEl.classList.remove('hidden'); return; }
+  
+  try {
+    const wallet = await loadWalletData(password);
+    document.getElementById('export-pw-group').classList.add('hidden');
+    const resultBox = document.getElementById('export-key-result');
+    resultBox.classList.remove('hidden');
+    document.getElementById('export-key-text').textContent = wallet.skHex;
+  } catch (e) {
+    errEl.textContent = 'Incorrect Password';
+    errEl.classList.remove('hidden');
+  }
+}
+
+function copyPrivateKey() {
+  const keyEl = document.getElementById('export-key-text');
+  if(keyEl && keyEl.textContent) {
+    navigator.clipboard.writeText(keyEl.textContent).then(() => toast('Private Key Copied!'));
+  }
+}
+
 // ── Lock / delete ─────────────────────────────────────────────────────────────
 
 function lockWallet() {
@@ -518,9 +572,9 @@ function lockWallet() {
 }
 
 function deleteWallet() {
-  if (!confirm('Delete ALL wallet data? Make sure you have your mnemonic backed up!')) return;
+  if (!confirm('Remove account permanently? Make sure you have your mnemonic or private key backed up!')) return;
   storageRemove(STORAGE_KEY);
-  lockWallet(); toast('Wallet deleted');
+  lockWallet(); toast('Account removed');
 }
 
 function copyAddress() {
@@ -532,7 +586,7 @@ function copyAddress() {
 
 async function loadSettings() {
   const s = await storageGet(SETTINGS_KEY);
-  if (s) { state.settings.rpc_url = s.rpc_url || 'http://localhost:3000'; state.settings.network = s.network || 'mainnet'; }
+  if (s) { state.settings.rpc_url = s.rpc_url || 'http://localhost:3000'; state.settings.network = s.network || 'testnet'; }
 }
 
 async function saveSettings() {
@@ -550,11 +604,8 @@ async function saveSettings() {
 window.addEventListener('DOMContentLoaded', async () => {
   await loadWasm();
 
-  // Bind UI events
   const b = (id, fn) => { const el = document.getElementById(id); if(el) el.addEventListener('click', fn); };
   
-  // If we're in the popup (window inner width is constrained) open a new tab for setup.
-  // Otherwise, if we're in a full tab, show the screens normally.
   const isPopup = window.innerWidth <= 400 && document.body.clientHeight < window.screen.height;
 
   b('btn-create', () => {
@@ -593,13 +644,27 @@ window.addEventListener('DOMContentLoaded', async () => {
   if(impPhr) impPhr.addEventListener('input', validateImportPhrase);
   b('btn-import-go', importWallet);
 
-  b('btn-show-settings', () => showPanel('settings-panel'));
-  b('btn-lock-wallet', lockWallet);
+  // New UI binds
+  b('btn-show-account', () => showPanel('account-panel'));
+  b('header-btn-settings', () => showPanel('settings-panel'));
+  b('btn-network-toggle', () => showPanel('settings-panel'));
+  
   b('btn-main-copy-addr', copyAddress);
+  b('btn-menu-copy', copyAddress);
   
   b('btn-action-send', () => showPanel('send-panel'));
   b('btn-action-receive', () => showPanel('receive-panel'));
   b('btn-action-refresh', refreshBalance);
+
+  b('btn-show-export', () => showPanel('export-panel'));
+  b('btn-reveal-key', revealPrivateKey);
+  b('btn-copy-export', copyPrivateKey);
+  
+  b('btn-lock-wallet', lockWallet);
+  b('btn-delete-wallet', deleteWallet);
+  b('btn-save-settings', saveSettings);
+  b('btn-exec-send', sendTransaction);
+  b('btn-receive-copy', copyAddress);
 
   document.querySelectorAll('.tab').forEach(btn => {
     btn.addEventListener('click', (e) => switchTab(e.target.dataset.target, e.target));
@@ -609,36 +674,20 @@ window.addEventListener('DOMContentLoaded', async () => {
     btn.addEventListener('click', (e) => closePanel(e.target.dataset.panel));
   });
 
-  b('btn-exec-send', sendTransaction);
-  b('btn-receive-copy', copyAddress);
-  b('btn-save-settings', saveSettings);
-  b('btn-delete-wallet', deleteWallet);
-
   const overlay = document.getElementById('overlay');
   if(overlay) overlay.addEventListener('click', closeAllPanels);
 
-  // Keyboard support for unlock
-  const unlockPw = document.getElementById('unlock-pw');
-  if(unlockPw) {
-    unlockPw.addEventListener('keydown', (e) => {
-      if(e.key === 'Enter') unlockWallet();
-    });
-  }
-
-  // Handle flow query params if we opened in a full tab
-  const params = new URLSearchParams(window.location.search);
-  const flow = params.get('flow');
+  const paramFlow = new URLSearchParams(window.location.search).get('flow');
   
-  // Check auto-lock state (only lock if not in setup flow)
   chrome.runtime.sendMessage({ type: 'GET_LOCK_STATE' }, async (resp) => {
-    if (resp?.locked && !flow) { showUnlockScreen(''); return; }
+    if (resp?.locked && !paramFlow) { showUnlockScreen(''); return; }
 
     if (await walletExists()) {
       const { address } = await getPublicInfo();
       showUnlockScreen(address || '');
     } else {
-      if (flow === 'create') showScreen('screen-create-warn');
-      else if (flow === 'import') showScreen('screen-import');
+      if (paramFlow === 'create') showScreen('screen-create-warn');
+      else if (paramFlow === 'import') showScreen('screen-import');
       else showScreen('screen-welcome');
     }
   });
@@ -653,12 +702,12 @@ function showUnlockScreen(address) {
     s.id = 'screen-unlock'; s.className = 'screen';
     s.innerHTML = `
       <div class="card-page" style="text-align:center">
-        <div class="mini-logo" style="margin:0 auto 16px;width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;">
-          <img src="icons/quanta-transparent-bg-logo.png" style="width:40px;height:40px;object-fit:contain;">
+        <div class="logo-wrap" style="margin:0 auto 16px;width:52px;height:52px;display:flex;align-items:center;justify-content:center;">
+          <img src="icons/quanta-transparent-bg-logo.png" style="width:50px;height:50px;object-fit:contain; filter: drop-shadow(0 0 10px rgba(255,255,255,0.2));">
         </div>
         <h2>Quanta Wallet</h2>
         <p class="subtitle">Welcome back</p>
-        <p style="font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);margin-bottom:24px;word-break:break-all">
+        <p style="font-family:var(--mono);font-size:0.75rem;color:var(--text-muted);margin-bottom:24px;word-break:break-all">
           ${address ? address.slice(0,12)+'…'+address.slice(-6) : ''}
         </p>
         <div class="form-group" style="text-align:left">
@@ -669,13 +718,12 @@ function showUnlockScreen(address) {
           </div>
         </div>
         <div id="unlock-error" class="error-msg hidden">Wrong password</div>
-        <button id="btn-unlock-exec" class="btn btn-primary">Unlock</button>
+        <button id="btn-unlock-exec" class="btn btn-primary full-width" style="margin-top:10px;">Unlock</button>
         <hr class="divider" style="margin:20px 0">
-        <button id="btn-unlock-diff" class="btn btn-ghost btn-sm" style="width:auto">Use Different Wallet</button>
+        <button id="btn-unlock-diff" class="btn btn-ghost btn-sm" style="width:100%;">Use Different Wallet</button>
       </div>`;
     document.body.appendChild(s);
     
-    // Bind unlock events
     const pw = document.getElementById('unlock-pw');
     if(pw) pw.addEventListener('keydown', (e) => { if (e.key === 'Enter') unlockWallet(); });
     const bToggle = document.getElementById('btn-toggle-unlock');
@@ -683,7 +731,11 @@ function showUnlockScreen(address) {
     const bExec = document.getElementById('btn-unlock-exec');
     if(bExec) bExec.addEventListener('click', unlockWallet);
     const bDiff = document.getElementById('btn-unlock-diff');
-    if(bDiff) bDiff.addEventListener('click', () => showScreen('screen-welcome'));
+    if(bDiff) bDiff.addEventListener('click', () => {
+      if (confirm('Are you sure? Unlocking a different wallet will discard your current keys on this device setup. You MUST have the private key or mnemonic saved.')) {
+        showScreen('screen-welcome');
+      }
+    });
   }
   showScreen('screen-unlock');
 }
