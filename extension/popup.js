@@ -2,11 +2,7 @@
  * Quanta Wallet Extension — popup.js
  *
  * Extension-aware version of wallet.js.
- * Key differences from web wallet:
- *  - Uses chrome.storage.local instead of localStorage
- *  - Pings background service worker to reset auto-lock timer
- *  - Checks lock state on popup open
- *  - WASM loaded from extension's pkg/ folder
+ * MV3 CSP-compliant (no inline onclick).
  */
 
 'use strict';
@@ -53,14 +49,14 @@ async function loadWasm() {
     const wasmUrl = chrome.runtime.getURL('pkg/quanta_wasm_bg.wasm');
     await module.default(wasmUrl);
     wasm = module;
-    console.log('[Quanta] WASM loaded — Falcon-512 active');
+    console.log('[Quanta] WASM loaded');
   } catch (e) {
     console.warn('[Quanta] WASM not loaded:', e.message);
     wasm = null;
   }
 }
 
-// ── Activity ping (resets auto-lock) ─────────────────────────────────────────
+// ── Activity ping ────────────────────────────────────────────────────────────
 
 function pingActivity() {
   chrome.runtime.sendMessage({ type: 'USER_ACTIVITY' });
@@ -87,20 +83,26 @@ function switchTab(id, btn) {
 
 function showPanel(id) {
   closeAllPanels();
-  document.getElementById(id).classList.add('open');
-  document.getElementById('overlay').classList.remove('hidden');
+  const panel = document.getElementById(id);
+  if(panel) panel.classList.add('open');
+  const overlay = document.getElementById('overlay');
+  if(overlay) overlay.classList.remove('hidden');
   if (id === 'receive-panel') renderQr();
 }
 
 function closePanel(id) {
-  document.getElementById(id).classList.remove('open');
-  if (!document.querySelector('.side-panel.open'))
-    document.getElementById('overlay').classList.add('hidden');
+  const panel = document.getElementById(id);
+  if(panel) panel.classList.remove('open');
+  if (!document.querySelector('.side-panel.open')) {
+    const overlay = document.getElementById('overlay');
+    if(overlay) overlay.classList.add('hidden');
+  }
 }
 
 function closeAllPanels() {
   document.querySelectorAll('.side-panel').forEach(p => p.classList.remove('open'));
-  document.getElementById('overlay').classList.add('hidden');
+  const overlay = document.getElementById('overlay');
+  if(overlay) overlay.classList.add('hidden');
 }
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
@@ -108,6 +110,7 @@ function closeAllPanels() {
 let toastTimer = null;
 function toast(msg, ms = 3000) {
   const el = document.getElementById('toast');
+  if(!el) return;
   el.textContent = msg;
   el.classList.remove('hidden');
   el.classList.add('show');
@@ -121,13 +124,15 @@ function toast(msg, ms = 3000) {
 // ── Create wallet flow ────────────────────────────────────────────────────────
 
 function toggleCreateBtn() {
-  document.getElementById('btn-show-mnemonic').disabled =
-    !document.getElementById('chk-understand').checked;
+  const btn = document.getElementById('btn-generate-wallet');
+  const chk = document.getElementById('chk-understand');
+  if(btn && chk) btn.disabled = !chk.checked;
 }
 
 async function createWallet() {
   showScreen('screen-loading');
-  document.getElementById('loading-msg').textContent = 'Generating Falcon-512 keys…';
+  const msgEl = document.getElementById('loading-msg');
+  if(msgEl) msgEl.textContent = 'Generating Falcon-512 keys…';
   try {
     let mnemonicPhrase, pkHex, skHex, address;
     if (wasm) {
@@ -137,7 +142,7 @@ async function createWallet() {
       skHex    = result.secret_key;
       address  = result.address;
     } else {
-      throw new Error('WASM not loaded — cannot generate PQC keys');
+      throw new Error('WASM not loaded');
     }
     state.mnemonic  = mnemonicPhrase;
     state.publicKey = pkHex;
@@ -146,14 +151,16 @@ async function createWallet() {
     renderMnemonicGrid(mnemonicPhrase);
     showScreen('screen-mnemonic');
   } catch (e) {
-    toast('❌ ' + e.message);
+    toast('Error: ' + e.message);
     showScreen('screen-create-warn');
   }
 }
 
 function renderMnemonicGrid(phrase) {
   const words = phrase.split(' ');
-  document.getElementById('mnemonic-grid').innerHTML = words.map((w, i) => `
+  const grid = document.getElementById('mnemonic-grid');
+  if(!grid) return;
+  grid.innerHTML = words.map((w, i) => `
     <div class="mnemonic-word">
       <span class="word-num">${i + 1}.</span>
       <span class="word-text">${w}</span>
@@ -161,8 +168,9 @@ function renderMnemonicGrid(phrase) {
 }
 
 function copyMnemonic() {
-  if (state.mnemonic)
-    navigator.clipboard.writeText(state.mnemonic).then(() => toast('✅ Copied'));
+  if (state.mnemonic) {
+    navigator.clipboard.writeText(state.mnemonic).then(() => toast('Copied recovery phrase'));
+  }
 }
 
 // ── Mnemonic confirm ──────────────────────────────────────────────────────────
@@ -178,7 +186,9 @@ function setupConfirmInputs() {
     if (!confirmPositions.includes(r)) confirmPositions.push(r);
   }
   confirmPositions.sort((a, b) => a - b);
-  document.getElementById('confirm-inputs').innerHTML = confirmPositions.map(i => `
+  const grid = document.getElementById('confirm-inputs');
+  if(!grid) return;
+  grid.innerHTML = confirmPositions.map(i => `
     <div class="confirm-row">
       <span class="confirm-num">Word #${i + 1}</span>
       <input type="text" id="confirm-word-${i}" placeholder="word ${i + 1}" autocomplete="off" spellcheck="false">
@@ -192,15 +202,17 @@ function confirmMnemonic() {
     const el = document.getElementById(`confirm-word-${pos}`);
     return el && el.value.trim().toLowerCase() === words[pos];
   });
-  if (!ok) { errEl.classList.remove('hidden'); return; }
-  errEl.classList.add('hidden');
+  if (!ok) { if(errEl) errEl.classList.remove('hidden'); return; }
+  if(errEl) errEl.classList.add('hidden');
   showScreen('screen-password');
 }
 
 // ── Password ──────────────────────────────────────────────────────────────────
 
 function checkPasswordStrength() {
-  const pw = document.getElementById('pw-new').value;
+  const pwEl = document.getElementById('pw-new');
+  if(!pwEl) return;
+  const pw = pwEl.value;
   const fill = document.getElementById('strength-fill');
   const label = document.getElementById('strength-label');
   let score = 0;
@@ -212,64 +224,80 @@ function checkPasswordStrength() {
   const widths  = ['0%','20%','40%','65%','85%','100%'];
   const colors  = ['#ff4d6a','#ff4d6a','#ffb830','#ffb830','#00ff88','#00d4ff'];
   const labels  = ['','Weak','Fair','Good','Strong','Very Strong'];
-  fill.style.width = widths[score]; fill.style.background = colors[score];
-  label.textContent = labels[score]; label.style.color = colors[score];
+  if(fill) { fill.style.width = widths[score]; fill.style.background = colors[score]; }
+  if(label) { label.textContent = labels[score]; label.style.color = colors[score]; }
 }
 
 function togglePw(id) {
   const el = document.getElementById(id);
+  if(!el) return;
   el.type = el.type === 'password' ? 'text' : 'password';
+  const btn = document.querySelector(`button[id*="${id}"]`);
+  if(btn) btn.textContent = el.type === 'password' ? 'Show' : 'Hide';
 }
 
 async function setPassword() {
-  const pw1 = document.getElementById('pw-new').value;
-  const pw2 = document.getElementById('pw-confirm').value;
+  const pw1El = document.getElementById('pw-new');
+  const pw2El = document.getElementById('pw-confirm');
+  if(!pw1El || !pw2El) return;
+  const pw1 = pw1El.value;
+  const pw2 = pw2El.value;
   const errEl = document.getElementById('pw-error');
-  if (pw1 !== pw2) { errEl.classList.remove('hidden'); return; }
+  if (pw1 !== pw2) { if(errEl) errEl.classList.remove('hidden'); return; }
   if (pw1.length < 8) { toast('Min 8 characters'); return; }
-  errEl.classList.add('hidden');
+  if(errEl) errEl.classList.add('hidden');
   showScreen('screen-loading');
-  document.getElementById('loading-msg').textContent = 'Encrypting wallet…';
+  const msgEl = document.getElementById('loading-msg');
+  if(msgEl) msgEl.textContent = 'Encrypting wallet…';
   try {
     await saveWallet(state.secretKey, state.publicKey, state.address, state.mnemonic, pw1);
     state.secretKey = null; state.mnemonic = null;
     await enterMain();
   } catch (e) {
-    toast('❌ ' + e.message); showScreen('screen-password');
+    toast('Error: ' + e.message); showScreen('screen-password');
   }
 }
 
 // ── Import ────────────────────────────────────────────────────────────────────
 
 function validateImportPhrase() {
-  const phrase = document.getElementById('import-phrase').value.trim();
+  const phrEl = document.getElementById('import-phrase');
+  if(!phrEl) return;
+  const phrase = phrEl.value.trim();
   const words  = phrase.split(/\s+/).filter(Boolean);
   const valid  = words.length === 24 && (wasm ? wasm.validate_mnemonic(phrase) : true);
-  document.getElementById('import-valid').classList.toggle('hidden', !valid);
-  document.getElementById('import-invalid').classList.toggle('hidden', valid || phrase === '');
-  document.getElementById('btn-import-go').disabled = !valid;
+  const vEl = document.getElementById('import-valid');
+  const invEl = document.getElementById('import-invalid');
+  const btn = document.getElementById('btn-import-go');
+  if(vEl) vEl.classList.toggle('hidden', !valid);
+  if(invEl) invEl.classList.toggle('hidden', valid || phrase === '');
+  if(btn) btn.disabled = !valid;
 }
 
 async function importWallet() {
-  const phrase     = document.getElementById('import-phrase').value.trim();
-  const passphrase = document.getElementById('import-passphrase').value;
-  const password   = document.getElementById('import-password').value;
+  const phrEl = document.getElementById('import-phrase');
+  const passpEl = document.getElementById('import-passphrase');
+  const pwdEl = document.getElementById('import-password');
+  if(!phrEl || !passpEl || !pwdEl) return;
+  const phrase     = phrEl.value.trim();
+  const passphrase = passpEl.value;
+  const password   = pwdEl.value;
   const errEl      = document.getElementById('import-error');
-  errEl.classList.add('hidden');
+  if(errEl) errEl.classList.add('hidden');
   if (password.length < 8) {
-    errEl.textContent = 'Password must be at least 8 characters';
-    errEl.classList.remove('hidden'); return;
+    if(errEl) { errEl.textContent = 'Password must be at least 8 characters'; errEl.classList.remove('hidden'); }
+    return;
   }
   showScreen('screen-loading');
-  document.getElementById('loading-msg').textContent = 'Restoring wallet…';
+  const msgEl = document.getElementById('loading-msg');
+  if(msgEl) msgEl.textContent = 'Restoring wallet…';
   try {
     if (!wasm) throw new Error('WASM not loaded');
     const result = wasm.import_wallet(phrase, passphrase, 0);
     await saveWallet(result.secret_key, result.public_key, result.address, phrase, password);
     await enterMain();
   } catch (e) {
-    errEl.textContent = '❌ ' + e.message;
-    errEl.classList.remove('hidden');
+    if(errEl) { errEl.textContent = 'Error: ' + e.message; errEl.classList.remove('hidden'); }
     showScreen('screen-import');
   }
 }
@@ -331,6 +359,13 @@ async function enterMain() {
   showScreen('screen-main');
   await refreshBalance();
   await loadHistory();
+  
+  // If we finished setup in a full tab, close it after a brief moment
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('flow')) {
+    toast('Wallet Setup Complete! Closing tab...', 2000);
+    setTimeout(() => { chrome.tabs.getCurrent(t => { if(t) chrome.tabs.remove(t.id); }); }, 2000);
+  }
 }
 
 function updateMainUI() {
@@ -339,11 +374,14 @@ function updateMainUI() {
   if (addrEl) addrEl.textContent = a;
   const rAddr = document.getElementById('receive-address-text');
   if (rAddr) rAddr.textContent = a;
-  document.getElementById('asset-bal-val').textContent = (state.balance / MICROUNITS).toFixed(6);
-  document.getElementById('network-badge').textContent =
-    state.settings.network === 'testnet' ? 'Testnet' : 'Mainnet';
-  document.getElementById('rpc-url').value = state.settings.rpc_url;
-  document.getElementById('network-select').value = state.settings.network;
+  const balEl = document.getElementById('asset-bal-val');
+  if(balEl) balEl.textContent = (state.balance / MICROUNITS).toFixed(6);
+  const netBadge = document.getElementById('network-badge');
+  if(netBadge) netBadge.textContent = state.settings.network === 'testnet' ? 'Testnet' : 'Mainnet';
+  const urlEl = document.getElementById('rpc-url');
+  if(urlEl) urlEl.value = state.settings.rpc_url;
+  const selEl = document.getElementById('network-select');
+  if(selEl) selEl.value = state.settings.network;
 }
 
 // ── Node API ──────────────────────────────────────────────────────────────────
@@ -358,12 +396,13 @@ async function refreshBalance() {
     const r    = await fetch(rpcUrl(`/balance/${state.address}`));
     const data = await r.json();
     state.balance = data.balance ?? data.amount ?? 0;
-    document.getElementById('balance-val').textContent =
-      (state.balance / MICROUNITS).toFixed(6);
-    document.getElementById('asset-bal-val').textContent =
-      (state.balance / MICROUNITS).toFixed(6);
+    const b1 = document.getElementById('balance-val');
+    const b2 = document.getElementById('asset-bal-val');
+    if(b1) b1.textContent = (state.balance / MICROUNITS).toFixed(6);
+    if(b2) b2.textContent = (state.balance / MICROUNITS).toFixed(6);
   } catch {
-    document.getElementById('balance-val').textContent = 'Node offline';
+    const b1 = document.getElementById('balance-val');
+    if(b1) b1.textContent = 'Offline';
   }
 }
 
@@ -380,6 +419,7 @@ async function loadHistory() {
 
 function renderHistory() {
   const list = document.getElementById('tx-list');
+  if(!list) return;
   if (!state.txHistory.length) {
     list.innerHTML = '<div class="tx-empty">No transactions yet</div>'; return;
   }
@@ -404,19 +444,27 @@ function renderHistory() {
 // ── Send ──────────────────────────────────────────────────────────────────────
 
 async function sendTransaction() {
-  const to       = document.getElementById('send-to').value.trim();
-  const amount   = parseFloat(document.getElementById('send-amount').value);
-  const fee      = parseFloat(document.getElementById('send-fee').value);
-  const password = document.getElementById('send-password').value;
+  const toEl = document.getElementById('send-to');
+  const amEl = document.getElementById('send-amount');
+  const feeEl = document.getElementById('send-fee');
+  const pwdEl = document.getElementById('send-password');
+  if(!toEl || !amEl || !feeEl || !pwdEl) return;
+  const to       = toEl.value.trim();
+  const amount   = parseFloat(amEl.value);
+  const fee      = parseFloat(feeEl.value);
+  const password = pwdEl.value;
   const errEl    = document.getElementById('send-error');
   const succEl   = document.getElementById('send-success');
-  errEl.classList.add('hidden'); succEl.classList.add('hidden');
+  if(errEl) errEl.classList.add('hidden');
+  if(succEl) succEl.classList.add('hidden');
 
   if (!to.startsWith('0x') && !to.startsWith('ms')) {
-    errEl.textContent = 'Invalid address'; errEl.classList.remove('hidden'); return;
+    if(errEl) { errEl.textContent = 'Invalid address'; errEl.classList.remove('hidden'); }
+    return;
   }
   if (isNaN(amount) || amount <= 0) {
-    errEl.textContent = 'Invalid amount'; errEl.classList.remove('hidden'); return;
+    if(errEl) { errEl.textContent = 'Invalid amount'; errEl.classList.remove('hidden'); }
+    return;
   }
   try {
     const wallet   = await loadWalletData(password);
@@ -440,13 +488,15 @@ async function sendTransaction() {
       body: JSON.stringify(tx),
     });
     if (!resp.ok) throw new Error(await resp.text());
-    succEl.textContent = '✅ Sent!'; succEl.classList.remove('hidden');
-    toast('✅ Transaction sent!');
-    ['send-to','send-amount','send-password'].forEach(id => document.getElementById(id).value = '');
+    if(succEl) { succEl.textContent = 'Transaction sent'; succEl.classList.remove('hidden'); }
+    toast('Transaction sent');
+    toEl.value = ''; amEl.value = ''; pwdEl.value = '';
     setTimeout(() => { closePanel('send-panel'); refreshBalance(); loadHistory(); }, 2000);
   } catch (e) {
-    errEl.textContent = e.name === 'OperationError' ? '❌ Wrong password' : '❌ ' + e.message;
-    errEl.classList.remove('hidden');
+    if(errEl) {
+      errEl.textContent = e.name === 'OperationError' ? 'Wrong password' : 'Error: ' + e.message;
+      errEl.classList.remove('hidden');
+    }
   }
 }
 
@@ -454,6 +504,7 @@ async function sendTransaction() {
 
 function renderQr() {
   const c = document.getElementById('qr-container');
+  if(!c) return;
   const addr = state.address || '';
   c.innerHTML = `<div style="padding:16px;text-align:center;font-size:0.68rem;font-family:monospace;color:#333;word-break:break-all;max-width:180px">${addr}</div>`;
 }
@@ -463,20 +514,18 @@ function renderQr() {
 function lockWallet() {
   state.secretKey = null; state.publicKey = null;
   state.address = null; state.balance = 0; state.txHistory = [];
-  showScreen('screen-welcome'); toast('🔒 Locked');
+  showScreen('screen-welcome'); toast('Locked');
 }
 
 function deleteWallet() {
   if (!confirm('Delete ALL wallet data? Make sure you have your mnemonic backed up!')) return;
   storageRemove(STORAGE_KEY);
-  lockWallet(); toast('🗑 Wallet deleted');
+  lockWallet(); toast('Wallet deleted');
 }
-
-function exportWallet() { toast('📤 Use the web wallet for full export'); }
 
 function copyAddress() {
   if (!state.address) return;
-  navigator.clipboard.writeText(state.address).then(() => toast('📋 Address copied'));
+  navigator.clipboard.writeText(state.address).then(() => toast('Address copied'));
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
@@ -487,34 +536,110 @@ async function loadSettings() {
 }
 
 async function saveSettings() {
-  state.settings.rpc_url = document.getElementById('rpc-url').value.trim() || 'http://localhost:3000';
-  state.settings.network = document.getElementById('network-select').value;
+  const urlEl = document.getElementById('rpc-url');
+  const selEl = document.getElementById('network-select');
+  if(urlEl) state.settings.rpc_url = urlEl.value.trim() || 'http://localhost:3000';
+  if(selEl) state.settings.network = selEl.value;
   await storageSet(SETTINGS_KEY, state.settings);
   updateMainUI(); closePanel('settings-panel');
-  toast('✅ Settings saved'); refreshBalance();
+  toast('Settings saved'); refreshBalance();
 }
 
-function setNetwork() { state.settings.network = document.getElementById('network-select').value; }
-
-// ── Boot ──────────────────────────────────────────────────────────────────────
+// ── Boot & Event Binders ──────────────────────────────────────────────────────
 
 window.addEventListener('DOMContentLoaded', async () => {
   await loadWasm();
 
-  // Wire confirm-mnemonic step
-  document.querySelectorAll('[onclick*="screen-confirm"]').forEach(btn => {
-    btn.addEventListener('click', () => setTimeout(setupConfirmInputs, 50));
+  // Bind UI events
+  const b = (id, fn) => { const el = document.getElementById(id); if(el) el.addEventListener('click', fn); };
+  
+  // If we're in the popup (window inner width is constrained) open a new tab for setup.
+  // Otherwise, if we're in a full tab, show the screens normally.
+  const isPopup = window.innerWidth <= 400 && document.body.clientHeight < window.screen.height;
+
+  b('btn-create', () => {
+    if (isPopup) chrome.tabs.create({ url: chrome.runtime.getURL('popup.html?flow=create') });
+    else showScreen('screen-create-warn');
+  });
+  
+  b('btn-import', () => {
+    if (isPopup) chrome.tabs.create({ url: chrome.runtime.getURL('popup.html?flow=import') });
+    else showScreen('screen-import');
+  });
+  
+  document.querySelectorAll('.back-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => showScreen(e.target.dataset.target));
   });
 
-  // Check auto-lock state
+  const chk = document.getElementById('chk-understand');
+  if(chk) chk.addEventListener('change', toggleCreateBtn);
+  
+  b('btn-generate-wallet', createWallet);
+  b('btn-copy-mnemonic', copyMnemonic);
+  b('btn-toggle-mnemonic', () => {
+    const grid = document.getElementById('mnemonic-grid');
+    if(grid) grid.classList.toggle('blur-words');
+  });
+  b('btn-written-down', () => { showScreen('screen-confirm'); setupConfirmInputs(); });
+  b('btn-verify-continue', confirmMnemonic);
+
+  const pw1El = document.getElementById('pw-new');
+  if(pw1El) pw1El.addEventListener('input', checkPasswordStrength);
+  b('btn-toggle-pw1', () => togglePw('pw-new'));
+  b('btn-toggle-pw2', () => togglePw('pw-confirm'));
+  b('btn-set-password', setPassword);
+
+  const impPhr = document.getElementById('import-phrase');
+  if(impPhr) impPhr.addEventListener('input', validateImportPhrase);
+  b('btn-import-go', importWallet);
+
+  b('btn-show-settings', () => showPanel('settings-panel'));
+  b('btn-lock-wallet', lockWallet);
+  b('btn-main-copy-addr', copyAddress);
+  
+  b('btn-action-send', () => showPanel('send-panel'));
+  b('btn-action-receive', () => showPanel('receive-panel'));
+  b('btn-action-refresh', refreshBalance);
+
+  document.querySelectorAll('.tab').forEach(btn => {
+    btn.addEventListener('click', (e) => switchTab(e.target.dataset.target, e.target));
+  });
+
+  document.querySelectorAll('.close-panel').forEach(btn => {
+    btn.addEventListener('click', (e) => closePanel(e.target.dataset.panel));
+  });
+
+  b('btn-exec-send', sendTransaction);
+  b('btn-receive-copy', copyAddress);
+  b('btn-save-settings', saveSettings);
+  b('btn-delete-wallet', deleteWallet);
+
+  const overlay = document.getElementById('overlay');
+  if(overlay) overlay.addEventListener('click', closeAllPanels);
+
+  // Keyboard support for unlock
+  const unlockPw = document.getElementById('unlock-pw');
+  if(unlockPw) {
+    unlockPw.addEventListener('keydown', (e) => {
+      if(e.key === 'Enter') unlockWallet();
+    });
+  }
+
+  // Handle flow query params if we opened in a full tab
+  const params = new URLSearchParams(window.location.search);
+  const flow = params.get('flow');
+  
+  // Check auto-lock state (only lock if not in setup flow)
   chrome.runtime.sendMessage({ type: 'GET_LOCK_STATE' }, async (resp) => {
-    if (resp?.locked) { showUnlockScreen(''); return; }
+    if (resp?.locked && !flow) { showUnlockScreen(''); return; }
 
     if (await walletExists()) {
       const { address } = await getPublicInfo();
       showUnlockScreen(address || '');
     } else {
-      showScreen('screen-welcome');
+      if (flow === 'create') showScreen('screen-create-warn');
+      else if (flow === 'import') showScreen('screen-import');
+      else showScreen('screen-welcome');
     }
   });
 });
@@ -528,7 +653,9 @@ function showUnlockScreen(address) {
     s.id = 'screen-unlock'; s.className = 'screen';
     s.innerHTML = `
       <div class="card-page" style="text-align:center">
-        <div class="mini-logo" style="margin:0 auto 16px;width:52px;height:52px;border-radius:14px;font-size:1.3rem;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#00d4ff,#00ff88);color:#000;font-weight:800">Q</div>
+        <div class="mini-logo" style="margin:0 auto 16px;width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;">
+          <img src="icons/quanta-transparent-bg-logo.png" style="width:40px;height:40px;object-fit:contain;">
+        </div>
         <h2>Quanta Wallet</h2>
         <p class="subtitle">Welcome back</p>
         <p style="font-family:var(--mono);font-size:0.7rem;color:var(--text-muted);margin-bottom:24px;word-break:break-all">
@@ -537,28 +664,41 @@ function showUnlockScreen(address) {
         <div class="form-group" style="text-align:left">
           <label>Password</label>
           <div class="input-wrap">
-            <input id="unlock-pw" type="password" placeholder="Your wallet password" onkeydown="if(event.key==='Enter')unlockWallet()">
-            <button class="eye-btn" onclick="togglePw('unlock-pw')">👁</button>
+            <input id="unlock-pw" type="password" placeholder="Your wallet password">
+            <button id="btn-toggle-unlock" class="eye-btn">Show</button>
           </div>
         </div>
         <div id="unlock-error" class="error-msg hidden">Wrong password</div>
-        <button class="btn btn-primary" onclick="unlockWallet()">🔓 Unlock</button>
+        <button id="btn-unlock-exec" class="btn btn-primary">Unlock</button>
         <hr class="divider" style="margin:20px 0">
-        <button class="btn btn-ghost btn-sm" style="width:auto" onclick="showScreen('screen-welcome')">Use Different Wallet</button>
+        <button id="btn-unlock-diff" class="btn btn-ghost btn-sm" style="width:auto">Use Different Wallet</button>
       </div>`;
     document.body.appendChild(s);
+    
+    // Bind unlock events
+    const pw = document.getElementById('unlock-pw');
+    if(pw) pw.addEventListener('keydown', (e) => { if (e.key === 'Enter') unlockWallet(); });
+    const bToggle = document.getElementById('btn-toggle-unlock');
+    if(bToggle) bToggle.addEventListener('click', () => togglePw('unlock-pw'));
+    const bExec = document.getElementById('btn-unlock-exec');
+    if(bExec) bExec.addEventListener('click', unlockWallet);
+    const bDiff = document.getElementById('btn-unlock-diff');
+    if(bDiff) bDiff.addEventListener('click', () => showScreen('screen-welcome'));
   }
   showScreen('screen-unlock');
 }
 
 async function unlockWallet() {
-  const pw = document.getElementById('unlock-pw').value;
-  document.getElementById('unlock-error').classList.add('hidden');
+  const pwEl = document.getElementById('unlock-pw');
+  if(!pwEl) return;
+  const pw = pwEl.value;
+  const errEl = document.getElementById('unlock-error');
+  if(errEl) errEl.classList.add('hidden');
   try {
     await loadWalletData(pw);
     pingActivity();
     await enterMain();
   } catch {
-    document.getElementById('unlock-error').classList.remove('hidden');
+    if(errEl) errEl.classList.remove('hidden');
   }
 }

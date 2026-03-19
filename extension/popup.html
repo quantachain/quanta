@@ -15,39 +15,34 @@
   #screen-main { max-width: 400px; height: 600px; overflow-y: auto; }
   .card-page { max-width: 400px; margin: 12px auto; padding: 24px 20px; }
   .side-panel { max-width: 400px; max-height: 560px; }
+  /* No Emoji SVG Icons */
+  .svg-icon { width: 16px; height: 16px; fill: currentColor; margin-right: 6px; vertical-align: middle; }
+  .svg-icon-large { width: 20px; height: 20px; }
+  .action-icon-svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; margin-bottom: 6px; }
+  .copy-btn-svg { width: 14px; height: 14px; fill: currentColor; }
+  .close-icon-svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .pwd-toggle-svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 2; fill: none; }
 </style>
 </head>
 <body>
 
-<!-- All screens — identical to web wallet index.html except script src -->
-
 <div id="screen-welcome" class="screen active">
   <div class="hero">
-    <div class="logo-wrap">
-      <div class="logo-ring"></div>
-      <div class="logo-inner">
-        <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-          <path d="M20 4L36 13V27L20 36L4 27V13L20 4Z" stroke="url(#g1)" stroke-width="2" fill="none"/>
-          <path d="M20 12L28 17V23L20 28L12 23V17L20 12Z" fill="url(#g1)" opacity="0.3"/>
-          <circle cx="20" cy="20" r="3" fill="url(#g1)"/>
-          <defs><linearGradient id="g1" x1="4" y1="4" x2="36" y2="36" gradientUnits="userSpaceOnUse">
-            <stop stop-color="#00d4ff"/><stop offset="1" stop-color="#00ff88"/>
-          </linearGradient></defs>
-        </svg>
-      </div>
+    <div class="logo-wrap" style="margin-bottom: 16px;">
+      <img src="icons/quanta-transparent-bg-logo.png" style="width: 80px; height: 80px; object-fit: contain;">
     </div>
     <h1 class="hero-title">Quanta Wallet</h1>
     <p class="hero-sub">Post-Quantum · Falcon-512 · NIST PQC</p>
     <div class="badge-row">
-      <span class="badge">🔐 Quantum-Safe</span>
-      <span class="badge">⚡ Falcon-512</span>
+      <span class="badge">Quantum-Safe</span>
+      <span class="badge">Falcon-512</span>
     </div>
     <div class="welcome-actions">
-      <button id="btn-create" class="btn btn-primary btn-lg" onclick="showScreen('screen-create-warn')">
-        <span class="btn-icon">✨</span> Create New Wallet
+      <button id="btn-create" class="btn btn-primary btn-lg">
+        Create New Wallet
       </button>
-      <button id="btn-import" class="btn btn-ghost btn-lg" onclick="showScreen('screen-import')">
-        <span class="btn-icon">📥</span> Import from Mnemonic
+      <button id="btn-import" class="btn btn-ghost btn-lg">
+        Import from Mnemonic
       </button>
     </div>
     <p class="welcome-note">Your keys never leave this device.</p>
@@ -56,19 +51,19 @@
 
 <div id="screen-create-warn" class="screen">
   <div class="card-page">
-    <button class="back-btn" onclick="showScreen('screen-welcome')">← Back</button>
+    <button class="back-btn" data-target="screen-welcome">← Back</button>
     <h2>Before You Continue</h2>
     <p class="subtitle">Your 24-word phrase is the ONLY way to recover your wallet.</p>
     <div class="warn-list">
-      <div class="warn-item"><span class="warn-icon">📝</span><span>Write it down on paper</span></div>
-      <div class="warn-item"><span class="warn-icon">🙈</span><span>Never share it with anyone</span></div>
-      <div class="warn-item"><span class="warn-icon">💀</span><span>Lost mnemonic = lost funds forever</span></div>
+      <div class="warn-item"><span>Write it down on paper</span></div>
+      <div class="warn-item"><span>Never share it with anyone</span></div>
+      <div class="warn-item"><span>Lost mnemonic = lost funds forever</span></div>
     </div>
     <div class="checkbox-row">
-      <input type="checkbox" id="chk-understand" onchange="toggleCreateBtn()">
+      <input type="checkbox" id="chk-understand">
       <label for="chk-understand">I understand losing my mnemonic means losing my funds</label>
     </div>
-    <button id="btn-show-mnemonic" class="btn btn-primary" disabled onclick="createWallet()">Generate My Wallet →</button>
+    <button id="btn-generate-wallet" class="btn btn-primary" disabled>Generate My Wallet →</button>
   </div>
 </div>
 
@@ -78,11 +73,11 @@
     <p class="subtitle">Write down all 24 words in order.</p>
     <div id="mnemonic-grid" class="mnemonic-grid"></div>
     <div class="mnemonic-actions">
-      <button class="btn btn-ghost btn-sm" onclick="copyMnemonic()">📋 Copy</button>
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('mnemonic-grid').classList.toggle('blur-words')">👁 Toggle</button>
+      <button id="btn-copy-mnemonic" class="btn btn-ghost btn-sm">Copy</button>
+      <button id="btn-toggle-mnemonic" class="btn btn-ghost btn-sm">Toggle Blur</button>
     </div>
-    <div class="warn-banner">⚠ Shown once only. Write it down now.</div>
-    <button class="btn btn-primary" onclick="showScreen('screen-confirm');setupConfirmInputs()">I've Written It Down →</button>
+    <div class="warn-banner">Shown once only. Write it down now.</div>
+    <button id="btn-written-down" class="btn btn-primary">I've Written It Down →</button>
   </div>
 </div>
 
@@ -92,7 +87,7 @@
     <p class="subtitle">Enter the 3 requested words to verify your backup.</p>
     <div id="confirm-inputs" class="confirm-grid"></div>
     <div id="confirm-error" class="error-msg hidden">Incorrect words. Check your mnemonic.</div>
-    <button class="btn btn-primary" onclick="confirmMnemonic()">Verify & Continue →</button>
+    <button id="btn-verify-continue" class="btn btn-primary">Verify & Continue →</button>
   </div>
 </div>
 
@@ -103,8 +98,8 @@
     <div class="form-group">
       <label>Password</label>
       <div class="input-wrap">
-        <input id="pw-new" type="password" placeholder="Min 8 characters" oninput="checkPasswordStrength()">
-        <button class="eye-btn" onclick="togglePw('pw-new')">👁</button>
+        <input id="pw-new" type="password" placeholder="Min 8 characters">
+        <button id="btn-toggle-pw1" class="eye-btn">Show</button>
       </div>
       <div class="strength-bar"><div id="strength-fill" class="strength-fill"></div></div>
       <span id="strength-label" class="strength-label"></span>
@@ -113,23 +108,23 @@
       <label>Confirm Password</label>
       <div class="input-wrap">
         <input id="pw-confirm" type="password" placeholder="Repeat password">
-        <button class="eye-btn" onclick="togglePw('pw-confirm')">👁</button>
+        <button id="btn-toggle-pw2" class="eye-btn">Show</button>
       </div>
     </div>
     <div id="pw-error" class="error-msg hidden">Passwords do not match.</div>
-    <button class="btn btn-primary" onclick="setPassword()">Create Wallet 🚀</button>
+    <button id="btn-set-password" class="btn btn-primary">Create Wallet</button>
   </div>
 </div>
 
 <div id="screen-import" class="screen">
   <div class="card-page">
-    <button class="back-btn" onclick="showScreen('screen-welcome')">← Back</button>
+    <button class="back-btn" data-target="screen-welcome">← Back</button>
     <h2>Import Wallet</h2>
     <div class="form-group">
       <label>Recovery Phrase (24 words)</label>
-      <textarea id="import-phrase" rows="3" placeholder="word1 word2 ... word24" oninput="validateImportPhrase()"></textarea>
-      <span id="import-valid" class="valid-label hidden">✅ Valid</span>
-      <span id="import-invalid" class="invalid-label hidden">❌ Invalid</span>
+      <textarea id="import-phrase" rows="3" placeholder="word1 word2 ... word24"></textarea>
+      <span id="import-valid" class="valid-label hidden">Valid format</span>
+      <span id="import-invalid" class="invalid-label hidden">Invalid format</span>
     </div>
     <div class="form-group">
       <label>Passphrase (optional)</label>
@@ -140,7 +135,7 @@
       <input id="import-password" type="password" placeholder="Choose a password">
     </div>
     <div id="import-error" class="error-msg hidden"></div>
-    <button id="btn-import-go" class="btn btn-primary" onclick="importWallet()" disabled>Import Wallet →</button>
+    <button id="btn-import-go" class="btn btn-primary" disabled>Import Wallet →</button>
   </div>
 </div>
 
@@ -148,7 +143,7 @@
   <div class="center-wrap">
     <div class="spinner-ring"></div>
     <p id="loading-msg" class="loading-msg">Generating quantum-safe keys…</p>
-    <p class="loading-sub">Falcon-512 PQC — please wait</p>
+    <p class="loading-sub">Falcon-512 PQC</p>
   </div>
 </div>
 
@@ -160,8 +155,12 @@
     </div>
     <div class="network-badge" id="network-badge">Mainnet</div>
     <div class="header-actions">
-      <button class="icon-btn" onclick="showPanel('settings-panel')">⚙️</button>
-      <button class="icon-btn" onclick="lockWallet()">🔒</button>
+      <button id="btn-show-settings" class="icon-btn">
+        <svg class="svg-icon-large" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.06-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.73 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.06.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.49-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+      </button>
+      <button id="btn-lock-wallet" class="icon-btn">
+        <svg class="svg-icon-large" viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>
+      </button>
     </div>
   </header>
   <div class="balance-card">
@@ -169,23 +168,31 @@
     <div class="balance-amount"><span id="balance-val">—</span><span class="balance-unit">QUA</span></div>
     <div class="address-row">
       <span id="wallet-address" class="address-text">Loading…</span>
-      <button class="copy-btn" onclick="copyAddress()">📋</button>
+      <button id="btn-main-copy-addr" class="copy-btn">Copy</button>
     </div>
   </div>
   <div class="action-row">
-    <button class="action-btn" onclick="showPanel('send-panel')"><span class="action-icon">↑</span><span>Send</span></button>
-    <button class="action-btn" onclick="showPanel('receive-panel')"><span class="action-icon">↓</span><span>Receive</span></button>
-    <button class="action-btn" onclick="refreshBalance()"><span class="action-icon">↻</span><span>Refresh</span></button>
+    <button id="btn-action-send" class="action-btn">
+      <svg class="action-icon-svg" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      <span>Send</span>
+    </button>
+    <button id="btn-action-receive" class="action-btn">
+      <svg class="action-icon-svg" viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+      <span>Receive</span>
+    </button>
+    <button id="btn-action-refresh" class="action-btn">
+      <svg class="action-icon-svg" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+      <span>Refresh</span>
+    </button>
   </div>
   <div class="tab-bar">
-    <button class="tab active" onclick="switchTab('tab-history',this)">History</button>
-    <button class="tab" onclick="switchTab('tab-assets',this)">Assets</button>
-    <button class="tab" onclick="switchTab('tab-security',this)">Security</button>
+    <button id="tab-btn-history" class="tab active" data-target="tab-history">History</button>
+    <button id="tab-btn-assets" class="tab" data-target="tab-assets">Assets</button>
+    <button id="tab-btn-security" class="tab" data-target="tab-security">Security</button>
   </div>
   <div id="tab-history" class="tab-content active"><div id="tx-list" class="tx-list"><div class="tx-empty">No transactions yet</div></div></div>
   <div id="tab-assets" class="tab-content">
     <div class="asset-row">
-      <div class="asset-icon">⬡</div>
       <div class="asset-info"><span class="asset-name">Quanta</span><span class="asset-ticker">QUA</span></div>
       <div class="asset-bal"><span id="asset-bal-val">—</span> QUA</div>
     </div>
@@ -201,7 +208,7 @@
 </div>
 
 <div id="send-panel" class="side-panel">
-  <div class="panel-header"><h3>Send QUA</h3><button class="close-panel" onclick="closePanel('send-panel')">✕</button></div>
+  <div class="panel-header"><h3>Send QUA</h3><button class="close-panel" data-panel="send-panel">✕</button></div>
   <div class="panel-body">
     <div class="form-group"><label>Recipient</label><input id="send-to" type="text" placeholder="0x…"></div>
     <div class="form-group"><label>Amount (QUA)</label><input id="send-amount" type="number" step="0.000001" placeholder="0.000000"></div>
@@ -209,38 +216,38 @@
     <div class="form-group"><label>Password</label><input id="send-password" type="password" placeholder="To sign and send"></div>
     <div id="send-error" class="error-msg hidden"></div>
     <div id="send-success" class="success-msg hidden"></div>
-    <button class="btn btn-primary full-width" onclick="sendTransaction()">Sign & Broadcast ⚡</button>
-    <p class="send-note">Signed locally with Falcon-512. Key never leaves device.</p>
+    <button id="btn-exec-send" class="btn btn-primary full-width">Sign & Broadcast</button>
+    <p class="send-note">Signed locally with Falcon-512.</p>
   </div>
 </div>
 
 <div id="receive-panel" class="side-panel">
-  <div class="panel-header"><h3>Receive QUA</h3><button class="close-panel" onclick="closePanel('receive-panel')">✕</button></div>
+  <div class="panel-header"><h3>Receive QUA</h3><button class="close-panel" data-panel="receive-panel">✕</button></div>
   <div class="panel-body receive-body">
     <p class="subtitle">Share your address to receive QUA</p>
     <div id="qr-container" class="qr-box"></div>
     <div class="receive-address" id="receive-address-text"></div>
-    <button class="btn btn-ghost full-width" onclick="copyAddress()">📋 Copy Address</button>
+    <button id="btn-receive-copy" class="btn btn-ghost full-width">Copy Address</button>
   </div>
 </div>
 
 <div id="settings-panel" class="side-panel">
-  <div class="panel-header"><h3>Settings</h3><button class="close-panel" onclick="closePanel('settings-panel')">✕</button></div>
+  <div class="panel-header"><h3>Settings</h3><button class="close-panel" data-panel="settings-panel">✕</button></div>
   <div class="panel-body">
     <div class="form-group"><label>Node RPC URL</label><input id="rpc-url" type="text" placeholder="http://localhost:3000"></div>
     <div class="form-group"><label>Network</label>
-      <select id="network-select" onchange="setNetwork()">
+      <select id="network-select">
         <option value="mainnet">Mainnet</option>
         <option value="testnet">Testnet</option>
       </select>
     </div>
-    <button class="btn btn-primary" onclick="saveSettings()">Save</button>
+    <button id="btn-save-settings" class="btn btn-primary">Save Settings</button>
     <hr class="divider">
-    <button class="btn btn-danger full-width" onclick="deleteWallet()">🗑 Delete Wallet</button>
+    <button id="btn-delete-wallet" class="btn btn-danger full-width">Delete Wallet Data</button>
   </div>
 </div>
 
-<div id="overlay" class="overlay hidden" onclick="closeAllPanels()"></div>
+<div id="overlay" class="overlay hidden"></div>
 <div id="toast" class="toast hidden"></div>
 
 <script src="popup.js" type="module"></script>
