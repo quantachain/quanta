@@ -218,21 +218,42 @@ impl Blockchain {
             let mut account_state = AccountState::new();
             
             // Genesis distribution
-            let genesis_address = "0x0000000000000000000000000000000000000000";
-            let genesis_tx = Transaction {
-                sender: "COINBASE".to_string(),
-                recipient: genesis_address.to_string(),
-                amount: 1_000_000_000, // 1000 QUA in microunits
-                timestamp: genesis.timestamp,
-                signature: vec![],
-                public_key: vec![],
-                fee: 0,
-                nonce: 0,
-                lock_time: 0,
-                tx_type: crate::core::transaction::TransactionType::Transfer,
-                sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
+            let (recipients, premine_amount) = if network == ChainNetwork::Testnet {
+                // TESTNET PREMINE: 1 Million QUA per wallet (1_000_000_000_000 microunits)
+                let testnet_faucets = vec![
+                    "0x4df72a570c6da4b8d19a53ea537bf0b70f214db7",
+                    "0xb4cc6c1148bbef44a3a837e1fff469230c7e0a1e",
+                    "0x500718acbf31a17608f1dc40bdcc4cadde5c4071",
+                    "0x2ef238e4342d05d2d2d7ce6b00faa892ca8e6bfb",
+                    "0xffdb3c04ad173afa8499328662ac6b710da03b72",
+                    "0x0d053c72b0d061f27e2ffb7addffea5818793323",
+                    "0x6d2e8d55fa15b0c1ec6270f6a1608a477bcbad18",
+                    "0x13842203cdc92009ba83e8306366f72235dc9b66",
+                    "0xbcd430a25e7b90d4a3e9e97d988a000405fecb9e",
+                    "0xff42dac6946fb9d220660d7a22c3d3e656a33fe9",
+                ];
+                (testnet_faucets.into_iter().map(String::from).collect(), 1_000_000_000_000)
+            } else {
+                // MAINNET: Standard empty genesis structure (1000 QUA to burn address)
+                (vec!["0x0000000000000000000000000000000000000000".to_string()], 1_000_000_000)
             };
-            account_state.credit_account(&genesis_tx, 0, COINBASE_MATURITY);
+
+            for recipient_address in recipients {
+                let genesis_tx = Transaction {
+                    sender: "COINBASE".to_string(),
+                    recipient: recipient_address,
+                    amount: premine_amount,
+                    timestamp: genesis.timestamp,
+                    signature: vec![],
+                    public_key: vec![],
+                    fee: 0,
+                    nonce: 0,
+                    lock_time: 0,
+                    tx_type: crate::core::transaction::TransactionType::Transfer,
+                    sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
+                };
+                account_state.credit_account(&genesis_tx, 0, COINBASE_MATURITY);
+            }
             
             storage.save_block(&genesis)?;
             storage.set_chain_height(1)?;
