@@ -284,6 +284,18 @@ body::before {
 .form-group textarea { resize: vertical; min-height: 90px; font-family: var(--mono); font-size: 0.82rem; }
 .form-group select { cursor: pointer; }
 
+/* Remove number spinners */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+input[type="number"] {
+  -moz-appearance: textfield; /* Firefox */
+  appearance: textfield;
+}
+
 .input-wrap { position: relative; }
 .input-wrap input { padding-right: 44px; }
 .input-suffix {
