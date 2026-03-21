@@ -81,6 +81,9 @@ const BASE_TRANSACTION_FEE: u64 = 1_000; // 0.001 QUA minimum (prevents spam)
 const FEE_BURN_PERCENT: u64 = 70; // 70% of fees burned (deflationary pressure)
 const FEE_TREASURY_PERCENT: u64 = 20; // 20% to development treasury
 const FEE_VALIDATOR_PERCENT: u64 = 10; // 10% to block validator (miner)
+// I-2 FIX: Compile-time guard — build fails if fee percentages don't add to 100.
+const _: () = assert!(FEE_BURN_PERCENT + FEE_TREASURY_PERCENT + FEE_VALIDATOR_PERCENT == 100,
+    "Fee percentages must sum to 100");
 
 // TREASURY FUND - Development, Marketing, Listings
 const TREASURY_ALLOCATION_PERCENT: u64 = 5; // 5% of block rewards → treasury

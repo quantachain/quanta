@@ -86,6 +86,7 @@ pub struct BalanceRequest {
 pub struct BalanceResponse {
     pub address: String,
     pub balance_microunits: u64, // Balance in microunits (1 QUA = 1_000_000)
+    pub nonce: u64,              // Current confirmed nonce for this address
 }
 
 async fn get_balance(
@@ -94,9 +95,11 @@ async fn get_balance(
 ) -> Json<BalanceResponse> {
     let blockchain = state.blockchain.read().await;
     let balance = blockchain.get_balance(&req.address);
+    let nonce = blockchain.get_account_state_read().get_nonce(&req.address);
     Json(BalanceResponse {
         address: req.address,
         balance_microunits: balance,
+        nonce,
     })
 }
 
@@ -149,78 +152,8 @@ async fn submit_signed_transaction(
     }
 }
 
-/// DEPRECATED local-signing endpoint — kept for single-node dev use ONLY.
-/// MUST NOT be exposed to the public internet or used without TLS.
-#[deprecated(note = "Use POST /api/transactions/submit with pre-signed transactions")]
-async fn create_transaction_local_only(
-    State(state): State<Arc<ApiState>>,
-    Json(req): Json<CreateTransactionRequest>,
-) -> (StatusCode, Json<TransactionResponse>) {
-    // Load quantum-safe wallet
-    let wallet = match QuantumWallet::load_quantum_safe(&req.wallet_file, &req.wallet_password) {
-        Ok(w) => w,
-        Err(e) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TransactionResponse {
-                    success: false,
-                    tx_hash: None,
-                    error: Some(format!("Failed to load wallet: {}", e)),
-                }),
-            );
-        }
-    };
-
-    // Get current nonce using read-only accessor (HIGH-8 FIX: avoids write-lock deadlock)
-    let blockchain = state.blockchain.read().await;
-    let current_nonce = blockchain.get_account_state_read().get_nonce(&wallet.address);
-    let next_nonce = current_nonce + 1;
-    drop(blockchain);
-
-    // Create transaction with microunits
-    let mut tx = Transaction::new(
-        wallet.address.clone(),
-        req.recipient,
-        req.amount_microunits,
-        chrono::Utc::now().timestamp(),
-    );
-    tx.nonce = next_nonce;
-
-    // MED-6 FIX: Use sign_transaction_canonical(&get_signing_bytes()) to avoid
-    // the double-hash bug (sign_transaction_data was hashing an already-hashed input).
-    let signing_bytes = tx.get_signing_bytes();
-    let signature = wallet.keypair.sign_transaction_canonical(&signing_bytes);
-    tx.signature = signature;
-    tx.public_key = wallet.keypair.public_key.clone();
-
-    // Submit to blockchain
-    let blockchain = state.blockchain.read().await;
-    match blockchain.add_transaction(tx.clone()) {
-        Ok(_) => {
-            let tx_hash = tx.hash();
-            drop(blockchain);
-            if let Some(ref network) = state.network {
-                network.broadcast_transaction(tx).await;
-            }
-            (
-                StatusCode::OK,
-                Json(TransactionResponse {
-                    success: true,
-                    tx_hash: Some(tx_hash),
-                    error: None,
-                }),
-            )
-        }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(TransactionResponse {
-                success: false,
-                tx_hash: None,
-                error: Some(format!("Transaction failed: {}", e)),
-            }),
-        ),
-    }
-}
+// REMOVED: create_transaction_local_only — path-traversal risk (wallet_file from POST body) +
+// password-over-HTTP. Replaced by POST /api/transactions/submit (pre-signed, no password).
 
 
 /// Mine request
@@ -241,19 +174,25 @@ async fn mine_block(
     Json(req): Json<MineRequest>,
 ) -> (StatusCode, Json<MineResponse>) {
     // HIGH-5 FIX: Validate miner_address format before mining.
-    // Prevents reward theft via malformed or adversarial addresses.
-    fn valid_miner_addr(addr: &str) -> bool {
-        addr.starts_with("0x")
-            && addr.len() == 42
-            && addr[2..].chars().all(|c| c.is_ascii_hexdigit())
+    // Accepts two address formats:
+    //   - Standard wallet:  0x<40 hex chars>     (e.g. 0xabcdef...)
+    //   - Multisig wallet:  ms<40+ hex chars>    (e.g. ms69216b1d10...)
+    fn valid_quanta_addr(addr: &str) -> bool {
+        if addr.starts_with("0x") {
+            addr.len() == 42 && addr[2..].chars().all(|c| c.is_ascii_hexdigit())
+        } else if addr.starts_with("ms") {
+            addr.len() >= 42 && addr[2..].chars().all(|c| c.is_ascii_hexdigit())
+        } else {
+            false
+        }
     }
-    if !valid_miner_addr(&req.miner_address) {
+    if !valid_quanta_addr(&req.miner_address) {
         return (
             StatusCode::BAD_REQUEST,
             Json(MineResponse {
                 success: false,
                 block_index: None,
-                error: Some("Invalid miner_address: must be 0x-prefixed 40-char hex (e.g. 0xabcdef...)".to_string()),
+                error: Some("Invalid miner_address: must be 0x<40 hex> or ms<40+ hex>".to_string()),
             }),
         );
     }
@@ -673,7 +612,8 @@ pub fn create_router(
     });
 
     // CRIT-1 FIX: CORS restricted to localhost only (no wildcard origin).
-    // Public-internet nodes MUST configure an explicit allowed origin via config.
+    // C-2 FIX: allow_headers restricted to Content-Type only (not Any).
+    //   Any allows Authorization / X-Admin headers cross-origin — CSRF risk.
     let cors = CorsLayer::new()
         .allow_origin(
             "http://localhost:3000"
@@ -681,7 +621,7 @@ pub fn create_router(
                 .expect("valid CORS origin"),
         )
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
-        .allow_headers(tower_http::cors::Any);
+        .allow_headers([axum::http::header::CONTENT_TYPE]);
 
     Router::new()
         .route("/health", get(health_check))

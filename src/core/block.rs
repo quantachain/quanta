@@ -107,7 +107,7 @@ impl Block {
 
     /// Mine the block by finding a valid nonce
     pub fn mine(&mut self) {
-        println!(
+        tracing::info!(
             "Mining block {} with difficulty {}...",
             self.index, self.difficulty
         );
@@ -121,8 +121,8 @@ impl Block {
             
             if self.has_valid_hash() {
                 let elapsed = start.elapsed().as_secs_f64();
-                let hashrate = hash_count as f64 / elapsed;
-                println!(
+                let hashrate = if elapsed > 0.0 { hash_count as f64 / elapsed } else { f64::INFINITY };
+                tracing::info!(
                     "Block mined! Nonce: {}, Hashes: {}, Time: {:.2}s, Hashrate: {:.0} H/s",
                     self.nonce, hash_count, elapsed, hashrate
                 );
@@ -133,9 +133,7 @@ impl Block {
             
             // Progress indicator every 100k hashes
             if hash_count % 100_000 == 0 {
-                print!("\rHashes: {}k", hash_count / 1000);
-                use std::io::{self, Write};
-                io::stdout().flush().unwrap();
+                tracing::debug!("Mining progress: {}k hashes (block {})", hash_count / 1000, self.index);
             }
         }
     }
@@ -144,13 +142,13 @@ impl Block {
     pub fn is_valid(&self, previous_block: Option<&Block>) -> bool {
         // Check hash is correct
         if self.hash != self.calculate_hash() {
-            println!("Invalid hash calculation");
+            tracing::warn!("Block {}: invalid hash calculation", self.index);
             return false;
         }
 
         // Check proof-of-work
         if !self.has_valid_hash() {
-            println!("Invalid proof-of-work");
+            tracing::warn!("Block {}: invalid proof-of-work", self.index);
             return false;
         }
 
@@ -158,30 +156,33 @@ impl Block {
         let tree = MerkleTree::from_transactions(&self.transactions);
         let computed_root = tree.root_hash().unwrap_or_else(|| "0".repeat(64));
         if self.merkle_root != computed_root {
-            println!("Invalid merkle root: expected {}, got {}", computed_root, self.merkle_root);
+            tracing::warn!(
+                "Block {}: invalid merkle root: expected {}, got {}",
+                self.index, computed_root, self.merkle_root
+            );
             return false;
         }
 
         // Check previous hash linkage
         if let Some(prev) = previous_block {
             if self.previous_hash != prev.hash {
-                println!("Invalid previous hash linkage");
+                tracing::warn!("Block {}: invalid previous hash linkage", self.index);
                 return false;
             }
             if self.index != prev.index + 1 {
-                println!("Invalid block index");
+                tracing::warn!("Block {}: invalid block index (expected {})", self.index, prev.index + 1);
                 return false;
             }
             
             // SECURITY FIX (MEDIUM): Validate timestamp is reasonable
             if self.timestamp <= prev.timestamp {
-                println!("Block timestamp must be after previous block");
+                tracing::warn!("Block {}: timestamp must be after previous block", self.index);
                 return false;
             }
             
             let current_time = chrono::Utc::now().timestamp();
             if self.timestamp > current_time + 7200 {
-                println!("Block timestamp too far in future (>2h)");
+                tracing::warn!("Block {}: timestamp too far in future (>2h)", self.index);
                 return false;
             }
         }
@@ -189,7 +190,7 @@ impl Block {
         // Verify all transaction signatures
         for tx in &self.transactions {
             if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.verify() {
-                println!("Invalid transaction signature");
+                tracing::warn!("Block {}: invalid transaction signature (tx: {})", self.index, tx.hash());
                 return false;
             }
         }
