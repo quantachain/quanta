@@ -222,17 +222,20 @@ impl Blockchain {
             // Genesis distribution
             let (recipients, premine_amount) = if network == ChainNetwork::Testnet {
                 // TESTNET PREMINE: 1 Million QUA per wallet (1_000_000_000_000 microunits)
+                // Generated via: cargo run --bin gen_faucet_wallets
+                // Mnemonic: set FAUCET_MNEMONIC in quanta-web/.env.local
+                // Account 0 = faucet sender address (used by the faucet API)
                 let testnet_faucets = vec![
-                    "0x4df72a570c6da4b8d19a53ea537bf0b70f214db7",
-                    "0xb4cc6c1148bbef44a3a837e1fff469230c7e0a1e",
-                    "0x500718acbf31a17608f1dc40bdcc4cadde5c4071",
-                    "0x2ef238e4342d05d2d2d7ce6b00faa892ca8e6bfb",
-                    "0xffdb3c04ad173afa8499328662ac6b710da03b72",
-                    "0x0d053c72b0d061f27e2ffb7addffea5818793323",
-                    "0x6d2e8d55fa15b0c1ec6270f6a1608a477bcbad18",
-                    "0x13842203cdc92009ba83e8306366f72235dc9b66",
-                    "0xbcd430a25e7b90d4a3e9e97d988a000405fecb9e",
-                    "0xff42dac6946fb9d220660d7a22c3d3e656a33fe9",
+                    "0x1683be267318d2ddd8cee8df4a4548dcffb1e088",  // Faucet 0 (sender)
+                    "0xd528c18ce7a8844e4a4dcd841975b20ae599b020",  // Faucet 1
+                    "0xfd6e36bfa2b2798d08592802206c943d5513adfb",  // Faucet 2
+                    "0xed15573ad312d41aaef74cff56a8ef28122ec2db",  // Faucet 3
+                    "0xaffd6d4f74c5651110efcf1b9736f7a5cf2ccdbb",  // Faucet 4
+                    "0xbf5ee055f399323fdd0cefe3d4aa923678d46107",  // Faucet 5
+                    "0x1dc9637b183093d723ea8d1fb18083b06490facb",  // Faucet 6
+                    "0xa2270f30ca1aad922510375508bf68cd95509f29",  // Faucet 7
+                    "0xe15a689775685ae324559ea9a492fc650354ca0b",  // Faucet 8
+                    "0x005dcff212d27b55e7a74bf745e1349ab44ca25d",  // Faucet 9
                 ];
                 (testnet_faucets.into_iter().map(String::from).collect(), 1_000_000_000_000)
             } else {

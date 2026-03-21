@@ -22,27 +22,27 @@ enum Commands {
     // ──────────────────────────────────────────────────────────────────────
     // Wallet management
     // ──────────────────────────────────────────────────────────────────────
-    /// Create a new encrypted Falcon-512 wallet
+    /// Create a new encrypted Falcon-512 raw wallet (advanced/server use).
+    /// For regular users, prefer `new-hd` which gives you a 24-word recovery phrase.
     New {
         #[arg(short, long, default_value = "wallet.qua")]
         file: String,
     },
 
-    /// Create a new HD wallet with 24-word mnemonic
+    /// Create a new HD wallet with a 24-word mnemonic (RECOMMENDED)
     NewHd {
         #[arg(short, long, default_value = "hd_wallet.json")]
         file: String,
-        #[arg(short, long, default_value = "3")]
+        #[arg(short, long, default_value = "1")]
         accounts: u32,
     },
 
-    /// Restore HD wallet from mnemonic phrase
+    /// Restore HD wallet from mnemonic phrase (mnemonic is prompted, not a CLI arg)
     RestoreHd {
         #[arg(short, long, default_value = "hd_wallet.json")]
         file: String,
-        /// Mnemonic phrase (24 words, quoted)
-        mnemonic: String,
-        #[arg(short, long, default_value = "3")]
+        /// How many accounts to restore
+        #[arg(short, long, default_value = "1")]
         accounts: u32,
     },
 
@@ -149,6 +149,9 @@ async fn main() {
     match cli.command {
         // ──────────────────── Wallet creation ────────────────────
         Commands::New { file } => {
+            println!("\n  NOTE: 'new' creates a raw key wallet (no recovery phrase).");
+            println!("  For regular users, consider 'new-hd' instead — it gives you");
+            println!("  a 24-word mnemonic that can restore all your accounts.\n");
             let wallet = QuantumWallet::new();
             let pwd = read_new_password("wallet");
             wallet.save_quantum_safe(&file, &pwd).expect("Failed to save wallet");
@@ -156,6 +159,7 @@ async fn main() {
             println!("  Address : {}", wallet.address);
             println!("  File    : {}", file);
             println!("\n  SECURITY: Back up this file and remember the password!");
+            println!("  WARNING : There is NO recovery phrase — if you lose this file, funds are lost!");
         }
 
         Commands::NewHd { file, accounts } => {
@@ -168,10 +172,20 @@ async fn main() {
             let encrypted = wallet.export_encrypted(&pwd).expect("Encrypt failed");
             std::fs::write(&file, encrypted).expect("Save failed");
             println!("\n HD Wallet saved to: {}", file);
-            println!("  CRITICAL: Write down your 24-word mnemonic above!");
+            println!("  CRITICAL: Write down your 24-word mnemonic shown above!");
+            println!("  It is the ONLY way to recover your wallet if you lose the file.");
         }
 
-        Commands::RestoreHd { file, mnemonic, accounts } => {
+        Commands::RestoreHd { file, accounts } => {
+            // SECURITY: Mnemonic is prompted interactively — never passed as a CLI arg
+            // (CLI args appear in shell history and `ps` output, exposing the seed phrase)
+            println!("Enter your 24-word mnemonic phrase:");
+            let mnemonic = rpassword::read_password().expect("Failed to read mnemonic");
+            let mnemonic = mnemonic.trim().to_string();
+            if mnemonic.split_whitespace().count() < 12 {
+                eprintln!(" Error: Mnemonic must be at least 12 words.");
+                std::process::exit(1);
+            }
             let mut wallet = HDWallet::from_mnemonic(mnemonic, "");
             for i in 0..accounts {
                 wallet.generate_account(Some(format!("Account {}", i)));

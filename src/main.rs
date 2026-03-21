@@ -80,9 +80,10 @@ enum Commands {
         #[arg(long = "no-network")]
         no_network: bool,
         
-        /// Run in background as daemon
-        #[arg(long)]
-        detach: bool,
+        // --detach (daemon mode) is commented out for now — Unix-only, not needed yet
+        // /// Run in background as daemon
+        // #[arg(long)]
+        // detach: bool,
     },
     
     /// Check node status (requires running node)
@@ -253,7 +254,7 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Start { config, network, port, network_port, rpc_port, db, bootstrap, no_network, detach } => {
+        Commands::Start { config, network, port, network_port, rpc_port, db, bootstrap, no_network } => {
             // Load configuration with RPC port override
             let mut cfg = QuantaConfig::load_with_overrides(
                 config,
@@ -268,116 +269,15 @@ async fn main() {
             // Set RPC port from CLI or default
             let rpc_port = rpc_port.unwrap_or(7782);
             
-            // Setup logging based on detach mode
-            if detach {
-                // Fork to background on Unix-like systems
-                #[cfg(unix)]
-                {
-                    use std::process::Command;
-                    
-                    // Check if already running as daemon
-                    if std::env::var("QUANTA_DAEMON").is_err() {
-                        println!("Starting QUANTA node in daemon mode...");
-                        
-                        // Create logs directory
-                        std::fs::create_dir_all("logs").expect("Failed to create logs directory");
-                        
-                        // Prepare arguments (include --detach to trigger file logging in child)
-                        let mut args = vec![
-                            "start".to_string(),
-                            "--detach".to_string(),
-                            "--port".to_string(),
-                            cfg.node.api_port.to_string(),
-                            "--network-port".to_string(),
-                            cfg.node.network_port.to_string(),
-                            "--rpc-port".to_string(),
-                            rpc_port.to_string(),
-                            "--db".to_string(),
-                            cfg.node.db_path.clone(),
-                        ];
-                        
-                        if cfg.node.no_network {
-                            args.push("--no-network".to_string());
-                        }
-                        
-                        // Open log file for the child process
-                        let log_file_path = format!("logs/quanta_node_{}.log", cfg.node.network_port);
-                        let log_file = std::fs::OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open(&log_file_path)
-                            .expect("Failed to open log file");
-                        
-                        // Fork process with proper file descriptors
-                        let child = Command::new(std::env::current_exe().unwrap())
-                            .args(&args)
-                            .env("QUANTA_DAEMON", "1")
-                            .stdin(std::process::Stdio::null())
-                            .stdout(std::process::Stdio::from(log_file.try_clone().unwrap()))
-                            .stderr(std::process::Stdio::from(log_file))
-                            .spawn()
-                            .expect("Failed to start daemon process");
-                        
-                        let child_pid = child.id();
-                        
-                        // Write PID file
-                        let pid_file = format!("logs/quanta_{}.pid", cfg.node.network_port);
-                        std::fs::write(&pid_file, child_pid.to_string())
-                            .expect("Failed to write PID file");
-                        
-                        println!(" QUANTA node started as daemon (PID: {})", child_pid);
-                        println!("  API Port: {}", cfg.node.api_port);
-                        println!("  Network Port: {}", cfg.node.network_port);
-                        println!("  RPC Port: {}", rpc_port);
-                        println!("  Database: {}", cfg.node.db_path);
-                        println!("  Log file: {}", log_file_path);
-                        println!("  PID file: {}", pid_file);
-                        println!("\nWaiting for node to initialize...");
-                        std::thread::sleep(std::time::Duration::from_secs(3));
-                        println!("\nUse './quanta status --rpc-port {}' to check node status", rpc_port);
-                        println!("Use './quanta stop --rpc-port {}' to stop the node", rpc_port);
-                        
-                        return;
-                    }
-                }
-                
-                #[cfg(not(unix))]
-                {
-                    eprintln!("Warning: Daemon mode is not fully supported on Windows. Running in foreground with file logging.");
-                }
-                
-                // Setup file-based logging for daemon
-                std::fs::create_dir_all("logs").expect("Failed to create logs directory");
-                
-                let log_file = format!("logs/quanta_node_{}.log", cfg.node.network_port);
-                let file = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&log_file)
-                    .expect("Failed to open log file");
-                
-                tracing_subscriber::fmt()
-                    .with_writer(Arc::new(file))
-                    .with_ansi(false)
-                    .with_target(false)
-                    .with_level(true)
-                    .init();
-                
-                // Write PID file
-                let pid_file = format!("logs/quanta_{}.pid", cfg.node.network_port);
-                std::fs::write(&pid_file, std::process::id().to_string())
-                    .expect("Failed to write PID file");
-                
-                tracing::info!("Starting QUANTA node in DAEMON mode");
-                tracing::info!("Log file: {}", log_file);
-                tracing::info!("PID file: {}", pid_file);
-            } else {
-                // Initialize console logging for non-detached mode
-                tracing_subscriber::fmt()
-                    .with_target(false)
-                    .with_level(true)
-                    .init();
-            }
+            // --detach / daemon mode is commented out for now
+            // To run in background on Linux/Mac: nohup ./quanta start &
+            // Or use a process manager like systemd / tmux / screen
+            
+            // Initialize console logging
+            tracing_subscriber::fmt()
+                .with_target(false)
+                .with_level(true)
+                .init();
             
             tracing::info!("Starting QUANTA node with configuration:");
             tracing::info!("  API Port: {}", cfg.node.api_port);
@@ -792,12 +692,17 @@ async fn main() {
         }
 
         Commands::HdWallet { file } => {
+            use crate::crypto::HDWallet;
             println!("Enter wallet password:");
-            let _password = rpassword::read_password().expect("Failed to read password");
-            
-            // For now, we'll need to implement proper loading
-            println!("HD wallet info display - implementation needed for encrypted load");
-            println!("Wallet file: {}", file);
+            let password = rpassword::read_password().expect("Failed to read password");
+            let data = std::fs::read(&file).expect("Failed to read wallet file");
+            match HDWallet::import_encrypted(&data, &password) {
+                Ok(wallet) => wallet.display_info(),
+                Err(e) => {
+                    eprintln!(" Failed to load HD wallet: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
 
         Commands::Wallet { file, network, db } => {

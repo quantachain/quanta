@@ -84,7 +84,7 @@ async fn main() {
                 Err(e) => {
                     eprintln!(" Failed to start mining: {}", e);
                     eprintln!("  Is the quanta node running? Start it with:");
-                    eprintln!("    quanta start --detach");
+                    eprintln!("    quanta start");
                     std::process::exit(1);
                 }
             }
