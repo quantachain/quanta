@@ -1,9 +1,9 @@
 # ============================================================
 # Dockerfile — QUANTA Blockchain Node
 # ============================================================
-# Beta v0.1 — Initial release for single-node testnet testing
+# Alpha v2 — Release for testnet testing
 #
-# Image : xd637/quanta-node:v0.1-beta
+# Image : xd637/quanta-node:alpha-v2
 # Repo  : https://hub.docker.com/r/xd637/quanta-node
 #
 # Quick start (single node):
@@ -20,8 +20,8 @@ FROM rust:latest AS builder
 
 # Image metadata (OCI standard)
 LABEL org.opencontainers.image.title="quanta-node" \
-      org.opencontainers.image.description="QuantaChain blockchain node — post-quantum secure, PoW/PoS hybrid. Beta v0.1 initial release." \
-      org.opencontainers.image.version="0.1-beta" \
+      org.opencontainers.image.description="QuantaChain blockchain node — post-quantum secure, PoW/PoS hybrid. Alpha v2 release." \
+      org.opencontainers.image.version="alpha-v2" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="MIT"

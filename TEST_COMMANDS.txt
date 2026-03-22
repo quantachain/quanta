@@ -68,3 +68,17 @@ cargo run -q --bin get_testnet_hash
 
 REAL_TESTNET_GENESIS_HASH: fd1b98c04051c3f413dd605ca44f3b200a95752efada30a6e2d142bcfaf094d3
 
+
+Time Gen
+powershell -Command "[DateTimeOffset]::Parse('2026-03-21T00:00:00Z').ToUnixTimeSeconds()"
+
+//docker COMMANDS
+
+docker build -t xd637/quanta-node:alpha-v2 -t xd637/quanta-node:latest .
+
+
+docker push xd637/quanta-node:alpha-v2
+
+docker push xd637/quanta-node:latest
+
+

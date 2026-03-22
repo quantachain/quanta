@@ -56,8 +56,8 @@ impl Block {
         // All nodes must use identical genesis parameters
         
         let (timestamp, difficulty, nonce) = match network {
-            crate::core::ChainNetwork::Mainnet => (1735689600, 6, 0), // 2026-01-01, difficulty 6 for security
-            crate::core::ChainNetwork::Testnet => (1735689601, 4, 12345), // Different genesis, difficulty 4
+            crate::core::ChainNetwork::Mainnet => (1774051200, 6, 0), // 2026-03-21, difficulty 6 for security
+            crate::core::ChainNetwork::Testnet => (1774051201, 4, 12345), // Different genesis, difficulty 4
         };
         
         let mut genesis = Self {
@@ -219,7 +219,7 @@ mod tests {
         
         // CONSENSUS-CRITICAL: Genesis block must have these exact parameters
         assert_eq!(genesis.index, 0);
-        assert_eq!(genesis.timestamp, 1735689600); // 2026-01-01 00:00:00 UTC
+        assert_eq!(genesis.timestamp, 1774051200); // 2026-03-21 00:00:00 UTC
         assert_eq!(genesis.difficulty, 6);
         assert_eq!(genesis.previous_hash, "0".repeat(64));
         assert_eq!(genesis.merkle_root, "0".repeat(64));
@@ -229,7 +229,7 @@ mod tests {
         // CRITICAL: Hash must match hardcoded value in blockchain.rs
         assert_eq!(
             genesis.hash,
-            "04d9ebb7e707b6107e24eb938650e5298f359254596f03d740038d511ea1ce71",
+            "d0f8e765c51672695069e6b91b989eb9d7646e362fbfb0948f5d3ab74ba88edf",
             "Genesis hash mismatch! This will cause chain splits."
         );
     }
