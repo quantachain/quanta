@@ -24,7 +24,7 @@ LABEL org.opencontainers.image.title="quanta-node" \
       org.opencontainers.image.version="alpha-v2" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="Apache-2.0"
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
