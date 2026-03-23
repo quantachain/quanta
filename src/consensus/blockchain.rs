@@ -127,7 +127,7 @@ const MAX_ADDRESS_LEN: usize = 128;
 // Generated from Block::genesis() with timestamp 1735689600 (2026-01-01 00:00:00 UTC)
 // Difficulty: 6 (PRODUCTION)
 const GENESIS_HASH: &str = "1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0";
-const TESTNET_GENESIS_HASH: &str = "fd1b98c04051c3f413dd605ca44f3b200a95752efada30a6e2d142bcfaf094d3";
+const TESTNET_GENESIS_HASH: &str = "4dbf3c4375b6fb25bc01a45c19ace8d656374ceb7e712ab3d88a70f29793034a";
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)

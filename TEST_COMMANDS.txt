@@ -66,7 +66,7 @@ tail -f logs/quanta.log
 cargo run -q --bin get_testnet_hash
 
 
-REAL_TESTNET_GENESIS_HASH: fd1b98c04051c3f413dd605ca44f3b200a95752efada30a6e2d142bcfaf094d3
+REAL_TESTNET_GENESIS_HASH: 4dbf3c4375b6fb25bc01a45c19ace8d656374ceb7e712ab3d88a70f29793034a
 
 
 Time Gen
