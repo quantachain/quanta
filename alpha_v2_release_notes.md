@@ -116,14 +116,14 @@ cargo build --release
 
 ## Wallet Management
 
-**Create a new wallet natively:**
+**Create a new HD wallet natively:**
 ```bash
-./target/release/quanta-wallet create
+./target/release/quanta-wallet new-hd
 ```
 
-**Create a new wallet using Docker:**
+**Create a new HD wallet using Docker:**
 ```bash
-docker exec -it quanta-node quanta-wallet create
+docker exec -it quanta-node quanta-wallet new-hd
 ```
 
 ---
@@ -132,12 +132,12 @@ docker exec -it quanta-node quanta-wallet create
 
 **Start CPU miner natively:**
 ```bash
-./target/release/quanta-miner start -c quanta.toml
+./target/release/quanta-miner start --address YOUR_WALLET_ADDRESS
 ```
 
 **Start CPU miner using Docker:**
 ```bash
-docker exec -d quanta-node quanta-miner start -c /home/quanta/quanta.toml
+docker exec -it quanta-node quanta-miner start --address YOUR_WALLET_ADDRESS
 ```
 
 ---
