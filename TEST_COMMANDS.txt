@@ -82,3 +82,50 @@ docker push xd637/quanta-node:alpha-v2
 docker push xd637/quanta-node:latest
 
 
+/// server setup - 
+
+sudo apt update && sudo apt upgrade -y
+
+curl -fsSL https://get.docker.com | sh
+
+sudo usermod -aG docker ubuntu && newgrp docker
+
+//ip ports - 
+
+sudo iptables -I INPUT -p tcp --dport 8333 -j ACCEPT
+sudo iptables -I INPUT -p tcp --dport 7782 -j ACCEPT
+sudo iptables -I INPUT -p tcp --dport 3000 -j ACCEPT
+sudo apt install -y iptables-persistent
+sudo netfilter-persistent save
+
+run node -
+
+mkdir -p ~/quanta_data
+
+sudo chmod 777 ~/quanta_data
+
+docker run -d \
+  --name quanta-node \
+  --restart always \
+  -p 8333:8333 \
+  -p 7782:7782 \
+  -p 3000:3000 \
+  -v ~/quanta_data:/home/quanta/quanta_data \
+  xd637/quanta-node:latest
+
+//check logs - docker logs quanta-node --tail 30 -f
+
+//stop and clean start
+
+docker stop quanta-node && docker rm quanta-node
+docker pull xd637/quanta-node:latest
+docker run -d \
+  --name quanta-node \
+  --restart always \
+  -p 8333:8333 \
+  -p 7782:7782 \
+  -p 3000:3000 \
+  -v ~/quanta_data:/home/quanta/quanta_data \
+  xd637/quanta-node:latest
+
+
