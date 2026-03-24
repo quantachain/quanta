@@ -71,6 +71,9 @@ USER quanta
 # API: 3000, P2P: 8333, RPC: 7782, Metrics: 9090
 EXPOSE 3000 8333 7782 9090
 
+# Define volumes for data persistence
+VOLUME ["/home/quanta/quanta_data", "/home/quanta/logs"]
+
 # Health check (dynamic port based on config)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:${API_PORT:-3000}/health || exit 1

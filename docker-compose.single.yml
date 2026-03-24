@@ -12,7 +12,7 @@ version: '3.8'
 
 services:
   quanta-node:
-    image: xd637/quanta-node:v0.1-beta
+    image: xd637/quanta-node:alpha-v2
     container_name: quanta-node
     hostname: quanta-node-01
     ports:
@@ -21,7 +21,8 @@ services:
       - "7782:7782"   # RPC (CLI control)
       - "9090:9090"   # Prometheus metrics
     volumes:
-      - quanta_data:/home/quanta/quanta_data
+      - quanta-data:/home/quanta/quanta_data
+      - quanta-logs:/home/quanta/logs
       - ./quanta.toml:/home/quanta/quanta.toml:ro
     environment:
       - RUST_LOG=info
@@ -42,5 +43,7 @@ networks:
     driver: bridge
 
 volumes:
-  quanta_data:
+  quanta-data:
+    driver: local
+  quanta-logs:
     driver: local
