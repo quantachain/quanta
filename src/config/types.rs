@@ -33,9 +33,7 @@ pub struct QuantaConfig {
     pub network_type: ChainNetwork,
     pub node: NodeConfig,
     pub network: NetworkConfig,
-    pub consensus: ConsensusConfig,
     pub security: SecurityConfig,
-    pub mining: MiningConfig,
     pub metrics: MetricsConfig,
     /// Consensus engine: proof_of_work | proof_of_stake (planned)
     #[serde(default = "QuantaConfig::default_engine")]
@@ -73,15 +71,6 @@ pub struct NetworkConfig {
     pub dns_seeds: Vec<String>,
 }
 
-/// Consensus-critical configuration (MUST match across all nodes)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConsensusConfig {
-    pub max_block_transactions: usize,
-    pub max_block_size_bytes: usize,
-    pub min_transaction_fee_microunits: u64,
-    pub transaction_expiry_blocks: u64,
-    pub coinbase_maturity: u64,
-}
 
 /// Node-local security preferences (can differ between nodes)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -98,30 +87,6 @@ pub struct SecurityConfig {
     pub require_tls: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MiningConfig {
-    // Adaptive tokenomics with annual reduction
-    pub year_1_reward_microunits: u64,
-    pub annual_reduction_percent: u8,
-    pub min_reward_microunits: u64,
-    pub blocks_per_year: u64,
-
-    // Network bootstrap
-    pub bootstrap_phase_blocks: u64,
-
-    // Mining reward vesting (anti-dump mechanism)
-    pub mining_reward_lock_percent: u8,
-    pub mining_reward_lock_blocks: u64,
-
-    // Fee distribution
-    pub fee_burn_percent: u8,
-    pub fee_treasury_percent: u8,
-    pub fee_validator_percent: u8,
-
-    // Blockchain timing
-    pub target_block_time: u64,
-    pub difficulty_adjustment_interval: u64,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricsConfig {
@@ -153,13 +118,7 @@ impl Default for QuantaConfig {
                     // "seed3.quanta.network".to_string(),
                 ],
             },
-            consensus: ConsensusConfig {
-                max_block_transactions: 2000,
-                max_block_size_bytes: 1_048_576,
-                min_transaction_fee_microunits: 100, // 0.0001 QUA
-                transaction_expiry_blocks: 2880, // ~24 hours at 30s blocks
-                coinbase_maturity: 100,
-            },
+
             security: SecurityConfig {
                 max_mempool_size: 5000,
                 transaction_expiry_seconds: 86400,
@@ -168,20 +127,7 @@ impl Default for QuantaConfig {
                 enable_peer_banning: true,   // Auto-ban malicious peers
                 require_tls: false,          // Set true for public nodes
             },
-            mining: MiningConfig {
-                year_1_reward_microunits: 100_000_000, // 100 QUA
-                annual_reduction_percent: 15,
-                min_reward_microunits: 5_000_000, // 5 QUA floor
-                blocks_per_year: 1_051_200,
-                bootstrap_phase_blocks: 105_120,
-                mining_reward_lock_percent: 50,
-                mining_reward_lock_blocks: 52_560,
-                fee_burn_percent: 70,
-                fee_treasury_percent: 20,
-                fee_validator_percent: 10,
-                target_block_time: 30,
-                difficulty_adjustment_interval: 10,
-            },
+
             metrics: MetricsConfig {
                 enabled: true,
                 port: 9090,
@@ -285,40 +231,7 @@ impl QuantaConfig {
             return Err("API port and metrics port must differ".into());
         }
         
-        // Consensus rules must be sane
-        if self.consensus.max_block_size_bytes == 0 {
-            return Err("Block size must be > 0".into());
-        }
-        if self.consensus.max_block_transactions == 0 {
-            return Err("Max block transactions must be > 0".into());
-        }
-        if self.consensus.min_transaction_fee_microunits == 0 {
-            return Err("Minimum transaction fee must be > 0 (prevents spam)".into());
-        }
-        if self.consensus.transaction_expiry_blocks == 0 {
-            return Err("Transaction expiry blocks must be > 0".into());
-        }
-        if self.consensus.coinbase_maturity == 0 {
-            return Err("Coinbase maturity must be > 0 (prevents mining attacks)".into());
-        }
-        
-        // Mining config validation
-        if self.mining.target_block_time == 0 {
-            return Err("Target block time must be > 0".into());
-        }
-        if self.mining.difficulty_adjustment_interval == 0 {
-            return Err("Difficulty adjustment interval must be > 0".into());
-        }
-        if self.mining.year_1_reward_microunits == 0 {
-            return Err("Year 1 mining reward must be > 0".into());
-        }
-        if self.mining.annual_reduction_percent > 100 {
-            return Err("Annual reduction percent must be <= 100".into());
-        }
-        if self.mining.fee_burn_percent + self.mining.fee_treasury_percent + self.mining.fee_validator_percent != 100 {
-            return Err("Fee distribution percentages must sum to 100".into());
-        }
-        
+
         // Security limits
         if self.security.max_mempool_size == 0 {
             return Err("Max mempool size must be > 0".into());
@@ -345,21 +258,7 @@ impl QuantaConfig {
         tracing::info!("Network:");
         tracing::info!("  Max Peers: {}", self.network.max_peers);
         tracing::info!("  Bootstrap Nodes: {:?}", self.network.bootstrap_nodes);
-        tracing::info!("Consensus (MUST match network):");
-        tracing::info!("  Max Block Size: {} bytes", self.consensus.max_block_size_bytes);
-        tracing::info!("  Max Block Txs: {}", self.consensus.max_block_transactions);
-        tracing::info!("  Min Fee: {} microunits", self.consensus.min_transaction_fee_microunits);
-        tracing::info!("  Tx Expiry: {} blocks", self.consensus.transaction_expiry_blocks);
-        tracing::info!("  Coinbase Maturity: {} blocks", self.consensus.coinbase_maturity);
-        tracing::info!("Mining:");
-        tracing::info!("  Year 1 Reward: {} microunits", self.mining.year_1_reward_microunits);
-        tracing::info!("  Annual Reduction: {}%", self.mining.annual_reduction_percent);
-        tracing::info!("  Min Reward Floor: {} microunits", self.mining.min_reward_microunits);
-        tracing::info!("  Reward Vesting: {}% locked for {} blocks", self.mining.mining_reward_lock_percent, self.mining.mining_reward_lock_blocks);
-        tracing::info!("  Fee Distribution: {}% burn, {}% treasury, {}% validator", 
-            self.mining.fee_burn_percent, self.mining.fee_treasury_percent, self.mining.fee_validator_percent);
-        tracing::info!("  Target Block Time: {}s", self.mining.target_block_time);
-        tracing::info!("  Difficulty Adjustment: {} blocks", self.mining.difficulty_adjustment_interval);
+
         tracing::info!("Security:");
         tracing::info!("  Max Mempool: {} txs", self.security.max_mempool_size);
         tracing::info!("Metrics:");

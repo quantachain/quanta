@@ -54,7 +54,7 @@ pub enum BlockchainError {
 // 30s gives ~26s slack and reduces fork probability from 2-5% to <0.1%.
 const TARGET_BLOCK_TIME: u64 = 30; // 30 seconds
 // SECURITY FIX (External Audit): Increased from 10 to 2016 for stability
-// 2016 blocks = ~5.6 hours (prevents rapid oscillation)
+// 2016 blocks × 30s = 60,480s = ~16.8 hours (prevents rapid oscillation)
 const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = 2016;
 
 // SECURITY FIX (External Audit): Difficulty bounds
@@ -63,7 +63,7 @@ const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = 2016;
 // No f64 — floating-point divergence would cause consensus forks.
 const MAX_DIFFICULTY_ADJUSTMENT_UP_PCT: u32 = 115;   // Max 15% increase per adjustment (x * 115 / 100)
 const MAX_DIFFICULTY_ADJUSTMENT_DOWN_PCT: u32 = 85;  // Max 15% decrease per adjustment (x * 85 / 100)
-const MIN_DIFFICULTY: u32 = 4;
+const MIN_DIFFICULTY: u32 = 1000; // ~1000 hashes minimum to prevent zero-difficulty attacks
 // Increased from 256 to 2^31-1 for long-term security (prevents maxing out)
 const MAX_DIFFICULTY: u32 = 2_147_483_647; // Can support massive hashrate growth
 
@@ -97,7 +97,7 @@ const TREASURY_ADDRESS: &str = "ms69216b1d10425689704d5ae3b2a4aa17049f59b1";
 
 // ANTI-DUMP MECHANISM - Mining Reward Lockup
 const MINING_REWARD_LOCK_PERCENT: u64 = 50; // 50% of mining rewards locked
-const MINING_REWARD_LOCK_BLOCKS: u64 = 157_680; // 6 months vesting (182.5 days)
+const MINING_REWARD_LOCK_BLOCKS: u64 = 157_680; // ~54.75 days vesting (157,680 × 30s)
 
 // Security limits
 const MAX_MEMPOOL_SIZE: usize = 5000; // Maximum pending transactions
@@ -127,7 +127,7 @@ const MAX_ADDRESS_LEN: usize = 128;
 // Generated from Block::genesis() with timestamp 1735689600 (2026-01-01 00:00:00 UTC)
 // Difficulty: 6 (PRODUCTION)
 const GENESIS_HASH: &str = "1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0";
-const TESTNET_GENESIS_HASH: &str = "4dbf3c4375b6fb25bc01a45c19ace8d656374ceb7e712ab3d88a70f29793034a";
+const TESTNET_GENESIS_HASH: &str = "00001a12f223e4bd6e2a8e5f6b4160d72cc01db8b48b2d6254f87a2704eff3b9";
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)
