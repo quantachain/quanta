@@ -68,24 +68,37 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 
 ## Quick Start with Docker
 
+### Option 1: Docker Desktop (Graphical Interface)
+1. Open Docker Desktop and find `xd637/quanta-node:alpha-v2` (or `:latest`) in your Images.
+2. Click **Run**.
+3. Under **Optional settings**, configure:
+   - **Container name**: `quanta-node`
+   - **Ports**: Map `3000`, `7782`, `8333`, `9090` to themselves.
+   - **Volumes**: 
+     - Add host path `quanta-data` to container path `/home/quanta/quanta_data`
+     - Add host path `quanta-logs` to container path `/home/quanta/logs`
+4. Click **Run**.
+
+### Option 2: Docker CLI
 ```bash
 # Pull the image
 docker pull xd637/quanta-node:alpha-v2
 
-# OPTION 1: Run with Docker Compose (Recommended)
-docker compose -f docker-compose.single.yml up -d
-
-# OPTION 2: Run directly via Docker CLI (Ensure data persistence!)
+# Run directly (Ensure data persistence!)
 docker run -d \
   --name quanta-node \
   -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
   -v quanta-data:/home/quanta/quanta_data \
   -v quanta-logs:/home/quanta/logs \
   xd637/quanta-node:alpha-v2
-
-# Check node is running (for both options)
-curl http://localhost:3000/health
 ```
+
+### Option 3: Docker Compose (Recommended)
+```bash
+docker compose -f docker-compose.single.yml up -d
+```
+
+---
 
 ## Manual Build from Source
 
@@ -97,6 +110,34 @@ cargo build --release
 
 # Run node
 ./target/release/quanta start -c quanta.toml
+```
+
+---
+
+## Wallet Management
+
+**Create a new wallet natively:**
+```bash
+./target/release/quanta-wallet create
+```
+
+**Create a new wallet using Docker:**
+```bash
+docker exec -it quanta-node quanta-wallet create
+```
+
+---
+
+## Mining (Proof of Work)
+
+**Start CPU miner natively:**
+```bash
+./target/release/quanta-miner start -c quanta.toml
+```
+
+**Start CPU miner using Docker:**
+```bash
+docker exec -d quanta-node quanta-miner start -c /home/quanta/quanta.toml
 ```
 
 ---
