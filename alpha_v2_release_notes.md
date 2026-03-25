@@ -12,7 +12,7 @@ This is a **pre-release testnet build**. Do not use real funds. APIs and chain p
 |---|---|
 | Network | Testnet |
 | Timestamp | `1774051200` (2026-03-21 00:00:00 UTC) |
-| Testnet Genesis Hash | `fd1b98c04051c3f413dd605ca44f3b200a95752efada30a6e2d142bcfaf094d3` |
+| Testnet Genesis Hash | `00001a12f223e4bd6e2a8e5f6b4160d72cc01db8b48b2d6254f87a2704eff3b9` |
 | Mainnet Genesis Hash | `1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0` |
 | Difficulty | 4 (Testnet) / 6 (Mainnet) |
 | Block Time | 30 seconds |
@@ -96,6 +96,62 @@ docker run -d \
 ### Option 3: Docker Compose (Recommended)
 ```bash
 docker compose -f docker-compose.single.yml up -d
+```
+
+---
+
+## Server Setup (Ubuntu / VPS)
+
+The following instructions guide you through setting up a persistent, always-on Quanta node on a fresh Ubuntu server.
+
+**1. Update system and install Docker:**
+```bash
+sudo apt update && sudo apt upgrade -y
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker ubuntu && newgrp docker
+```
+
+**2. Open necessary ports:**
+```bash
+sudo iptables -I INPUT -p tcp --dport 8333 -j ACCEPT
+sudo iptables -I INPUT -p tcp --dport 7782 -j ACCEPT
+sudo iptables -I INPUT -p tcp --dport 3000 -j ACCEPT
+sudo apt install -y iptables-persistent
+sudo netfilter-persistent save
+```
+
+**3. Set up directory and start the node:**
+```bash
+mkdir -p ~/quanta_data
+sudo chmod 777 ~/quanta_data
+
+docker run -d \
+  --name quanta-node \
+  --restart always \
+  -p 8333:8333 \
+  -p 7782:7782 \
+  -p 3000:3000 \
+  -v ~/quanta_data:/home/quanta/quanta_data \
+  xd637/quanta-node:latest
+```
+
+**4. Check logs:**
+```bash
+docker logs quanta-node --tail 30 -f
+```
+
+**5. Update / Clean Restart:**
+```bash
+docker stop quanta-node && docker rm quanta-node
+docker pull xd637/quanta-node:latest
+docker run -d \
+  --name quanta-node \
+  --restart always \
+  -p 8333:8333 \
+  -p 7782:7782 \
+  -p 3000:3000 \
+  -v ~/quanta_data:/home/quanta/quanta_data \
+  xd637/quanta-node:latest
 ```
 
 ---
