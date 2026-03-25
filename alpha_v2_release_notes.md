@@ -120,7 +120,7 @@ sudo apt install -y iptables-persistent
 sudo netfilter-persistent save
 ```
 
-**3. Set up directory and start the node:**
+**3. Set up directory and start the node (using Host Networking for API Security):**
 ```bash
 mkdir -p ~/quanta_data
 sudo chmod 777 ~/quanta_data
@@ -128,12 +128,11 @@ sudo chmod 777 ~/quanta_data
 docker run -d \
   --name quanta-node \
   --restart always \
-  -p 8333:8333 \
-  -p 7782:7782 \
-  -p 3000:3000 \
+  --network host \
   -v ~/quanta_data:/home/quanta/quanta_data \
   xd637/quanta-node:latest
 ```
+*(Need public Web Wallet access? See `TESTNET_RPC_SETUP.md` for NGINX & SSL setup)*
 
 **4. Check logs:**
 ```bash
@@ -147,9 +146,7 @@ docker pull xd637/quanta-node:latest
 docker run -d \
   --name quanta-node \
   --restart always \
-  -p 8333:8333 \
-  -p 7782:7782 \
-  -p 3000:3000 \
+  --network host \
   -v ~/quanta_data:/home/quanta/quanta_data \
   xd637/quanta-node:latest
 ```
