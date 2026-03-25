@@ -172,14 +172,19 @@ cargo build --release
 
 ## Wallet Management
 
-**Create a new HD wallet natively:**
+**Create a new wallet natively:**
 ```bash
-./target/release/quanta-wallet new-hd
+./target/release/quanta new-wallet --file wallet.qua
 ```
 
-**Create a new HD wallet using Docker:**
+**Create a raw encrypted wallet using Docker:**
 ```bash
-docker exec -it quanta-node quanta-wallet new-hd
+docker exec -it quanta-node quanta new_wallet --file wallet.qua
+```
+
+**Create a new HD Wallet (Recommended! Gives JSON + 24-word recovery phrase):**
+```bash
+docker exec -it quanta-node quanta new_hd_wallet --file hd_wallet.json
 ```
 
 ---
@@ -188,12 +193,41 @@ docker exec -it quanta-node quanta-wallet new-hd
 
 **Start CPU miner natively:**
 ```bash
-./target/release/quanta-miner start --address YOUR_WALLET_ADDRESS
+./target/release/quanta start_mining YOUR_WALLET_ADDRESS --rpc-port 7782
 ```
 
-**Start CPU miner using Docker:**
+**Start CPU miner using Docker (Background):**
 ```bash
-docker exec -it quanta-node quanta-miner start --address YOUR_WALLET_ADDRESS
+docker exec -d quanta-node quanta start_mining YOUR_WALLET_ADDRESS --rpc-port 7782
+```
+
+**Check Mining Logs in Docker:**
+```bash
+docker logs quanta-node --tail 30 -f
+```
+
+**Stop Mining using Docker:**
+```bash
+docker exec -it quanta-node quanta stop_mining --rpc-port 7782
+```
+
+---
+
+## Node Status & Blockchain Info
+
+**Print Current Blockchain Height:**
+```bash
+docker exec -it quanta-node quanta print_height --rpc-port 7782
+```
+
+**View Full Node Status (Peers, Height, Mempool):**
+```bash
+docker exec -it quanta-node quanta status --rpc-port 7782
+```
+
+**View Dynamic Mining Status (Difficulty, Blocks Mined, Rewards):**
+```bash
+docker exec -it quanta-node quanta mining_status --rpc-port 7782
 ```
 
 ---
