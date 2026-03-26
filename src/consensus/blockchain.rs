@@ -114,7 +114,7 @@ const MAX_BLOCK_TRANSACTIONS: usize = 1200; // Maximum transactions per block
 // Previous 1MB limit could only support ~583 transactions
 /// Exported so `storage::db` can enforce a matching decompress size cap (MED-5).
 pub const MAX_BLOCK_SIZE_BYTES: usize = 2_097_152; // 2 MB max block size
-const MAX_ORPHAN_BLOCKS: usize = 100; // Maximum orphaned blocks (prevents memory exhaustion)
+const MAX_ORPHAN_BLOCKS: usize = 2000; // Increased to hold full MAX_SYNC_BATCH out-of-order blocks
 const MAX_TRANSACTION_SIZE_BYTES: usize = 102400; // 100KB max per transaction (prevents DOS)
 const MIN_TRANSACTION_FEE: u64 = 100; // 0.0001 QUA in microunits
 const TRANSACTION_EXPIRY_SECONDS: i64 = 86400; // 24 hours
@@ -202,11 +202,15 @@ impl Blockchain {
         let chain = storage.load_chain()?;
         let account_state = storage.load_account_state()?.unwrap_or_else(AccountState::new);
         
+        // OPTIMIZATION: load_chain only returns genesis or empty if new.
+        // We must check storage height to see if we truly have an empty chain!
+        let height = storage.get_chain_height()?;
+        
         // Define expected genesis hash based on network
         // Note: Mainnet hash is hardcoded constant. Testnet hash should be calculated or hardcoded once known.
         // For now, we trust the generated testnet genesis if it's testnet.
         
-        let (chain, account_state, _difficulty) = if chain.is_empty() {
+        let (chain, account_state, _difficulty) = if height == 0 {
             // Create genesis block
             tracing::info!("Creating new blockchain with genesis block for {:?}", network);
             let genesis = Block::genesis(network);
@@ -271,11 +275,14 @@ impl Blockchain {
             (vec![genesis], account_state, if network == ChainNetwork::Testnet { 4 } else { 6 })
         } else {
             // OPTIMIZATION: chain only contains genesis (loaded from db.rs load_chain())
-            let height = storage.get_chain_height()?;
+            // Or we just load genesis manually here
+            let genesis = storage.load_block(0).expect("Genesis block must exist if height > 0");
+            let chain = vec![genesis];
+            
             tracing::info!("✓ Loaded blockchain with {} blocks (genesis in memory, rest on disk)", height);
             
             // SECURITY: Verify genesis block on load (prevents database tampering)
-            if !chain.is_empty() && network == ChainNetwork::Mainnet && chain[0].hash != GENESIS_HASH {
+            if network == ChainNetwork::Mainnet && chain[0].hash != GENESIS_HASH {
                 panic!("CRITICAL: Genesis block mismatch in existing chain!\nExpected: {}\nGot: {}\nDatabase may be corrupted or from different network.", 
                     GENESIS_HASH, chain[0].hash);
             }
@@ -1114,7 +1121,12 @@ impl Blockchain {
         // 2. FORK DETECTION: Check if this block builds on our chain
         if block.previous_hash == latest.hash && block.index == latest.index + 1 {
             // Normal case: extends our chain
-            return self.add_block_to_main_chain(block);
+            let res = self.add_block_to_main_chain(block);
+            if res.is_ok() {
+                // If we successfully added a block, see if any orphans can now be attached!
+                self.process_orphans();
+            }
+            return res;
         } else if block.index > latest.index {
             // Potential fork: block is ahead of us
             tracing::warn!("Fork detected: Block {} at height {}, we're at {}", 
@@ -1251,6 +1263,40 @@ impl Blockchain {
 
         tracing::info!(" Network block {} accepted", block.index);
         Ok(())
+    }
+
+    /// Process the orphan pool recursively to attach any pending blocks
+    fn process_orphans(&self) {
+        loop {
+            let latest = self.get_latest_block();
+            let expected_index = latest.index + 1;
+            let expected_prev_hash = latest.hash.clone();
+            
+            let mut orphans = self.orphaned_blocks.write();
+            
+            // Find an orphan that connects to our new tip
+            let mut found_index = None;
+            for (i, orphan) in orphans.iter().enumerate() {
+                if orphan.index == expected_index && orphan.previous_hash == expected_prev_hash {
+                    found_index = Some(i);
+                    break;
+                }
+            }
+            
+            if let Some(idx) = found_index {
+                // Remove the connected orphan
+                let block = orphans.remove(idx).unwrap();
+                drop(orphans); // Drop lock before adding to main chain
+                
+                tracing::info!("Orphan block {} connects to main chain at height {}", &block.hash[..8], block.index);
+                if let Err(e) = self.add_block_to_main_chain(block) {
+                    tracing::warn!("Failed to add formerly orphaned block: {}", e);
+                    break;
+                }
+            } else {
+                break; // No more orphans connect
+            }
+        }
     }
 
     /// Check if a block exists in the chain by hash.
