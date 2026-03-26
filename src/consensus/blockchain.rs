@@ -574,10 +574,22 @@ impl Blockchain {
         let state_root = temp_state.calculate_state_root();
 
         // Create new block (unmined)
-        let previous_hash = self.get_latest_block().hash.clone();
+        let previous_block = self.get_latest_block();
+        let previous_hash = previous_block.hash.clone();
         let mut new_block = Block::new(index, all_transactions, previous_hash, difficulty);
+        
+        // Ensure timestamp is valid (strictly greater than previous and MTP)
+        let current_time = chrono::Utc::now().timestamp();
+        let mtp = if previous_block.index >= 10 {
+            self.get_median_time_past(previous_block.index, 11)
+        } else {
+            0
+        };
+        let min_valid_time = std::cmp::max(previous_block.timestamp, mtp);
+        new_block.timestamp = std::cmp::max(current_time, min_valid_time + 1);
+        
         new_block.state_root = state_root;
-        new_block.hash = new_block.calculate_hash(); // Re-calculate hash with state_root included
+        new_block.hash = new_block.calculate_hash(); // Re-calculate hash with state_root and adjusted timestamp included
         
         // Don't mine or save here. Just return the template.
         Ok(new_block)
@@ -644,15 +656,8 @@ impl Blockchain {
                 return Err(BlockchainError::InvalidBlock);
             }
         }
-        // Prevent large backward jumps (within 2 hours of previous block)
-        // EXCEPTION: Allow large gap for block 1 (genesis to first mined block)
-        const MAX_TIME_DELTA: i64 = 7200; // 2 hours
-        if previous.index > 0 && (block.timestamp > previous.timestamp + MAX_TIME_DELTA ||
-           block.timestamp < previous.timestamp - MAX_TIME_DELTA) {
-            tracing::warn!("Block timestamp {} outside acceptable range (prev: {}, delta: {})", 
-                block.timestamp, previous.timestamp, block.timestamp - previous.timestamp);
-            return Err(BlockchainError::InvalidBlock);
-        }
+        // Removed MAX_TIME_DELTA check. Large forward gaps are valid if the network stops.
+        // Large backward gaps are already prevented by MTP and `block.timestamp <= previous.timestamp`.
         
         // 3. Difficulty must match expected
         // Calculate expected difficulty considering adjustments

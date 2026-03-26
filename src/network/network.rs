@@ -393,9 +393,28 @@ impl Network {
 
         let blockchain = self.blockchain.write().await;
         
-        // SECURITY: Reject blocks that are too far ahead (prevents time-warp attacks)
+        // SYNC FIX: If a block is too far ahead, we are behind — request the missing
+        // range from this peer instead of returning a hard error.  The 100-block
+        // guard is intentionally kept to block time-warp attacks from peers that
+        // don't trigger a sync (i.e., no peer object available).
         let latest = blockchain.get_latest_block();
         if block.index > latest.index + 100 {
+            if let Some(ref p) = peer {
+                let our_height = latest.index;
+                // Drop the write lock before sending the network message
+                drop(blockchain);
+                let end_height = block.index.min(our_height + MAX_SYNC_BATCH);
+                info!(
+                    "Block too far ahead ({} vs our {}) — requesting sync [{}-{}]",
+                    block.index, our_height, our_height, end_height
+                );
+                let _ = p.send_message(P2PMessage::GetBlocks {
+                    start_height: our_height,
+                    end_height,
+                }).await;
+                return Ok(());
+            }
+            // No peer context — we can't sync, reject outright
             return Err(format!("Block too far ahead: {} vs our {}", block.index, latest.index));
         }
         
@@ -510,6 +529,11 @@ impl Network {
     }
 
     /// Synchronize blockchain from peers
+    ///
+    /// SYNC FIX: Loops in MAX_SYNC_BATCH-sized batches until we reach the peer's
+    /// reported chain tip.  The previous implementation sent a single GetBlocks
+    /// request capped at 500 blocks then declared "sync complete", leaving nodes
+    /// permanently stuck thousands of blocks behind.
     pub async fn sync_blockchain(&self) -> Result<(), String> {
         let peers = self.peer_manager.get_peers().await;
         
@@ -519,18 +543,14 @@ impl Network {
         
         info!("Starting blockchain synchronization");
         
-        // BETA FIX: use storage height (get_chain().len() is always 1 - genesis only in memory)
-        let our_height = self.blockchain.read().await.get_height();
-        
-        // Ask all peers for their height
+        // Ask all peers for their current height
         for peer in &peers {
             let _ = peer.send_message(P2PMessage::GetHeight).await;
         }
-        
         tokio::time::sleep(Duration::from_secs(2)).await;
         
         // Find peer with highest height
-        let mut max_height = our_height;
+        let mut max_height = self.blockchain.read().await.get_height();
         let mut best_peer: Option<Arc<Peer>> = None;
         
         for peer in &peers {
@@ -541,21 +561,47 @@ impl Network {
             }
         }
         
-        if let Some(peer) = best_peer {
-            info!("Syncing from peer with height {}", max_height);
-            
-            // Request missing blocks
-            let _ = peer.send_message(P2PMessage::GetBlocks {
+        let peer = match best_peer {
+            Some(p) => p,
+            None => {
+                info!("Already at chain tip — no sync needed");
+                return Ok(());
+            }
+        };
+        
+        info!("Syncing from peer {} at height {}", peer.address().await, max_height);
+        
+        // Batch loop: keep requesting MAX_SYNC_BATCH blocks until caught up.
+        loop {
+            // BETA FIX: always read from storage, not in-memory chain length
+            let our_height = self.blockchain.read().await.get_height();
+            if our_height >= max_height {
+                break;
+            }
+
+            let end_height = max_height.min(our_height + MAX_SYNC_BATCH);
+            info!("Sync batch: requesting blocks [{}-{}] (target: {})", our_height, end_height, max_height);
+
+            if let Err(e) = peer.send_message(P2PMessage::GetBlocks {
                 start_height: our_height,
-                end_height: max_height,
-            }).await;
-            
-            // Wait for blocks to arrive
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            
-            info!("Blockchain sync complete");
+                end_height,
+            }).await {
+                warn!("Sync request failed: {} — aborting sync", e);
+                break;
+            }
+
+            // Allow time for the batch to arrive and be processed
+            tokio::time::sleep(Duration::from_secs(8)).await;
+
+            // Refresh peer tip in case it grew while we were syncing
+            let info = peer.get_info().await;
+            if info.height > max_height {
+                max_height = info.height;
+            }
         }
         
+        let final_height = self.blockchain.read().await.get_height();
+        info!("Blockchain sync complete — height: {}", final_height);
         Ok(())
     }
 
