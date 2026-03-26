@@ -138,6 +138,12 @@ impl Peer {
         info.height = height;
     }
 
+    /// Update peer height specifically (e.g. from Height messages)
+    pub async fn update_height(&self, height: u64) {
+        let mut info = self.info.write().await;
+        info.height = height;
+    }
+
     /// Get peer information
     pub async fn get_info(&self) -> PeerInfo {
         self.info.read().await.clone()

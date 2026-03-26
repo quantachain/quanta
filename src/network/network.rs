@@ -12,6 +12,7 @@ use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use lru::LruCache;
 use std::num::NonZeroUsize;
 
@@ -53,6 +54,13 @@ pub struct Network {
     seen_blocks: Arc<Mutex<LruCache<String, ()>>>,
     seen_txs:    Arc<Mutex<LruCache<String, ()>>>,
     discovery: Arc<PeerDiscovery>,
+    /// SYNC FIX: Track whether a sync operation is currently in progress.
+    /// When true, broadcast blocks that are "too far ahead" will NOT
+    /// trigger additional GetBlocks requests (prevents request storms).
+    syncing: Arc<AtomicBool>,
+    /// SYNC FIX: Mutex-protected sync block buffer. Sync response blocks
+    /// are collected here and applied sequentially, not concurrently.
+    sync_buffer: Arc<tokio::sync::Mutex<Vec<Block>>>,
 }
 
 impl Network {
@@ -76,6 +84,8 @@ impl Network {
             // 10k tx entries ≈ handles a full mempool cycle without re-flooding
             seen_txs: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(10_000).unwrap()))),
             discovery,
+            syncing: Arc::new(AtomicBool::new(false)),
+            sync_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -304,6 +314,9 @@ impl Network {
             }
             P2PMessage::Height(height) => {
                 debug!("Peer {} has height {}", addr, height);
+                if let Some(p) = &peer {
+                    p.update_height(height).await;
+                }
             }
             P2PMessage::GetMempool => {
                 self.handle_get_mempool(addr).await?;
@@ -380,7 +393,37 @@ impl Network {
     }
 
     /// Handle new block (WITH HARDENED VALIDATION + RE-BROADCAST FIX)
+    ///
+    /// SYNC FIX: During an active sync, blocks that are "too far ahead" are
+    /// silently dropped instead of triggering additional GetBlocks requests.
+    /// This prevents the request storm that was causing the stuck-at-272 bug.
     async fn handle_new_block(&self, block: Block, peer: Option<Arc<Peer>>) -> Result<(), String> {
+        let is_syncing = self.syncing.load(Ordering::SeqCst);
+
+        let blockchain = self.blockchain.read().await;
+        let latest = blockchain.get_latest_block();
+        let our_height = blockchain.get_height();
+        drop(blockchain);
+
+        if block.index > latest.index + 100 {
+            // We just ignore it. The periodic sync loop in main.rs will
+            // detect the height gap and execute a proper sync_blockchain()
+            // batch process. We do not want to spam GetBlocks here.
+            return Ok(());
+        }
+
+        // SYNC FIX: If syncing and block is in the sync range, buffer it
+        // for ordered sequential application.
+        // We do this BEFORE the seen_blocks check, because previously-failed blocks
+        // might be in the seen cache and we need to process them during a sync!
+        if is_syncing && block.index > latest.index && block.index <= latest.index + 1500 {
+            let mut buffer = self.sync_buffer.lock().await;
+            if buffer.len() < (MAX_SYNC_BATCH as usize + 200) {
+                buffer.push(block);
+            }
+            return Ok(());
+        }
+
         // BETA FIX: Deduplication — only process + re-broadcast if not seen before.
         // This prevents broadcast storms while still propagating to the full mesh.
         let already_seen = {
@@ -391,35 +434,7 @@ impl Network {
             return Ok(());
         }
 
-        let blockchain = self.blockchain.write().await;
-        
-        // SYNC FIX: If a block is too far ahead, we are behind — request the missing
-        // range from this peer instead of returning a hard error.  The 100-block
-        // guard is intentionally kept to block time-warp attacks from peers that
-        // don't trigger a sync (i.e., no peer object available).
-        let latest = blockchain.get_latest_block();
-        if block.index > latest.index + 100 {
-            if let Some(ref p) = peer {
-                let our_height = latest.index;
-                // Drop the write lock before sending the network message
-                drop(blockchain);
-                let end_height = block.index.min(our_height + MAX_SYNC_BATCH);
-                info!(
-                    "Block too far ahead ({} vs our {}) — requesting sync [{}-{}]",
-                    block.index, our_height, our_height, end_height
-                );
-                let _ = p.send_message(P2PMessage::GetBlocks {
-                    start_height: our_height,
-                    end_height,
-                }).await;
-                return Ok(());
-            }
-            // No peer context — we can't sync, reject outright
-            return Err(format!("Block too far ahead: {} vs our {}", block.index, latest.index));
-        }
-        
         // Add block to chain (full validation inside add_network_block)
-        drop(blockchain);
         let bc = self.blockchain.write().await;
         match bc.add_network_block(block.clone()) {
             Ok(_) => {
@@ -430,19 +445,20 @@ impl Network {
                 // also receive the block (essential for mesh topology with 6+ nodes).
                 self.broadcast_block(block.clone()).await;
 
-                // Recursive Synchronization: request next batch if peer is ahead.
-                // HIGH-2 FIX: Clamp end_height to MAX_SYNC_BATCH to prevent
-                // a malicious peer from triggering a block-request storm via
-                // a forged height value.
-                if let Some(p) = peer {
-                    let peer_info = p.get_info().await;
-                    if peer_info.height > block.index {
-                        let end_height = peer_info.height.min(block.index + MAX_SYNC_BATCH);
-                        info!("Recursive sync: height {} → requesting up to {}", block.index, end_height);
-                        let _ = p.send_message(P2PMessage::GetBlocks {
-                            start_height: block.index + 1,
-                            end_height,
-                        }).await;
+                // SYNC FIX: Don't do recursive sync requests here.
+                // The main sync_blockchain loop handles this properly.
+                // Only request more blocks if NOT in a sync operation.
+                if !is_syncing {
+                    if let Some(p) = peer {
+                        let peer_info = p.get_info().await;
+                        if peer_info.height > block.index + 1 {
+                            let end_height = peer_info.height.min(block.index + MAX_SYNC_BATCH);
+                            info!("Requesting next blocks: {} → {}", block.index + 1, end_height);
+                            let _ = p.send_message(P2PMessage::GetBlocks {
+                                start_height: block.index + 1,
+                                end_height,
+                            }).await;
+                        }
                     }
                 }
 
@@ -530,10 +546,18 @@ impl Network {
 
     /// Synchronize blockchain from peers
     ///
-    /// SYNC FIX: Loops in MAX_SYNC_BATCH-sized batches until we reach the peer's
-    /// reported chain tip.  The previous implementation sent a single GetBlocks
-    /// request capped at 500 blocks then declared "sync complete", leaving nodes
-    /// permanently stuck thousands of blocks behind.
+    /// SYNC FIX (v3): Complete rewrite of sync logic. Previous implementations
+    /// failed because:
+    /// 1. Sync blocks arrived as individual Block messages processed concurrently
+    ///    by tokio::spawn, breaking sequential chain application.
+    /// 2. Broadcast blocks from the tip triggered redundant GetBlocks requests.
+    /// 3. The old "sleep and hope" approach couldn't reliably detect batch completion.
+    ///
+    /// New approach:
+    /// - Set syncing=true to suppress broadcast-triggered sync requests
+    /// - Clear sync buffer, send GetBlocks, wait for blocks to arrive in buffer
+    /// - Sort buffered blocks by index and apply sequentially
+    /// - Repeat until caught up
     pub async fn sync_blockchain(&self) -> Result<(), String> {
         let peers = self.peer_manager.get_peers().await;
         
@@ -569,14 +593,26 @@ impl Network {
             }
         };
         
-        info!("Syncing from peer {} at height {}", peer.address().await, max_height);
+        info!("Syncing from peer {} at height {} (we are at {})", 
+            peer.address().await, max_height, self.blockchain.read().await.get_height());
+        
+        // SYNC FIX: Set syncing flag to suppress broadcast-triggered GetBlocks requests
+        self.syncing.store(true, Ordering::SeqCst);
+        
+        let mut stall_count = 0u32;
+        const MAX_STALLS: u32 = 5; // Give up after 5 consecutive stalls
         
         // Batch loop: keep requesting MAX_SYNC_BATCH blocks until caught up.
         loop {
-            // BETA FIX: always read from storage, not in-memory chain length
             let our_height = self.blockchain.read().await.get_height();
             if our_height >= max_height {
                 break;
+            }
+
+            // Clear the sync buffer before requesting a new batch
+            {
+                let mut buffer = self.sync_buffer.lock().await;
+                buffer.clear();
             }
 
             let end_height = max_height.min(our_height + MAX_SYNC_BATCH);
@@ -590,18 +626,128 @@ impl Network {
                 break;
             }
 
-            // Allow time for the batch to arrive and be processed
-            tokio::time::sleep(Duration::from_secs(8)).await;
+            // SYNC FIX: Wait for blocks to arrive in the sync buffer.
+            // Poll the buffer until no new blocks have arrived for a timeout period.
+            let expected_blocks = (end_height - our_height) as usize;
+            let mut wait_cycles = 0u32;
+            let max_wait_cycles = 30; // 30 × 500ms = 15 seconds max wait per batch
+            let mut last_buffer_size = 0usize;
+            let mut no_progress_count = 0u32;
+            
+            loop {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                wait_cycles += 1;
+                
+                let buffer_size = self.sync_buffer.lock().await.len();
+                
+                if buffer_size >= expected_blocks {
+                    info!("Sync buffer full: {}/{} blocks received", buffer_size, expected_blocks);
+                    break;
+                }
+                
+                if buffer_size == last_buffer_size {
+                    no_progress_count += 1;
+                } else {
+                    no_progress_count = 0;
+                    last_buffer_size = buffer_size;
+                }
+                
+                // If no new blocks for 3 seconds or max wait reached, process what we have
+                if no_progress_count >= 6 || wait_cycles >= max_wait_cycles {
+                    if buffer_size > 0 {
+                        info!("Sync buffer partial: {}/{} blocks after {}ms", 
+                            buffer_size, expected_blocks, wait_cycles * 500);
+                    } else {
+                        warn!("No sync blocks received after {}ms", wait_cycles * 500);
+                    }
+                    break;
+                }
+            }
+
+            // SYNC FIX: Extract blocks from buffer, sort by index, and apply sequentially
+            let blocks_to_apply: Vec<Block> = {
+                let mut buffer = self.sync_buffer.lock().await;
+                let mut blocks: Vec<Block> = buffer.drain(..).collect();
+                blocks.sort_by_key(|b| b.index);
+                blocks
+            };
+
+            if blocks_to_apply.is_empty() {
+                stall_count += 1;
+                warn!("Sync stall {}/{}: no blocks received, retrying...", stall_count, MAX_STALLS);
+                if stall_count >= MAX_STALLS {
+                    warn!("Sync stalled {} times — aborting. Will retry on next peer cycle.", MAX_STALLS);
+                    break;
+                }
+                // Wait a bit before retrying (connection might need to reconnect)
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                continue;
+            }
+            stall_count = 0; // Reset on progress
+
+            let batch_count = blocks_to_apply.len();
+            let first_idx = blocks_to_apply.first().map(|b| b.index).unwrap_or(0);
+            let last_idx = blocks_to_apply.last().map(|b| b.index).unwrap_or(0);
+            info!("Applying {} sync blocks [{}-{}] sequentially...", batch_count, first_idx, last_idx);
+
+            let mut applied = 0u64;
+            let mut errors = 0u64;
+            for block in blocks_to_apply {
+                let bc = self.blockchain.write().await;
+                match bc.add_network_block(block.clone()) {
+                    Ok(_) => {
+                        applied += 1;
+                        if applied % 100 == 0 {
+                            info!("Sync progress: applied {}/{} blocks (height: {})", 
+                                applied, batch_count, block.index + 1);
+                        }
+                    }
+                    Err(e) => {
+                        errors += 1;
+                        if errors <= 5 {
+                            warn!("Sync: failed to apply block {}: {}", block.index, e);
+                        }
+                        // Don't break — later blocks might still apply (orphan processing)
+                    }
+                }
+                drop(bc);
+            }
+
+            let new_height = self.blockchain.read().await.get_height();
+            info!("Sync batch complete: applied {}, errors {}, new height: {}", 
+                applied, errors, new_height);
+
+            // If no blocks were applied at all, we're stuck
+            if applied == 0 {
+                stall_count += 1;
+                warn!("Sync stall {}/{}: received blocks but none applied", stall_count, MAX_STALLS);
+                if stall_count >= MAX_STALLS {
+                    warn!("Sync permanently stalled — aborting.");
+                    break;
+                }
+            }
 
             // Refresh peer tip in case it grew while we were syncing
+            let _ = peer.send_message(P2PMessage::GetHeight).await;
+            tokio::time::sleep(Duration::from_millis(500)).await;
             let info = peer.get_info().await;
             if info.height > max_height {
                 max_height = info.height;
             }
         }
         
+        // SYNC FIX: Clear syncing state
+        self.syncing.store(false, Ordering::SeqCst);
+        
         let final_height = self.blockchain.read().await.get_height();
         info!("Blockchain sync complete — height: {}", final_height);
+        
+        // If we're still behind, schedule another sync attempt
+        if final_height < max_height {
+            info!("Still behind (at {} vs target {}), will continue syncing on next cycle", 
+                final_height, max_height);
+        }
+        
         Ok(())
     }
 
@@ -637,10 +783,18 @@ impl Network {
                 for addr in target_peers {
                     let network = Arc::clone(&self);
                     tokio::spawn(async move {
-                        if let Err(_) = network.connect_to_peer(addr).await {
-                            network.discovery.mark_peer_failed(addr).await;
-                        } else {
-                            network.discovery.update_peer_seen(addr).await;
+                        match network.connect_to_peer(addr).await {
+                            Ok(_) => {
+                                network.discovery.update_peer_seen(addr).await;
+                            }
+                            Err(e) => {
+                                if e.contains("Already connected") || e.contains("Too many connections") {
+                                    // We are connected (or rejected safely), so update seen time
+                                    network.discovery.update_peer_seen(addr).await;
+                                } else {
+                                    network.discovery.mark_peer_failed(addr).await;
+                                }
+                            }
                         }
                     });
                 }

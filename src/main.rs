@@ -336,12 +336,32 @@ async fn main() {
                     }
                 });
                 
-                // Start blockchain sync
+                // Start blockchain sync (loops until caught up, then checks periodically)
                 let network_clone = Arc::clone(&network);
+                let blockchain_clone = Arc::clone(&blockchain);
                 tokio::spawn(async move {
+                    // Initial delay to let connections establish
                     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                    if let Err(e) = network_clone.sync_blockchain().await {
-                        tracing::error!("Sync error: {}", e);
+                    
+                    loop {
+                        if let Err(e) = network_clone.sync_blockchain().await {
+                            tracing::error!("Sync error: {}", e);
+                        }
+                        
+                        // Check if we need to continue syncing
+                        let our_height = blockchain_clone.read().await.get_height();
+                        let peers = network_clone.get_peers_info().await;
+                        let max_peer_height = peers.iter().map(|p| p.height).max().unwrap_or(0);
+                        
+                        if our_height >= max_peer_height.saturating_sub(2) {
+                            tracing::info!("Sync complete — at height {} (peers at {})", our_height, max_peer_height);
+                            // Still check periodically for new blocks
+                            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+                        } else {
+                            tracing::info!("Still syncing — at height {} (peers at {}), retrying in 10s", 
+                                our_height, max_peer_height);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                        }
                     }
                 });  
                 
