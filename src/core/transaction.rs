@@ -460,6 +460,12 @@ impl AccountState {
     pub fn get_accounts(&self) -> Vec<String> {
         self.accounts.keys().cloned().collect()
     }
+
+    /// Full account record for an address (balance + locked + nonce).
+    /// Returns `None` if the address has never appeared on-chain.
+    pub fn get_account(&self, address: &str) -> Option<&AccountBalance> {
+        self.accounts.get(address)
+    }
 }
 
 // ---------------------------------------------------------------------------

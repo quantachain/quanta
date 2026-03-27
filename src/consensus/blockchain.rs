@@ -57,15 +57,23 @@ const TARGET_BLOCK_TIME: u64 = 30; // 30 seconds
 // 2016 blocks × 30s = 60,480s = ~16.8 hours (prevents rapid oscillation)
 const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = 2016;
 
-// SECURITY FIX (External Audit): Difficulty bounds
-// Tightened from 2x/0.5x to 1.15x/0.85x (prevents wild swings)
-// INTEGER MATH ONLY: expressed as percent numerators (100 = 100%).
-// No f64 — floating-point divergence would cause consensus forks.
-const MAX_DIFFICULTY_ADJUSTMENT_UP_PCT: u32 = 115;   // Max 15% increase per adjustment (x * 115 / 100)
-const MAX_DIFFICULTY_ADJUSTMENT_DOWN_PCT: u32 = 85;  // Max 15% decrease per adjustment (x * 85 / 100)
-const MIN_DIFFICULTY: u32 = 1000; // ~1000 hashes minimum to prevent zero-difficulty attacks
-// Increased from 256 to 2^31-1 for long-term security (prevents maxing out)
-const MAX_DIFFICULTY: u32 = 2_147_483_647; // Can support massive hashrate growth
+// DIFFICULTY BOUNDS — INTEGER MATH ONLY (no f64, no platform-dependent rounding).
+//
+// The actual_time fed into the ratio is ALREADY clamped to [expected/4 .. expected*4],
+// so the maximum natural scaling per interval is 4x in either direction.
+// Setting the cap at exactly that boundary means the formula is the sole limiter —
+// no redundant secondary clamp to slow convergence on a chain that starts fast.
+//
+// A ±15% cap (old value from security audit) was designed for a LIVE chain already
+// near its target. On a fresh chain with difficulty=65536 and a CPU hashrate of
+// millions H/s, ±15% needs 50+ intervals (100K blocks!) to converge — effectively
+// broken. 4x per interval converges in ~10 intervals instead.
+const MAX_DIFFICULTY_ADJUSTMENT_UP_PCT: u32 = 400;   // Max 4x increase per interval
+const MAX_DIFFICULTY_ADJUSTMENT_DOWN_PCT: u32 = 25;  // Max 4x decrease per interval (1/4)
+/// MIN_DIFFICULTY must always be ≤ genesis difficulty so there is no jarring
+/// upward jump at the first adjustment interval (block 2016).
+const MIN_DIFFICULTY: u32 = 8_343_908; // Matches testnet V2 genesis — prevents trivial PoW
+const MAX_DIFFICULTY: u32 = 2_147_483_647; // 2^31-1 — safely holds massive hashrate growth
 
 // MODERN ADAPTIVE TOKENOMICS (Option 3 - Solana-style)
 const YEAR_1_REWARD: u64 = 100_000_000; // 100 QUA in microunits
@@ -123,11 +131,12 @@ const MAX_FUTURE_BLOCK_TIME: i64 = 7200; // 2 hours maximum future timestamp
 /// LOW-1 FIX: Bound address string length to prevent unbounded HashMap key allocations.
 const MAX_ADDRESS_LEN: usize = 128;
 
-// CONSENSUS-CRITICAL: Genesis block hash (prevents chain split attacks)
-// Generated from Block::genesis() with timestamp 1735689600 (2026-01-01 00:00:00 UTC)
-// Difficulty: 6 (PRODUCTION)
+/// CONSENSUS-CRITICAL: Genesis block hashes (prevent chain-split attacks)
+/// Mainnet genesis — pending final mining before mainnet launch.
 const GENESIS_HASH: &str = "1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0";
-const TESTNET_GENESIS_HASH: &str = "00001a12f223e4bd6e2a8e5f6b4160d72cc01db8b48b2d6254f87a2704eff3b9";
+/// Testnet Alpha V2 genesis — mined 2026-03-27, difficulty 8_343_908 (~30s/block).
+/// Old nodes on the previous testnet genesis will be rejected by this hash check.
+const TESTNET_GENESIS_HASH: &str = "0000001a2cbe8311e347945a5d0c35563b3b17b7423f6cc471b9c623ef10b77f";
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)
@@ -623,9 +632,16 @@ impl Blockchain {
     
 
     
-    /// Get current difficulty (DERIVED FROM CHAIN, not local memory)
+    /// Get current difficulty — reads from STORAGE (the real chain), not the
+    /// in-memory `chain` vec which only holds genesis after startup.
     fn get_current_difficulty(&self) -> u32 {
-        self.chain.read().last().map(|b| b.difficulty).unwrap_or(4)
+        let height = self.get_height();
+        if height == 0 {
+            return MIN_DIFFICULTY; // genesis — matches testnet genesis difficulty
+        }
+        self.storage.load_block(height - 1)
+            .map(|b| b.difficulty)
+            .unwrap_or(MIN_DIFFICULTY)
     }
 
     /// Validate block against consensus rules (CRITICAL for network blocks)
@@ -1385,6 +1401,111 @@ impl Blockchain {
         timestamps.sort_unstable();
         timestamps[timestamps.len() / 2]
     }
+
+    // -----------------------------------------------------------------------
+    // Block Explorer APIs
+    // -----------------------------------------------------------------------
+
+    /// Return full account information for a given address (for block explorer).
+    ///
+    /// Returns `None` only when the address has never appeared on-chain.
+    /// Returns spendable balance, total balance (including locked), nonce,
+    /// and the list of active locked entries.
+    pub fn get_address_info(&self, address: &str) -> Option<crate::core::transaction::AccountBalance> {
+        let state = self.account_state.read();
+        state.get_account(address).cloned()
+    }
+
+    /// Look up a confirmed transaction by its hash.
+    ///
+    /// Uses the O(1) storage index built at save-time — no full chain scan.
+    /// Returns `None` if the transaction is not found in confirmed blocks
+    /// (it might still be in the mempool).
+    pub fn find_transaction_by_hash(&self, tx_hash: &str) -> Option<crate::core::transaction::Transaction> {
+        self.storage.find_transaction(tx_hash).ok()
+    }
+
+    /// Return the `count` most recent blocks (descending order, tip first).
+    ///
+    /// Capped at 100 to prevent large response payloads.
+    pub fn get_latest_blocks(&self, count: usize) -> Vec<crate::core::block::Block> {
+        let height = self.get_height();
+        if height == 0 {
+            return vec![];
+        }
+        let count = count.min(100).min(height as usize);
+        let start = height - 1; // tip (0-indexed block index)
+        let mut blocks = Vec::with_capacity(count);
+        for i in 0..count as u64 {
+            if let Some(b) = self.load_block_from_storage(start.saturating_sub(i)) {
+                blocks.push(b);
+            }
+        }
+        blocks
+    }
+
+    /// Return all confirmed transactions involving `address` (sent or received),
+    /// scanning from the chain tip backwards up to `max_blocks` blocks.
+    ///
+    /// Capped at 500 transactions to keep response sizes reasonable.
+    pub fn get_address_transactions(
+        &self,
+        address: &str,
+        max_blocks: u64,
+    ) -> Vec<AddressTransaction> {
+        let height = self.get_height();
+        if height == 0 {
+            return vec![];
+        }
+        let scan_start = height.saturating_sub(1);
+        let scan_end  = scan_start.saturating_sub(max_blocks.min(height));
+
+        let mut results: Vec<AddressTransaction> = Vec::new();
+
+        let i_start = scan_start;
+        let i_end   = scan_end;
+
+        let mut h = i_start;
+        loop {
+            if results.len() >= 500 {
+                break;
+            }
+            if let Some(block) = self.load_block_from_storage(h) {
+                for tx in &block.transactions {
+                    if tx.sender == address || tx.recipient == address {
+                        results.push(AddressTransaction {
+                            tx_hash: tx.hash(),
+                            block_height: block.index,
+                            block_time: block.timestamp,
+                            sender: tx.sender.clone(),
+                            recipient: tx.recipient.clone(),
+                            amount_microunits: tx.amount,
+                            fee_microunits: tx.fee,
+                            tx_type: format!("{:?}", tx.tx_type),
+                        });
+                    }
+                }
+            }
+            if h == 0 || h == i_end {
+                break;
+            }
+            h -= 1;
+        }
+        results
+    }
+}
+
+/// A lightweight transaction record returned for address history queries.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AddressTransaction {
+    pub tx_hash: String,
+    pub block_height: u64,
+    pub block_time: i64,
+    pub sender: String,
+    pub recipient: String,
+    pub amount_microunits: u64,
+    pub fee_microunits: u64,
+    pub tx_type: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

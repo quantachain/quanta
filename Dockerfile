@@ -20,8 +20,8 @@ FROM rust:latest AS builder
 
 # Image metadata (OCI standard)
 LABEL org.opencontainers.image.title="quanta-node" \
-      org.opencontainers.image.description="QuantaChain blockchain node — post-quantum secure, PoW/PoS hybrid. Alpha v2 release." \
-      org.opencontainers.image.version="alpha-v2" \
+      org.opencontainers.image.description="QuantaChain node — post-quantum PoW, Falcon-512 signatures. Alpha V2 — new testnet genesis, fixed difficulty adjustment." \
+      org.opencontainers.image.version="0.3.0-alpha" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="Apache-2.0"

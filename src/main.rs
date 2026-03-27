@@ -497,9 +497,12 @@ async fn main() {
                     println!("\n");
                     println!("            QUANTA MINING STATUS                          ");
                     println!("");
-                    println!("  Mining Active:  {}                              ", if status.is_mining { "YES " } else { "NO" });
+                    println!("  Mining Active:  {}                              ", if status.is_mining { "YES " } else { "NO (idle)" });
                     if let Some(ref addr) = status.mining_address {
-                        println!("  Mining To:      {}...", &addr[..32]);
+                        // Print full address — no truncation
+                        println!("  Mining To:      {}", addr);
+                    } else {
+                        println!("  Mining To:      (not set — use start_mining <address>)");
                     }
                     println!("  Blocks Mined:   {}                                      ", status.blocks_mined);
                     println!("  Difficulty:     {}                                      ", status.difficulty);
@@ -512,11 +515,18 @@ async fn main() {
                         let dt = DateTime::<ChronoUtc>::from_timestamp(last_time, 0)
                             .unwrap_or_else(|| ChronoUtc::now());
                         println!("  Last Block:     {}                        ", dt.format("%Y-%m-%d %H:%M:%S UTC"));
+                    } else {
+                        println!("  Last Block:     (none yet)");
+                    }
+                    if !status.is_mining {
+                        println!("");
+                        println!("  Hint: Start mining with: ./quanta start_mining <your-address>");
                     }
                     println!("\n");
                 }
                 Err(e) => {
                     eprintln!(" Failed to get mining status: {}", e);
+                    eprintln!("  Is the node running? Check with: ./quanta status");
                     std::process::exit(1);
                 }
             }
@@ -675,7 +685,12 @@ async fn main() {
             }
             
             wallet.save_quantum_safe(&file, &password).expect("Failed to save wallet");
-            println!("Wallet created and encrypted successfully!");
+            println!("\n Wallet created and saved to: {}", file);
+            println!("\n Your wallet address:");
+            println!("   {}", wallet.address);
+            println!("\n Copy the address above to receive QUA or start mining.");
+            println!(" To view address later: ./quanta wallet_address --file {}", file);
+            println!(" To start mining:       ./quanta start_mining <address>\n");
         }
 
         Commands::NewHdWallet { file, accounts } => {

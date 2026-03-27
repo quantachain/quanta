@@ -1,5 +1,5 @@
 use axum::{
-    extract::{State, Json, Path},
+    extract::{State, Json, Path, Query},
     routing::{get, post},
     Router, http::StatusCode,
     http::Method,
@@ -19,9 +19,9 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use crate::consensus::blockchain::{Blockchain, BlockchainStats};
+use crate::consensus::blockchain::{Blockchain, BlockchainStats, AddressTransaction};
 use crate::core::transaction::Transaction;
-use crate::crypto::wallet::QuantumWallet;
+
 use crate::consensus::mempool::NodeMetrics;
 use crate::core::block::Block;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -68,6 +68,10 @@ pub struct TransactionResponse {
     pub error: Option<String>,
 }
 
+// -----------------------------------------------------------------------
+// Core stats
+// -----------------------------------------------------------------------
+
 /// Get blockchain stats
 async fn get_stats(
     State(state): State<Arc<ApiState>>,
@@ -76,7 +80,11 @@ async fn get_stats(
     Json(blockchain.get_stats())
 }
 
-/// Get balance for an address
+// -----------------------------------------------------------------------
+// Balance (legacy POST — kept for backward compat)
+// -----------------------------------------------------------------------
+
+/// Get balance for an address (POST body)
 #[derive(Deserialize)]
 pub struct BalanceRequest {
     pub address: String,
@@ -102,6 +110,210 @@ async fn get_balance(
         nonce,
     })
 }
+
+// -----------------------------------------------------------------------
+// Block Explorer — Address endpoints (GET-based, scanner-friendly)
+// -----------------------------------------------------------------------
+
+/// Full address information returned by GET /api/address/:address
+#[derive(Serialize)]
+pub struct AddressInfoResponse {
+    pub address: String,
+    /// Immediately spendable balance (microunits)
+    pub balance_microunits: u64,
+    /// Spendable balance in QUA
+    pub balance_qua: f64,
+    /// Total balance including all locked/vesting entries (microunits)
+    pub total_balance_microunits: u64,
+    /// Total balance in QUA
+    pub total_balance_qua: f64,
+    /// Number of transactions sent FROM this address (on-chain nonce)
+    pub nonce: u64,
+    /// Active locked / vesting entries
+    pub locked_balances: Vec<LockedBalanceResponse>,
+}
+
+#[derive(Serialize)]
+pub struct LockedBalanceResponse {
+    pub amount_microunits: u64,
+    pub amount_qua: f64,
+    pub unlock_height: u64,
+}
+
+/// GET /api/address/:address
+/// Returns full account information: balance, total balance (locked + spendable),
+/// nonce, and locked-balance details. Never returns 404 — unknown addresses
+/// return zeroed fields (address might receive a future tx).
+async fn get_address_info(
+    State(state): State<Arc<ApiState>>,
+    Path(address): Path<String>,
+) -> Json<AddressInfoResponse> {
+    let blockchain = state.blockchain.read().await;
+    let account_state = blockchain.get_account_state_read();
+
+    let balance_microunits = account_state.get_balance(&address);
+    let total_microunits = account_state.get_total_balance(&address);
+    let nonce = account_state.get_nonce(&address);
+
+    let locked_balances = account_state
+        .get_account(&address)
+        .map(|acc| {
+            acc.locked_balances
+                .iter()
+                .map(|lb| LockedBalanceResponse {
+                    amount_microunits: lb.amount,
+                    amount_qua: lb.amount as f64 / 1_000_000.0,
+                    unlock_height: lb.unlock_height,
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Json(AddressInfoResponse {
+        address,
+        balance_microunits,
+        balance_qua: balance_microunits as f64 / 1_000_000.0,
+        total_balance_microunits: total_microunits,
+        total_balance_qua: total_microunits as f64 / 1_000_000.0,
+        nonce,
+        locked_balances,
+    })
+}
+
+/// GET /api/balance/:address  (GET alias — allows direct link from scanner UI)
+async fn get_balance_by_path(
+    State(state): State<Arc<ApiState>>,
+    Path(address): Path<String>,
+) -> Json<BalanceResponse> {
+    let blockchain = state.blockchain.read().await;
+    let balance = blockchain.get_balance(&address);
+    let nonce = blockchain.get_account_state_read().get_nonce(&address);
+    Json(BalanceResponse {
+        address,
+        balance_microunits: balance,
+        nonce,
+    })
+}
+
+/// Query parameters for address tx history
+#[derive(Deserialize)]
+pub struct AddressTxsQuery {
+    /// How many blocks to scan backwards. Defaults to 10_000. Max enforced at 50_000.
+    pub max_blocks: Option<u64>,
+}
+
+/// GET /api/address/:address/txs?max_blocks=N
+/// Returns all confirmed transactions (sent or received) for an address,
+/// scanning backward from the chain tip. Capped at 500 transactions.
+async fn get_address_transactions(
+    State(state): State<Arc<ApiState>>,
+    Path(address): Path<String>,
+    Query(params): Query<AddressTxsQuery>,
+) -> Json<AddressTxsResponse> {
+    let max_blocks = params.max_blocks.unwrap_or(10_000).min(50_000);
+    let blockchain = state.blockchain.read().await;
+    let txs = blockchain.get_address_transactions(&address, max_blocks);
+    let count = txs.len();
+    Json(AddressTxsResponse {
+        address,
+        transaction_count: count,
+        transactions: txs,
+    })
+}
+
+#[derive(Serialize)]
+pub struct AddressTxsResponse {
+    pub address: String,
+    pub transaction_count: usize,
+    pub transactions: Vec<AddressTransaction>,
+}
+
+// -----------------------------------------------------------------------
+// Block Explorer — Transaction lookup by hash
+// -----------------------------------------------------------------------
+
+/// GET /api/tx/:hash
+/// Look up a confirmed transaction by its hash using the O(1) storage index.
+/// Falls back to the mempool if not yet confirmed.
+/// Returns 404 only when the hash is completely unknown.
+async fn get_tx_handler(
+    State(state): State<Arc<ApiState>>,
+    Path(hash): Path<String>,
+) -> Result<Json<TxDetailResponse>, StatusCode> {
+    let blockchain = state.blockchain.read().await;
+
+    // 1. Check confirmed chain first via O(1) storage index
+    if let Some(tx) = blockchain.find_transaction_by_hash(&hash) {
+        return Ok(Json(TxDetailResponse {
+            tx_hash: hash,
+            status: "confirmed".to_string(),
+            transaction: tx,
+            block_height: None,
+        }));
+    }
+
+    // 2. Fall back to mempool
+    let pending = blockchain.get_pending_transactions();
+    if let Some(tx) = pending.iter().find(|t| t.hash() == hash) {
+        return Ok(Json(TxDetailResponse {
+            tx_hash: hash,
+            status: "pending".to_string(),
+            transaction: tx.clone(),
+            block_height: None,
+        }));
+    }
+
+    Err(StatusCode::NOT_FOUND)
+}
+
+/// Response for GET /api/tx/:hash
+#[derive(Serialize)]
+pub struct TxDetailResponse {
+    pub tx_hash: String,
+    /// "confirmed" | "pending"
+    pub status: String,
+    pub transaction: Transaction,
+    /// Present when status == "confirmed" and block info is recoverable
+    pub block_height: Option<u64>,
+}
+
+// -----------------------------------------------------------------------
+// Block Explorer — Latest blocks feed
+// -----------------------------------------------------------------------
+
+/// Query parameters for /api/blocks/latest
+#[derive(Deserialize)]
+pub struct LatestBlocksQuery {
+    /// Number of blocks to return. Defaults to 10. Capped at 100.
+    pub count: Option<usize>,
+}
+
+/// GET /api/blocks/latest?count=N
+/// Returns the N most recent blocks (newest first), including all transactions.
+/// Useful for the block explorer live feed. Count is capped at 100.
+async fn get_latest_blocks(
+    State(state): State<Arc<ApiState>>,
+    Query(params): Query<LatestBlocksQuery>,
+) -> Json<LatestBlocksResponse> {
+    let count = params.count.unwrap_or(10).min(100);
+    let blockchain = state.blockchain.read().await;
+    let blocks = blockchain.get_latest_blocks(count);
+    let block_count = blocks.len();
+    Json(LatestBlocksResponse {
+        block_count,
+        blocks,
+    })
+}
+
+#[derive(Serialize)]
+pub struct LatestBlocksResponse {
+    pub block_count: usize,
+    pub blocks: Vec<Block>,
+}
+
+// -----------------------------------------------------------------------
+// Transaction submission (pre-signed)
+// -----------------------------------------------------------------------
 
 /// CRIT-1 FIX: Password-over-HTTP endpoint replaced with pre-signed submission.
 ///
@@ -155,6 +367,9 @@ async fn submit_signed_transaction(
 // REMOVED: create_transaction_local_only — path-traversal risk (wallet_file from POST body) +
 // password-over-HTTP. Replaced by POST /api/transactions/submit (pre-signed, no password).
 
+// -----------------------------------------------------------------------
+// Mining
+// -----------------------------------------------------------------------
 
 /// Mine request
 #[derive(Deserialize)]
@@ -174,9 +389,6 @@ async fn mine_block(
     Json(req): Json<MineRequest>,
 ) -> (StatusCode, Json<MineResponse>) {
     // HIGH-5 FIX: Validate miner_address format before mining.
-    // Accepts two address formats:
-    //   - Standard wallet:  0x<40 hex chars>     (e.g. 0xabcdef...)
-    //   - Multisig wallet:  ms<40+ hex chars>    (e.g. ms69216b1d10...)
     fn valid_quanta_addr(addr: &str) -> bool {
         if addr.starts_with("0x") {
             addr.len() == 42 && addr[2..].chars().all(|c| c.is_ascii_hexdigit())
@@ -197,53 +409,44 @@ async fn mine_block(
         );
     }
 
-    // 1. Create template (Lock held briefly)
     let template_res = state.blockchain.read().await.create_block_template(req.miner_address.clone());
 
     match template_res {
         Ok(mut block) => {
-            // 2. Mine (NO LOCK held on blockchain)
-            // Run CPU-intensive mining in a blocking task
             let mined_block_res = tokio::task::spawn_blocking(move || {
                 block.mine();
                 block
             }).await;
 
             if let Ok(mined_block) = mined_block_res {
-                 // 3. Submit (Lock held briefly to commit)
-                 let blockchain = state.blockchain.read().await;
-                 match blockchain.add_network_block(mined_block.clone()) {
-                     Ok(_) => {
-                         let index = mined_block.index;
-                         
-                         // Broadcast to network if available
-                         if let Some(ref network) = state.network {
-                             network.broadcast_block(mined_block).await;
-                         }
-                         drop(blockchain);
-
-                         (
-                             StatusCode::OK,
-                             Json(MineResponse {
-                                 success: true,
-                                 block_index: Some(index),
-                                 error: None,
-                             }),
-                         )
-                     }
-                     Err(e) => {
+                let blockchain = state.blockchain.read().await;
+                match blockchain.add_network_block(mined_block.clone()) {
+                    Ok(_) => {
+                        let index = mined_block.index;
+                        if let Some(ref network) = state.network {
+                            network.broadcast_block(mined_block).await;
+                        }
+                        drop(blockchain);
                         (
-                            StatusCode::INTERNAL_SERVER_ERROR,
+                            StatusCode::OK,
                             Json(MineResponse {
-                                success: false,
-                                block_index: None,
-                                error: Some(format!("Failed to add block: {}", e)),
+                                success: true,
+                                block_index: Some(index),
+                                error: None,
                             }),
                         )
-                     }
-                 }
+                    }
+                    Err(e) => (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(MineResponse {
+                            success: false,
+                            block_index: None,
+                            error: Some(format!("Failed to add block: {}", e)),
+                        }),
+                    ),
+                }
             } else {
-                 (
+                (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(MineResponse {
                         success: false,
@@ -253,16 +456,14 @@ async fn mine_block(
                 )
             }
         }
-        Err(e) => {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(MineResponse {
-                    success: false,
-                    block_index: None,
-                    error: Some(format!("Failed to create template: {}", e)),
-                }),
-            )
-        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(MineResponse {
+                success: false,
+                block_index: None,
+                error: Some(format!("Failed to create template: {}", e)),
+            }),
+        ),
     }
 }
 
@@ -287,7 +488,6 @@ async fn start_continuous_mining(
     
     tokio::spawn(async move {
         while mining_active.load(Ordering::Relaxed) {
-            // Check if there are transactions to mine
             let has_txs = {
                 let bc = blockchain.read().await;
                 let result = !bc.get_pending_transactions().is_empty();
@@ -295,29 +495,23 @@ async fn start_continuous_mining(
             };
             
             if !has_txs {
-                // No transactions - sleep longer to avoid CPU waste
                 tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 continue;
             }
             
-            // 1. Create template
             let template_res = blockchain.read().await.create_block_template(miner_address.clone());
             
             match template_res {
                 Ok(mut block) => {
-                    // 2. Mine (NO LOCK)
                     let mined_block_res = tokio::task::spawn_blocking(move || {
                         block.mine();
                         block
                     }).await;
                     
                     if let Ok(mined_block) = mined_block_res {
-                        // Check if still active
                         if !mining_active.load(Ordering::Relaxed) {
                             break;
                         }
-                        
-                        // 3. Submit
                         let bc = blockchain.read().await;
                         match bc.add_network_block(mined_block.clone()) {
                             Ok(_) => {
@@ -333,12 +527,10 @@ async fn start_continuous_mining(
                 }
                 Err(e) => {
                     tracing::error!("Continuous mining error (create template): {}", e);
-                    // Sleep to avoid tight loop on error
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
             }
             
-            // Small delay between blocks
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
     });
@@ -370,6 +562,10 @@ async fn get_mining_status(
         active: state.mining_active.load(Ordering::Relaxed),
     })
 }
+
+// -----------------------------------------------------------------------
+// Validation / Peers / Metrics
+// -----------------------------------------------------------------------
 
 /// Validate blockchain
 #[derive(Serialize)]
@@ -438,7 +634,6 @@ async fn get_metrics(
         NodeMetrics::default()
     };
     
-    // Convert to Prometheus Text Format
     let s = format!(
         "# HELP quanta_peer_count Number of connected peers\n\
          # TYPE quanta_peer_count gauge\n\
@@ -483,15 +678,16 @@ async fn get_metrics(
     )
 }
 
+// -----------------------------------------------------------------------
+// Block / Mempool
+// -----------------------------------------------------------------------
+
 /// Get specific block by height — CRIT-5 FIX: reads from storage, not in-memory chain
 async fn get_block(
     State(state): State<Arc<ApiState>>,
     Path(height): Path<u64>,
 ) -> Result<Json<Block>, StatusCode> {
     let blockchain = state.blockchain.read().await;
-    // CRIT-5 FIX: Previous implementation called get_chain().get(height) which
-    // only accessed the genesis block — every height > 0 returned 404.
-    // load_block_from_storage reads from sled disk DB (the actual chain).
     match blockchain.load_block_from_storage(height) {
         Some(block) => Ok(Json(block)),
         None => Err(StatusCode::NOT_FOUND),
@@ -518,7 +714,10 @@ async fn get_mempool(
     })
 }
 
-/// Health check endpoint
+// -----------------------------------------------------------------------
+// Health check
+// -----------------------------------------------------------------------
+
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: String,
@@ -555,6 +754,10 @@ async fn health_check(
         uptime_seconds: uptime,
     })
 }
+
+// -----------------------------------------------------------------------
+// Rate limiting middleware
+// -----------------------------------------------------------------------
 
 static RATE_LIMITS: std::sync::OnceLock<Mutex<LruCache<std::net::IpAddr, (u32, Instant)>>> = std::sync::OnceLock::new();
 
@@ -598,7 +801,11 @@ async fn rate_limiter(
     Ok(next.run(request).await)
 }
 
-/// Create the API router with rate limiting (DoS protection)
+// -----------------------------------------------------------------------
+// Router + Server
+// -----------------------------------------------------------------------
+
+/// Create the API router with all endpoints and middleware.
 pub fn create_router(
     blockchain: Arc<RwLock<Blockchain>>,
     metrics: Option<Arc<crate::consensus::mempool::MetricsCollector>>,
@@ -611,35 +818,50 @@ pub fn create_router(
         mining_active: Arc::new(AtomicBool::new(false)),
     });
 
-    // CRIT-1 FIX: CORS restricted to localhost only (no wildcard origin).
-    // C-2 FIX: allow_headers restricted to Content-Type only (not Any).
-    //   Any allows Authorization / X-Admin headers cross-origin — CSRF risk.
+    // Allow both localhost dev and the public block explorer origins.
+    // Axum requires exact HeaderValue entries (no wildcard subdomains).
     let cors = CorsLayer::new()
-        .allow_origin(
+        .allow_origin([
             "http://localhost:3000"
                 .parse::<axum::http::HeaderValue>()
                 .expect("valid CORS origin"),
-        )
+            "https://scan.quantachain.org"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid CORS origin"),
+            "https://www.scan.quantachain.org"
+                .parse::<axum::http::HeaderValue>()
+                .expect("valid CORS origin"),
+        ])
         .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
         .allow_headers([axum::http::header::CONTENT_TYPE]);
 
     Router::new()
-        .route("/health", get(health_check))
-        .route("/api/stats", get(get_stats))
-        .route("/api/balance", post(get_balance))
-        // CRIT-1: New pre-signed tx submission endpoint (no password needed)
+        // ── Health / Monitoring ──────────────────────────────────────────
+        .route("/health",           get(health_check))
+        .route("/api/stats",        get(get_stats))
+        .route("/api/validate",     get(validate_chain))
+        .route("/api/peers",        get(get_peers))
+        .route("/api/metrics",      get(get_metrics))
+        // ── Blocks ──────────────────────────────────────────────────────
+        .route("/api/block/:height",    get(get_block))
+        .route("/api/blocks/latest",    get(get_latest_blocks))
+        // ── Mempool ─────────────────────────────────────────────────────
+        .route("/api/mempool",          get(get_mempool))
+        // ── Transactions ────────────────────────────────────────────────
         .route("/api/transactions/submit", post(submit_signed_transaction))
-        // Old endpoint kept but hidden — disabled in public builds
-        // .route("/api/transaction", post(create_transaction_local_only))
-        .route("/api/mine", post(mine_block))
-        .route("/api/mine/start", post(start_continuous_mining))
-        .route("/api/mine/stop", post(stop_continuous_mining))
-        .route("/api/mine/status", get(get_mining_status))
-        .route("/api/validate", get(validate_chain))
-        .route("/api/peers", get(get_peers))
-        .route("/api/metrics", get(get_metrics))
-        .route("/api/block/:height", get(get_block))
-        .route("/api/mempool", get(get_mempool))
+        .route("/api/tx/:hash",            get(get_tx_handler))
+        // ── Addresses / Balances ─────────────────────────────────────────
+        // POST form kept for backward-compat with existing wallets
+        .route("/api/balance",              post(get_balance))
+        // GET-style routes for block explorer deep-links
+        .route("/api/balance/:address",     get(get_balance_by_path))
+        .route("/api/address/:address",     get(get_address_info))
+        .route("/api/address/:address/txs", get(get_address_transactions))
+        // ── Mining ──────────────────────────────────────────────────────
+        .route("/api/mine",         post(mine_block))
+        .route("/api/mine/start",   post(start_continuous_mining))
+        .route("/api/mine/stop",    post(stop_continuous_mining))
+        .route("/api/mine/status",  get(get_mining_status))
         .layer(
             ServiceBuilder::new()
                 .layer(middleware::from_fn(rate_limiter))
@@ -668,16 +890,20 @@ pub async fn start_server(
     
     tracing::info!("QUANTA API server starting on {} (TLS={})", addr, tls_enabled);
     tracing::info!("Endpoints:");
-    tracing::info!("   GET  /health - Health check");
-    tracing::info!("   GET  /api/stats - Get blockchain statistics");
-    tracing::info!("   POST /api/balance - Get address balance");
-    tracing::info!("   POST /api/transactions/submit - Submit pre-signed transaction");
-    tracing::info!("   POST /api/mine - Mine a block");
-    tracing::info!("   GET  /api/validate - Validate blockchain");
-    tracing::info!("   GET  /api/peers - Get connected peers");
-    tracing::info!("   GET  /api/metrics - Get node metrics");
-    tracing::info!("   GET  /api/block/:height - Get specific block");
-    tracing::info!("   GET  /api/mempool - Get pending transactions");
+    tracing::info!("   GET  /health                        - Health check");
+    tracing::info!("   GET  /api/stats                     - Blockchain statistics");
+    tracing::info!("   GET  /api/block/:height             - Block by height");
+    tracing::info!("   GET  /api/blocks/latest?count=N     - Latest N blocks");
+    tracing::info!("   GET  /api/tx/:hash                  - Transaction by hash");
+    tracing::info!("   GET  /api/balance/:address          - Balance by address (GET)");
+    tracing::info!("   POST /api/balance                   - Balance by address (POST, legacy)");
+    tracing::info!("   GET  /api/address/:address          - Full address info + locked balances");
+    tracing::info!("   GET  /api/address/:address/txs      - Address transaction history");
+    tracing::info!("   GET  /api/mempool                   - Pending transactions");
+    tracing::info!("   POST /api/transactions/submit       - Submit pre-signed transaction");
+    tracing::info!("   GET  /api/validate                  - Validate blockchain");
+    tracing::info!("   GET  /api/peers                     - Connected peers");
+    tracing::info!("   GET  /api/metrics                   - Prometheus metrics");
     
     let listener = tokio::net::TcpListener::bind(&addr)
         .await

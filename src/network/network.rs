@@ -226,8 +226,8 @@ impl Network {
                         // CRIT-3 FIX: Use try_send on bounded channel.
                         // If full, add a strike to the misbehaving peer instead of buffering.
                         if let Err(_) = message_tx.try_send((addr, msg)) {
-                            warn!("Message channel full — dropping message from {} and adding strike", addr);
-                            peer.add_strike().await;
+                            warn!("Message channel full — dropping message from {} and adding misbehavior score (+20)", addr);
+                            peer.add_misbehavior(20).await;
                             break;
                         }
                     }
@@ -376,8 +376,9 @@ impl Network {
         if let Err(e) = blockchain.add_transaction(tx.clone()) {
             warn!("Rejected transaction from peer: {}", e);
             if let Some(p) = peer {
-                if p.add_strike().await {
-                    warn!("Banning peer {} for invalid transactions", p.address().await);
+                // Invalid tx: +10 points (10 bad txs = ban)
+                if p.add_misbehavior(10).await {
+                    warn!("Banning peer {} for repeated invalid transactions (score ≥ 100)", p.address().await);
                     p.disconnect().await;
                     self.peer_manager.remove_peer(p.address().await).await;
                 }
@@ -467,8 +468,9 @@ impl Network {
             Err(e) => {
                 warn!("Rejected block from peer: {}", e);
                 if let Some(p) = peer {
-                    if p.add_strike().await {
-                        warn!("Banning peer {} for invalid network blocks", p.address().await);
+                    // Invalid block is a SERIOUS violation: +50 points (2 = ban)
+                    if p.add_misbehavior(50).await {
+                        warn!("Banning peer {} for invalid network blocks (score ≥ 100)", p.address().await);
                         p.disconnect().await;
                         self.peer_manager.remove_peer(p.address().await).await;
                     }

@@ -18,6 +18,15 @@ pub struct PeerInfo {
     pub height: u64,
     pub connected_at: i64,
     pub last_seen: i64,
+    /// Weighted misbehavior score (0–100). Replaces the old binary strike system.
+    /// Score thresholds per offense type (matches Bitcoin DoSMan philosophy):
+    ///   Invalid block    → +50  (one or two = ban; serious consensus violation)
+    ///   Message flood    → +20  (5 floods = ban)
+    ///   Invalid tx       → +10  (10 bad txs = ban)
+    ///   Stale/old block  →  +0  (not scored — could be network latency)
+    /// Peer is disconnected and IP-banned when score ≥ 100.
+    pub misbehavior_score: u32,
+    /// Legacy field kept so PeerManager cleanup can still gate on it
     pub strikes: u8,
 }
 
@@ -44,6 +53,7 @@ impl Peer {
             height: 0,
             connected_at: chrono::Utc::now().timestamp(),
             last_seen: chrono::Utc::now().timestamp(),
+            misbehavior_score: 0,
             strikes: 0,
         };
 
@@ -149,11 +159,32 @@ impl Peer {
         self.info.read().await.clone()
     }
 
-    /// Add a strike to a peer for bad behavior. Returns true if the peer should be banned.
-    pub async fn add_strike(&self) -> bool {
+    /// Add weighted misbehavior score for bad behavior.
+    ///
+    /// Recommended weights:
+    ///   - Invalid block (consensus violation) → score = 50
+    ///   - Message flood                       → score = 20
+    ///   - Invalid transaction                 → score = 10
+    ///
+    /// Returns `true` when the peer should be banned (≥ 100 total).
+    pub async fn add_misbehavior(&self, score: u32) -> bool {
         let mut info = self.info.write().await;
-        info.strikes += 1;
-        info.strikes >= 3 // Return true if peer should be banned
+        info.misbehavior_score = info.misbehavior_score.saturating_add(score);
+        // Keep legacy strikes field in sync for cleanup_dead_peers
+        if info.misbehavior_score >= 100 {
+            info.strikes = 3; // trigger ban in cleanup
+        }
+        tracing::warn!(
+            "Peer {} misbehavior score: {}/100 (+{})",
+            info.address, info.misbehavior_score, score
+        );
+        info.misbehavior_score >= 100
+    }
+
+    /// Legacy shim — adds 33 points (3 calls = ban, same as old 3-strike system).
+    /// Prefer `add_misbehavior(weight)` for new code.
+    pub async fn add_strike(&self) -> bool {
+        self.add_misbehavior(34).await
     }
 
     /// Get peer address
