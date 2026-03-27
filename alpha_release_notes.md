@@ -1,6 +1,9 @@
-# QuantaChain Testnet — Alpha v2
+# QuantaChain Testnet — Alpha v0.3.0 (Testnet V2)
 
 Post-quantum secure blockchain using Falcon-512 signatures and SHA3-256 Proof of Work.
+
+> **⚠️ CRITICAL: TESTNET RESET ⚠️**
+> This release includes a new genesis block. If you are running an older alpha node, you **MUST delete your `quanta_data/` folder** before starting this update. The old chain is incompatible.
 
 This is a **pre-release testnet build**. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
@@ -11,10 +14,10 @@ This is a **pre-release testnet build**. Do not use real funds. APIs and chain p
 | Parameter | Value |
 |---|---|
 | Network | Testnet |
-| Timestamp | `1774051200` (2026-03-21 00:00:00 UTC) |
-| Testnet Genesis Hash | `00001a12f223e4bd6e2a8e5f6b4160d72cc01db8b48b2d6254f87a2704eff3b9` |
+| Timestamp | `1774828800` (2026-04-01 00:00:00 UTC) |
+| Testnet Genesis Hash | `0000001a2cbe8311e347945a5d0c35563b3b17b7423f6cc471b9c623ef10b77f` |
 | Mainnet Genesis Hash | `1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0` |
-| Difficulty | 4 (Testnet) / 6 (Mainnet) |
+| Difficulty | 8,343,908 (Testnet) / 16,777,216 (Mainnet) |
 | Block Time | 30 seconds |
 
 ---
@@ -69,7 +72,7 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 ## Quick Start with Docker
 
 ### Option 1: Docker Desktop (Graphical Interface)
-1. Open Docker Desktop and find `xd637/quanta-node:alpha-v2` (or `:latest`) in your Images.
+1. Open Docker Desktop and find `xd637/quanta-node:v0.3.0-alpha` (or `:latest`) in your Images.
 2. Click **Run**.
 3. Under **Optional settings**, configure:
    - **Container name**: `quanta-node`
@@ -82,7 +85,7 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 ### Option 2: Docker CLI
 ```bash
 # Pull the image
-docker pull xd637/quanta-node:alpha-v2
+docker pull xd637/quanta-node:v0.3.0-alpha
 
 # Run directly (Ensure data persistence!)
 docker run -d \
@@ -90,10 +93,17 @@ docker run -d \
   -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
   -v quanta-data:/home/quanta/quanta_data \
   -v quanta-logs:/home/quanta/logs \
-  xd637/quanta-node:alpha-v2
+  xd637/quanta-node:v0.3.0-alpha
 ```
 
 ### Option 3: Docker Compose (Recommended)
+
+**If updating from an older version**, delete your old named volume first:
+```bash
+docker compose down -v
+```
+
+Then start the node:
 ```bash
 docker compose -f docker-compose.single.yml up -d
 ```
@@ -139,9 +149,16 @@ docker run -d \
 docker logs quanta-node --tail 30 -f
 ```
 
-**5. Update / Clean Restart:**
+**5. Update / Clean Restart (REQUIRED FOR v0.3.0):**
+
+Due to the Testnet V2 reset, you MUST delete your old blockchain data before restarting:
+
 ```bash
 docker stop quanta-node && docker rm quanta-node
+
+# ⚠️ CRITICAL: Delete old blockchain data
+sudo rm -rf ~/quanta_data/*
+
 docker pull xd637/quanta-node:latest
 docker run -d \
   --name quanta-node \
@@ -158,7 +175,7 @@ docker run -d \
 ```bash
 git clone https://github.com/quantachain/quanta
 cd quanta
-git checkout alpha-v2
+git checkout v0.3.0-alpha
 cargo build --release
 
 # Run node
@@ -240,18 +257,27 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 
 ---
 
-## What Changed in Alpha v2
+## What Changed in Alpha v0.3.0 (Testnet V2)
 
-- Mnemonic-based faucet wallet system (10 reserve wallets, BIP-39 derived)
-- Rate-limited faucet API: 1 QUA per IP per wallet per day
-- Genesis timestamp updated to 2026-03-21
-- Security audit 2 applied: nonce atomicity, coinbase validation, MTP timestamp rule, per-sender mempool cap, state root enforcement
-- Difficulty adjustment interval increased to 2016 blocks for stability
-- Block size increased to 2 MB to accommodate Falcon-512 transaction sizes
-- Mining reward lock extended to 6 months (anti-dump)
-- License changed from MIT to Apache 2.0
+- **Testnet V2 Genesis Reset:** Restarted the testnet with a realistic genesis difficulty (`8,343,908`) to properly enforce ~30s block times.
+- **Difficulty Adjustment Fix:** Removed the broken ±15% bounding cap on difficulty adjustments. The algorithm is now mathematically equivalent to Bitcoin's formula with a 4x clamp, resolving the issue where difficulty failed to adjust correctly.
+- **Weighted Peer Reputation:** Replaced the flat 3-strike system with a Bitcoin-style DoSMan weighted scoring system (0-100). Serious consensus violations (e.g., invalid blocks) result in immediate bans (Score: +50), while minor issues like invalid txs (Score: +10) or message floods (Score: +20) accumulate gradually.
+- **Wallet & Mining CLI Improvements:** 
+  - `quanta new_wallet` now clearly prints your generated address to the terminal.
+  - `quanta mining_status` no longer silently truncates your public address, and clearly states if mining is idle instead of looking stuck.
+  - Mining will no longer start unnecessarily if your node is out of sync.
+- **Block Explorer API:** Added full support for paginated address history (`/api/address/:address/txs`), address lookup (`/api/address/:address`), $O(1)$ transaction lookup by hash (`/api/tx/:hash`), and latest block feeds (`/api/blocks/latest`).
+- **Network Routing Fixes:** Nodes no longer request duplicate blocks during broadcasts, fixing the persistent sync stall bug ("stuck at 272").
 
 ---
+
+## What Changed in Alpha v0.2.0
+
+- Mnemonic-based faucet wallet system (10 reserve wallets, BIP-39 derived)
+- Genesis timestamp updated to 2026-03-21
+- Security audit 2 applied: nonce atomicity, coinbase validation, MTP timestamp rule, per-sender mempool cap, state root enforcement
+- Block size increased to 2 MB to accommodate Falcon-512 transaction sizes
+- License changed from MIT to Apache 2.0
 
 ## Security Notice
 
