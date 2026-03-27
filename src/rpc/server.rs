@@ -228,6 +228,11 @@ async fn handle_start_mining(state: &AppState, params: &serde_json::Value) -> Js
                     // 2. Mine (NO LOCK held on blockchain)
                     // Run CPU-intensive mining in a blocking task to avoid starving async runtime
                     
+                    // Snapshot the chain tip at template creation time.
+                    // If the chain advances while we mine, our result is stale.
+                    let template_prev_hash = block.previous_hash.clone();
+                    let template_index = block.index;
+
                     let mined_block_res = tokio::task::spawn_blocking(move || {
                         block.mine();
                         block
@@ -239,24 +244,42 @@ async fn handle_start_mining(state: &AppState, params: &serde_json::Value) -> Js
                             break;
                         }
 
-                        // 3. Submit (Lock held briefly to commit)
-                        // add_network_block handles validation and saving
-                        match blockchain.read().await.add_network_block(mined_block.clone()) {
-                            Ok(_) => {
-                                consecutive_failures = 0; // Reset on success
-                                let mut count = blocks_mined.write().await;
-                                *count += 1;
-                                tracing::info!("Successfully mined block #{}", *count);
-                                
-                                // Broadcast block to network
-                                if let Some(ref net) = network {
-                                    // We can just broadcast the block we mined
-                                    net.broadcast_block(mined_block).await;
+                        // FORK FIX: Check if the chain moved under us while we were mining.
+                        // If another block arrived at the same height (from the network or a
+                        // previous mining round), our template is now stale. Submitting it
+                        // would always produce a competing-block situation and either orphan
+                        // us or trigger an unnecessary reorg. Instead, just discard and
+                        // restart with a fresh template built on the real current tip.
+                        let chain_tip_now = blockchain.read().await.get_latest_block();
+                        if chain_tip_now.hash != template_prev_hash {
+                            tracing::info!(
+                                "Mining result for block {} is stale (chain moved to height {} \
+                                 with hash {}…); discarding and restarting",
+                                template_index,
+                                chain_tip_now.index,
+                                &chain_tip_now.hash[..8]
+                            );
+                            // Don't count as failure — this is expected and healthy behaviour.
+                            // Fall through to the next loop iteration immediately.
+                        } else {
+                            // 3. Submit (Lock held briefly to commit)
+                            // add_network_block handles validation and saving
+                            match blockchain.read().await.add_network_block(mined_block.clone()) {
+                                Ok(_) => {
+                                    consecutive_failures = 0; // Reset on success
+                                    let mut count = blocks_mined.write().await;
+                                    *count += 1;
+                                    tracing::info!("Successfully mined block #{}", *count);
+                                    
+                                    // Broadcast block to network
+                                    if let Some(ref net) = network {
+                                        net.broadcast_block(mined_block).await;
+                                    }
                                 }
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to add mined block: {}", e);
-                                consecutive_failures += 1;
+                                Err(e) => {
+                                    tracing::warn!("Failed to add mined block: {}", e);
+                                    consecutive_failures += 1;
+                                }
                             }
                         }
                     } else {

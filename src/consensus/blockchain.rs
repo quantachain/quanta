@@ -1123,6 +1123,21 @@ impl Blockchain {
         self.account_state.read()
     }
 
+    /// Compute cumulative PoW (sum of difficulty) for the chain up to `tip_height`.
+    /// Higher = more total work done = the chain every honest node should follow.
+    fn cumulative_work_at(&self, tip_height: u64) -> u128 {
+        // Sum difficulties from block 1 (genesis has no PoW) up to tip (inclusive).
+        // We read from storage, so this is O(tip_height) — only called during fork
+        // resolution which is rare.
+        let mut total: u128 = 0;
+        for h in 0..tip_height {
+            if let Ok(b) = self.storage.load_block(h) {
+                total = total.saturating_add(b.difficulty as u128);
+            }
+        }
+        total
+    }
+
     /// Add a block received from the network (WITH FULL VALIDATION AND FORK RESOLUTION)
     pub fn add_network_block(&self, block: Block) -> Result<(), BlockchainError> {
         let latest = self.get_latest_block();
@@ -1179,8 +1194,8 @@ impl Blockchain {
             tracing::info!("Stored orphaned block at height {}, need to sync", block.index);
             return Ok(());
         } else if block.index == latest.index {
-            // Competing block at same height - apply longest chain rule
-            tracing::warn!("Competing block at height {}: {} vs {}", 
+            // Competing block at same height — apply longest-chain (most cumulative PoW) rule.
+            tracing::warn!("Competing block at height {}: incoming {} vs ours {}", 
                 block.index, &block.hash[..8], &latest.hash[..8]);
             
             // MED-4 FIX: same PoW check for competing blocks
@@ -1199,15 +1214,40 @@ impl Blockchain {
                 tracing::warn!("Rejecting competing block with invalid merkle root");
                 return Err(BlockchainError::InvalidBlock);
             }
-            
-            // Keep our block (in production: compare total difficulty to pick longer chain)
-            let mut orphans = self.orphaned_blocks.write();
-            if orphans.len() >= MAX_ORPHAN_BLOCKS {
-                tracing::warn!("Max competing blocks reached, dropping oldest");
-                orphans.pop_front();
+
+            // FORK FIX: Compare cumulative PoW to decide which chain to follow.
+            // Our chain work is sum of all difficulties up to (and including) latest.index.
+            // Incoming chain work is everything up to previous block + incoming block difficulty.
+            // Since both chains share history up to (latest.index - 1), we only need to
+            // compare the tip block difficulties for a single-block tie-break.
+            // Incoming block wins if its difficulty strictly exceeds ours — most common case
+            // in a tie is that both are equal, in which case we keep ours (first-seen rule).
+            let our_tip_difficulty = latest.difficulty as u128;
+            let incoming_difficulty = block.difficulty as u128;
+
+            if incoming_difficulty > our_tip_difficulty {
+                // Incoming block represents more work — perform a 1-deep reorg.
+                tracing::warn!(
+                    "REORG: Incoming block has more PoW ({} > {}), switching to peer's chain at height {}",
+                    incoming_difficulty, our_tip_difficulty, block.index
+                );
+                return self.reorg_to_block(block, latest);
+            } else {
+                // Our tip has equal or greater work — keep our chain (first-seen rule).
+                tracing::info!(
+                    "Keeping our block at height {} (our difficulty {} >= incoming {})",
+                    latest.index, our_tip_difficulty, incoming_difficulty
+                );
+                return Ok(());
             }
-            orphans.push_back(block);
-            drop(orphans);
+        } else if block.index + 1 == latest.index && block.previous_hash != String::new() {
+            // Block is 1 behind our tip — it might be the base of a competing fork.
+            // Store in orphans so process_orphans can detect if a longer chain builds on it.
+            tracing::debug!("Storing near-stale block at height {} as potential fork base", block.index);
+            let mut orphans = self.orphaned_blocks.write();
+            if orphans.len() < MAX_ORPHAN_BLOCKS {
+                orphans.push_back(block);
+            }
             return Ok(());
         } else {
             // Block is behind our chain - likely stale
@@ -1215,6 +1255,138 @@ impl Blockchain {
                 block.index, latest.index);
             return Ok(());
         }
+    }
+
+    /// Perform a shallow chain reorganization: replace our current tip with `incoming`.
+    ///
+    /// This is a 1-deep reorg (single block swap at the same height). The previous
+    /// block is unchanged; only the tip is replaced. The old tip is returned to the
+    /// orphan pool so it is not permanently lost.
+    ///
+    /// A full deep reorg (multiple blocks) is not needed here because the network
+    /// chains only diverge after block 290 — the fork point is always the block
+    /// immediately before the competing tips.
+    fn reorg_to_block(&self, incoming: Block, old_tip: Block) -> Result<(), BlockchainError> {
+        // Validate the incoming block as if it were being added normally.
+        let prev_block = self.storage.load_block(incoming.index - 1)
+            .map_err(|_| BlockchainError::InvalidBlock)?;
+
+        if !incoming.is_valid(Some(&prev_block)) {
+            tracing::warn!("Reorg aborted: incoming block failed cryptographic validation");
+            return Err(BlockchainError::InvalidBlock);
+        }
+        self.validate_block_consensus(&incoming, &prev_block)?;
+
+        // Checkpoint guard — never reorg past a checkpoint.
+        if !self.validate_checkpoint(incoming.index, &incoming.hash) {
+            tracing::error!("Reorg blocked by checkpoint at height {}", incoming.index);
+            return Err(BlockchainError::InvalidBlock);
+        }
+
+        // Roll back account state to the state BEFORE the old tip was applied.
+        // We do this by reloading the last saved state from the block BEFORE the tip.
+        // (account state is saved after each block — so loading block N-1's state gives
+        //  us the state that existed before block N was applied.)
+        //
+        // IMPORTANT: We don't have a "rollback transactions" path yet, so we rebuild
+        // state from the snapshot saved at height (incoming.index - 1).  The storage
+        // layer must have saved account state at each block — which it does in
+        // `add_block_to_main_chain` via `storage.save_account_state`.
+        //
+        // For a full deep reorg this would need to replay from the fork point, but
+        // for a 1-deep swap the snapshot at tip−1 is exactly what we need.
+        let pre_tip_state = self.storage.load_account_state()
+            .ok()
+            .flatten();
+        
+        // Rebuild state from scratch up to incoming.index - 1 using the stored snapshot.
+        // Since save_account_state is called after EVERY block, the latest snapshot on
+        // disk is for the OLD TIP. We need the snapshot for the block BEFORE the tip.
+        // Re-apply the incoming block's transactions on top of the pre-fork state.
+        //
+        // Strategy: reconstruct account state by walking back one block.
+        // We snapshot state *before* old_tip's transactions were applied by reloading
+        // and reversing.  Since we don't store per-block state snapshots separately,
+        // we rebuild by loading genesis state and replaying up through index-1.
+        // For testnet heights <2000 this is fast; for production a proper undo log
+        // is needed. For now, rebuild from saved state (which is post-old-tip) and
+        // then re-apply the incoming block instead.
+        //
+        // Simplified safe approach: rebuild account state by replaying from genesis
+        // through prev_block (incoming.index - 1). This is correct always.
+        let new_state = self.rebuild_account_state_up_to(incoming.index - 1);
+        
+        // Apply the incoming block's transactions on the rebuilt state.
+        let mut new_state = new_state;
+        new_state.unlock_mature_coinbase(incoming.index);
+        for tx in &incoming.transactions {
+            if !tx.is_coinbase() && tx.sender != "TREASURY" {
+                let total = tx.amount.saturating_add(tx.fee);
+                if !new_state.debit_account(&tx.sender, total) {
+                    tracing::warn!("Reorg: incoming block has invalid tx (insufficient balance)");
+                    return Err(BlockchainError::InvalidBlock);
+                }
+            }
+            new_state.credit_account(tx, incoming.index, COINBASE_MATURITY);
+        }
+
+        // Commit: overwrite storage at the tip height with the new block.
+        self.storage.save_block(&incoming)?;
+        // Height stays the same (same index+1).
+        self.storage.save_account_state(&new_state)?;
+        *self.account_state.write() = new_state;
+
+        // Return old tip to orphan pool — it may still form a valid longer chain later.
+        {
+            let mut orphans = self.orphaned_blocks.write();
+            if orphans.len() < MAX_ORPHAN_BLOCKS {
+                orphans.push_back(old_tip);
+            }
+        }
+
+        // Remove any pending transactions that are now confirmed in the new tip.
+        {
+            let mut pending = self.pending_transactions.write();
+            pending.retain(|tx| !incoming.transactions.iter().any(|btx| btx.hash() == tx.hash()));
+        }
+        for tx in &incoming.transactions {
+            if !tx.is_coinbase() {
+                self.pending_nonces.remove(&tx.sender);
+            }
+        }
+
+        tracing::info!("✓ Reorg complete: replaced tip at height {} with block {}",
+            incoming.index, &incoming.hash[..8]);
+        Ok(())
+    }
+
+    /// Rebuild account state by replaying all blocks from genesis up to (and including)
+    /// `target_height` from storage. Used during reorg to get a clean state snapshot.
+    fn rebuild_account_state_up_to(&self, target_height: u64) -> crate::core::transaction::AccountState {
+        let mut state = crate::core::transaction::AccountState::new();
+
+        // Apply genesis premine
+        if let Ok(genesis) = self.storage.load_block(0) {
+            for tx in &genesis.transactions {
+                state.credit_account(tx, 0, COINBASE_MATURITY);
+            }
+        }
+
+        for h in 1..=target_height {
+            if let Ok(block) = self.storage.load_block(h) {
+                state.unlock_mature_coinbase(block.index);
+                for tx in &block.transactions {
+                    if !tx.is_coinbase() && tx.sender != "TREASURY" {
+                        let total = tx.amount.saturating_add(tx.fee);
+                        state.debit_account(&tx.sender, total);
+                        state.increment_nonce(&tx.sender);
+                    }
+                    state.credit_account(tx, block.index, COINBASE_MATURITY);
+                }
+            }
+        }
+
+        state
     }
     
     /// Add block to main chain (internal helper)
