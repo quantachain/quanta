@@ -16,7 +16,7 @@ use std::time::Instant;
 
 /// Timestamp: 2026-04-01 00:00:00 UTC (Alpha V2 Testnet relaunch)
 /// Change this to any future Unix timestamp if you want a different launch date.
-const GENESIS_TIMESTAMP: i64 = 1774828800; // 2026-04-01 00:00:00 UTC
+const GENESIS_TIMESTAMP: i64 = 1774483200; // 2026-03-26 00:00:00 UTC
 
 /// Target block time in seconds
 const TARGET_BLOCK_SECS: u64 = 30;

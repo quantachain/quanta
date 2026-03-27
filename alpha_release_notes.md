@@ -14,10 +14,10 @@ This is a **pre-release testnet build**. Do not use real funds. APIs and chain p
 | Parameter | Value |
 |---|---|
 | Network | Testnet |
-| Timestamp | `1774828800` (2026-04-01 00:00:00 UTC) |
-| Testnet Genesis Hash | `0000001a2cbe8311e347945a5d0c35563b3b17b7423f6cc471b9c623ef10b77f` |
+| Timestamp | `1774483200` (2026-03-26 00:00:00 UTC) |
+| Testnet Genesis Hash | `0000000379f963c94f47e9d949a288c9f68caa9d2399a3efa9ed844bf6bf52e2` |
 | Mainnet Genesis Hash | `1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0` |
-| Difficulty | 8,343,908 (Testnet) / 16,777,216 (Mainnet) |
+| Difficulty | 6,972,889 (Testnet) / 16,777,216 (Mainnet) |
 | Block Time | 30 seconds |
 
 ---
@@ -121,13 +121,13 @@ curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker ubuntu && newgrp docker
 ```
 
-**2. Open necessary ports:**
+**2. Open necessary ports (using UFW):**
 ```bash
-sudo iptables -I INPUT -p tcp --dport 8333 -j ACCEPT
-sudo iptables -I INPUT -p tcp --dport 7782 -j ACCEPT
-sudo iptables -I INPUT -p tcp --dport 3000 -j ACCEPT
-sudo apt install -y iptables-persistent
-sudo netfilter-persistent save
+sudo ufw allow 8333/tcp
+sudo ufw allow 7782/tcp
+sudo ufw allow 3000/tcp
+sudo ufw allow ssh    # Prevents getting locked out
+sudo ufw --force enable
 ```
 
 **3. Set up directory and start the node (using Host Networking for API Security):**
@@ -259,7 +259,7 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 
 ## What Changed in Alpha v0.3.0 (Testnet V2)
 
-- **Testnet V2 Genesis Reset:** Restarted the testnet with a realistic genesis difficulty (`8,343,908`) to properly enforce ~30s block times.
+- **Testnet V2 Genesis Reset:** Restarted the testnet with a realistic genesis difficulty (`6,972,889`) to properly enforce ~30s block times.
 - **Difficulty Adjustment Fix:** Removed the broken ±15% bounding cap on difficulty adjustments. The algorithm is now mathematically equivalent to Bitcoin's formula with a 4x clamp, resolving the issue where difficulty failed to adjust correctly.
 - **Weighted Peer Reputation:** Replaced the flat 3-strike system with a Bitcoin-style DoSMan weighted scoring system (0-100). Serious consensus violations (e.g., invalid blocks) result in immediate bans (Score: +50), while minor issues like invalid txs (Score: +10) or message floods (Score: +20) accumulate gradually.
 - **Wallet & Mining CLI Improvements:** 

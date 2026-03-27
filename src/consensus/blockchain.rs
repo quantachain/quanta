@@ -134,9 +134,9 @@ const MAX_ADDRESS_LEN: usize = 128;
 /// CONSENSUS-CRITICAL: Genesis block hashes (prevent chain-split attacks)
 /// Mainnet genesis — pending final mining before mainnet launch.
 const GENESIS_HASH: &str = "1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0";
-/// Testnet Alpha V2 genesis — mined 2026-03-27, difficulty 8_343_908 (~30s/block).
+/// Testnet Alpha V2 genesis — difficulty 6_972_889 (~30s/block).
 /// Old nodes on the previous testnet genesis will be rejected by this hash check.
-const TESTNET_GENESIS_HASH: &str = "0000001a2cbe8311e347945a5d0c35563b3b17b7423f6cc471b9c623ef10b77f";
+const TESTNET_GENESIS_HASH: &str = "0000000379f963c94f47e9d949a288c9f68caa9d2399a3efa9ed844bf6bf52e2";
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)

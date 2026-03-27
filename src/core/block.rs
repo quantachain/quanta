@@ -57,7 +57,7 @@ impl Block {
         
         let (timestamp, difficulty, nonce) = match network {
             crate::core::ChainNetwork::Mainnet => (1774051200, 16_777_216, 0), // Pending actual mining before Mainnet launch
-            crate::core::ChainNetwork::Testnet  => (1774828800, 8_343_908, 5047342), // Alpha V2 Testnet — mined 2026-03-27, ~30s block time
+            crate::core::ChainNetwork::Testnet  => (1774483200, 6972889, 3882460), // Alpha V2 Testnet — ~30s block time
         };
         
         let mut genesis = Self {

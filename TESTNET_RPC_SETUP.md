@@ -32,10 +32,9 @@ sudo apt install -y nginx certbot python3-certbot-nginx
 **CRITICAL:** Ensure that TCP Ports `80` (HTTP) and `443` (HTTPS) are permitted both in your local Ubuntu firewall (`iptables`) AND your Cloud Provider's Web Dashboard (e.g., Oracle Cloud VCN Security Lists, AWS Security Groups).
 
 ```bash
-# Ubuntu iptables Configuration
-sudo iptables -I INPUT -p tcp --dport 80 -j ACCEPT
-sudo iptables -I INPUT -p tcp --dport 443 -j ACCEPT
-sudo netfilter-persistent save
+# Ubuntu UFW Configuration
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
 ```
 
 ## 4. Configure the NGINX Reverse Proxy
