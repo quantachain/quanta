@@ -36,6 +36,10 @@ path = "src/bin/mine_genesis.rs"
 # Changing this version requires a coordinated network-wide upgrade.
 pqcrypto-falcon = "=0.3.0"
 pqcrypto-traits = "0.3"
+# falcon-rust: pure-Rust Falcon-512 used by the WASM browser wallet.
+# verify_signature_strict uses this for raw-sig verification so the browser
+# wallet (wasm32-unknown-unknown, no C FFI allowed) can interoperate.
+falcon-rust = "0.1"
 
 # SHA3 hashing (quantum-resistant)
 sha3 = "0.10"
