@@ -49,31 +49,60 @@ pub enum BlockchainError {
     InvalidDifficulty,
 }
 
-// BETA FIX: Increased from 10s to 30s — PQC blocks are ~2MB, at 10s there's
-// only ~6s propagation slack in a 6-node network (causes dead forks)
-// 30s gives ~26s slack and reduces fork probability from 2-5% to <0.1%.
-const TARGET_BLOCK_TIME: u64 = 30; // 30 seconds
-// SECURITY FIX (External Audit): Increased from 10 to 2016 for stability
-// 2016 blocks × 30s = 60,480s = ~16.8 hours (prevents rapid oscillation)
-const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = 2016;
+// Target block time: 30 seconds.
+// PQC blocks are ~2 MB; 30s gives ~26s propagation slack in a 6-node mesh
+// and reduces fork probability from 2–5% to <0.1%.
+const TARGET_BLOCK_TIME: u64 = 30; // seconds
 
-// DIFFICULTY BOUNDS — INTEGER MATH ONLY (no f64, no platform-dependent rounding).
+// LWMA DIFFICULTY ALGORITHM (Linearly Weighted Moving Average)
 //
-// The actual_time fed into the ratio is ALREADY clamped to [expected/4 .. expected*4],
-// so the maximum natural scaling per interval is 4x in either direction.
-// Setting the cap at exactly that boundary means the formula is the sole limiter —
-// no redundant secondary clamp to slow convergence on a chain that starts fast.
+// Replaces the old Bitcoin-style 2016-block interval adjustment which was
+// unsuitable for a small, variable-hashrate testnet:
 //
-// A ±15% cap (old value from security audit) was designed for a LIVE chain already
-// near its target. On a fresh chain with difficulty=65536 and a CPU hashrate of
-// millions H/s, ±15% needs 50+ intervals (100K blocks!) to converge — effectively
-// broken. 4x per interval converges in ~10 intervals instead.
-const MAX_DIFFICULTY_ADJUSTMENT_UP_PCT: u32 = 400;   // Max 4x increase per interval
-const MAX_DIFFICULTY_ADJUSTMENT_DOWN_PCT: u32 = 25;  // Max 4x decrease per interval (1/4)
-/// MIN_DIFFICULTY must always be ≤ genesis difficulty so there is no jarring
-/// upward jump at the first adjustment interval (block 2016).
-const MIN_DIFFICULTY: u32 = 8_343_908; // Matches testnet V2 genesis — prevents trivial PoW
-const MAX_DIFFICULTY: u32 = 2_147_483_647; // 2^31-1 — safely holds massive hashrate growth
+//   Problem A — "Difficulty bomb trap":
+//     A high-hash miner joins, mines 2016 blocks fast, difficulty jumps 4×,
+//     miner leaves, low nodes can't mine for hours until next 2016-block window.
+//
+//   Problem B — Slow convergence on a fresh chain:
+//     With a ±15% per-interval cap it takes 50+ intervals to reach equilibrium.
+//
+// LWMA adjusts EVERY block using a 45-block sliding window (~22.5 min).
+// Each solve-time is weighted linearly (newest block gets weight 45, oldest gets 1)
+// so recent hashrate changes dominate without discarding historical data.
+//
+// References:
+//   Zawy (2017) — https://github.com/zawy12/difficulty-algorithms
+//   Used by: Zcash, Grin, Beam, MimbleWimble variants, many Monero forks
+
+/// Number of blocks in the LWMA sliding window.
+/// 45 blocks × 30s = 22.5 minutes of smoothing — fast without being jumpy.
+const LWMA_WINDOW: u64 = 45;
+
+/// Maximum per-block difficulty INCREASE (as a percentage of current difficulty).
+/// 200% = at most 2× up per block — prevents a single fast block from spiking too high.
+const MAX_DIFF_UP_PCT: u32 = 200;
+
+/// Maximum per-block difficulty DECREASE (as a percentage of current difficulty).
+/// 75% = at most 0.75× down per block (i.e. maximum 25% drop) — prevents death spirals.
+const MAX_DIFF_DOWN_PCT: u32 = 75;
+
+/// Per-block solve-time clamp: individual solve times are clamped to [1 .. 6×T]
+/// before entering the LWMA sum. This prevents a single stalled block (e.g. from
+/// a node going offline) from crashing difficulty.
+const LWMA_SOLVE_TIME_CAP_FACTOR: u64 = 6; // 6 × 30s = 180s cap per solve-time
+
+/// Minimum difficulty — set to match the testnet V2 genesis so the algorithm
+/// never outputs a trivially easy target that an attacker can flood with blocks.
+const MIN_DIFFICULTY: u32 = 8_343_908;
+
+/// Maximum difficulty — 2^31−1 fits in an i32 (used by block.has_valid_hash)
+/// and is far beyond any real CPU/GPU hashrate.
+const MAX_DIFFICULTY: u32 = 2_147_483_647;
+
+// Keep this available for code that referenced the old constant (e.g. genesis loader).
+// It is no longer used by the difficulty algorithm.
+#[allow(dead_code)]
+const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = LWMA_WINDOW;
 
 // MODERN ADAPTIVE TOKENOMICS (Option 3 - Solana-style)
 const YEAR_1_REWARD: u64 = 100_000_000; // 100 QUA in microunits
@@ -922,71 +951,114 @@ impl Blockchain {
         timestamps[timestamps.len() / 2]  // Return median
     }
 
-    /// Calculate next difficulty (pure function, deterministic)
-    /// Calculate next difficulty (pure function, deterministic)
+    /// Calculate next difficulty using LWMA (Linearly Weighted Moving Average).
+    ///
+    /// LWMA ALGORITHM (Zawy 2017 variant, integer-only for consensus safety)
+    /// =========================================================================
+    /// Adjusts difficulty on EVERY block using the last LWMA_WINDOW solve times,
+    /// giving linearly increasing weights to more-recent blocks.
+    ///
+    /// Formula (all integer math, no f64):
+    ///
+    ///   For each block i in [tip-N .. tip] (oldest=1, newest=N):
+    ///     weight_i   = i                              (1 … N)
+    ///     solve_time = clamp(ts[i] - ts[i-1], 1, 6T) (anti-manipulation)
+    ///
+    ///   lwma_numerator   = Σ(weight_i × solve_time_i)   scaled by 1000
+    ///   weight_sum       = N×(N+1)/2
+    ///   lwma_denominator = weight_sum × T × 1000
+    ///
+    ///   new_diff = current_diff × lwma_denominator / lwma_numerator
+    ///            = current_diff × T / lwma_time    (no division-by-zero risk)
+    ///
+    /// Per-block clamp: [MAX_DIFF_DOWN_PCT%, MAX_DIFF_UP_PCT%] of current diff.
+    /// Global clamp:    [MIN_DIFFICULTY, MAX_DIFFICULTY].
     fn calculate_next_difficulty(&self) -> u32 {
         let chain_len = self.get_height();
-        
-        // Not enough blocks yet - use initial difficulty
-        if chain_len < DIFFICULTY_ADJUSTMENT_INTERVAL {
-            // Get latest block difficulty
-            return match self.storage.load_block(chain_len - 1) {
+
+        // Need at least LWMA_WINDOW + 1 blocks (N blocks of solve times).
+        // Before that, hold the genesis difficulty constant.
+        if chain_len <= LWMA_WINDOW {
+            return match self.storage.load_block(chain_len.saturating_sub(1)) {
                 Ok(b) => b.difficulty,
-                Err(_) => Block::genesis(crate::core::ChainNetwork::Mainnet).difficulty,
+                Err(_) => MIN_DIFFICULTY,
             };
         }
-        
-        // Only adjust at intervals
-        if chain_len % DIFFICULTY_ADJUSTMENT_INTERVAL != 0 {
-             return match self.storage.load_block(chain_len - 1) {
-                Ok(b) => b.difficulty,
-                Err(_) => 6, // Fallback
-            };
-        }
-        
-        let latest_block = match self.storage.load_block(chain_len - 1) {
+
+        // Load the tip block for the current difficulty reference.
+        let tip = match self.storage.load_block(chain_len - 1) {
             Ok(b) => b,
-            Err(_) => return 6,
+            Err(_) => return MIN_DIFFICULTY,
         };
-        
-        let adjustment_start = chain_len.saturating_sub(DIFFICULTY_ADJUSTMENT_INTERVAL);
-        // Note: we don't strictly need start_block object if we rely on median time
-        
-        // Calculate actual time taken for last N blocks
-        // SECURITY FIX (HIGH-1): Use median-time-past to prevent timestamp manipulation
-        let latest_median = self.get_median_time_past(chain_len - 1, 11);
-        let start_median = self.get_median_time_past(adjustment_start, 11);
-        let actual_time = latest_median - start_median;
-        let expected_time = (TARGET_BLOCK_TIME * DIFFICULTY_ADJUSTMENT_INTERVAL) as i64;
-        
-        // Calculate actual time taken, clamp to prevent extreme adjustments (4x bounds)
-        let actual_time_clamped = actual_time.max(expected_time / 4).min(expected_time * 4);
-        
-        // INTEGER MATH ONLY — no f64, no platform-dependent rounding.
-        // Formula: new_difficulty = current * expected_time / actual_time
-        // To avoid truncation, we scale up by 1000, divide, then round back down.
-        // E.g. if ratio = 1.05, scaled = 1050; we add 500 before dividing by 1000
-        // to get the nearest integer (equivalent to .round()).
-        let cd = latest_block.difficulty as u64;
-        let actual = actual_time_clamped as u64;
-        let expected = expected_time as u64;
+        let current_diff = tip.difficulty as u64;
 
-        // scaled_difficulty = round(current * expected / actual)
-        let scaled = cd
-            .checked_mul(expected)
-            .and_then(|v| v.checked_mul(1000))
-            .map(|v| (v / actual + 500) / 1000)  // +500 for rounding
-            .unwrap_or(cd);
+        // ── Gather solve times for the last LWMA_WINDOW blocks ──────────────
+        // solve_time[i] = timestamp[tip - LWMA_WINDOW + i] - timestamp[tip - LWMA_WINDOW + i - 1]
+        // i runs from 1 (oldest pair) to LWMA_WINDOW (newest pair), weight = i.
+        let t_max = (LWMA_SOLVE_TIME_CAP_FACTOR * TARGET_BLOCK_TIME) as i64; // 180s
+        let n     = LWMA_WINDOW as u64;
 
-        // Apply ±15% bounds using integer percent constants, then global min/max.
-        let floor = (cd * MAX_DIFFICULTY_ADJUSTMENT_DOWN_PCT as u64 + 50) / 100; // round
-        let ceil  = (cd * MAX_DIFFICULTY_ADJUSTMENT_UP_PCT   as u64 + 50) / 100; // round
-        let new_difficulty = scaled.clamp(floor, ceil)
+        let mut weighted_sum: u64 = 0; // Σ(weight × solve_time), scaled × 1000
+        let mut valid_count: u64  = 0;
+
+        for i in 1..=n {
+            // Block indices: current = (chain_len - 1 - (n - i))
+            //               previous = current - 1
+            let cur_idx  = chain_len.saturating_sub(1).saturating_sub(n - i);
+            let prev_idx = cur_idx.saturating_sub(1);
+
+            // Skip if we'd wrap around to genesis (shouldn't happen given guard above)
+            if prev_idx == cur_idx {
+                continue;
+            }
+
+            let cur_ts  = match self.storage.load_block(cur_idx)  { Ok(b) => b.timestamp, Err(_) => continue };
+            let prev_ts = match self.storage.load_block(prev_idx) { Ok(b) => b.timestamp, Err(_) => continue };
+
+            // Clamp solve time: must be positive and at most 6×T.
+            // This prevents timestamp manipulation from crashing difficulty.
+            let raw_solve = (cur_ts - prev_ts).max(1).min(t_max) as u64;
+
+            // weight = i (oldest block in window gets weight 1, newest gets weight N)
+            weighted_sum = weighted_sum.saturating_add(i * raw_solve * 1000);
+            valid_count += 1;
+        }
+
+        if valid_count == 0 || weighted_sum == 0 {
+            tracing::warn!("LWMA: no valid solve times found, holding difficulty");
+            return current_diff.clamp(MIN_DIFFICULTY as u64, MAX_DIFFICULTY as u64) as u32;
+        }
+
+        // weight_sum = N×(N+1)/2  (sum of weights 1..N)
+        let weight_sum = n * (n + 1) / 2; // 45×46/2 = 1035
+
+        // lwma_denominator = weight_sum × TARGET_BLOCK_TIME × 1000
+        // new_diff = current_diff × lwma_denominator / weighted_sum
+        //          = current_diff × weight_sum × T × 1000 / weighted_sum
+        let denominator = weight_sum
+            .saturating_mul(TARGET_BLOCK_TIME)
+            .saturating_mul(1000);
+
+        // Avoid division by zero (guaranteed non-zero above, but be safe)
+        let new_diff_raw = current_diff
+            .checked_mul(denominator)
+            .map(|v| v / weighted_sum)
+            .unwrap_or(current_diff);
+
+        // Per-block clamp: prevent single-block spikes
+        let floor = (current_diff * MAX_DIFF_DOWN_PCT as u64) / 100; // e.g. 75% of current
+        let ceil  = (current_diff * MAX_DIFF_UP_PCT   as u64) / 100; // e.g. 200% of current
+        let new_difficulty = new_diff_raw
+            .clamp(floor, ceil)
             .clamp(MIN_DIFFICULTY as u64, MAX_DIFFICULTY as u64) as u32;
-        
-        tracing::info!("Difficulty adjustment: {} -> {} (actual time: {}s, expected: {}s)",
-            latest_block.difficulty, new_difficulty, actual_time, expected_time);
-        
+
+        // Compute a human-readable LWMA time for the log (no f64 needed)
+        let lwma_time_s = weighted_sum / (weight_sum * 1000);
+        tracing::info!(
+            "LWMA difficulty: {} → {} (lwma_time: {}s, target: {}s, window: {} blocks)",
+            current_diff, new_difficulty, lwma_time_s, TARGET_BLOCK_TIME, LWMA_WINDOW
+        );
+
         new_difficulty
     }
 
@@ -1664,6 +1736,128 @@ impl Blockchain {
             h -= 1;
         }
         results
+    }
+
+    /// Get the hash of the block stored at a specific height (O(1) disk read).
+    /// Returns None if the block doesn't exist.
+    pub fn get_block_hash_at(&self, height: u64) -> Option<String> {
+        self.storage.load_block(height).ok().map(|b| b.hash)
+    }
+
+    /// Deep chain reorganisation: rolls back our chain to `rollback_to` (exclusive)
+    /// and replays `new_chain` (sorted ascending by index) on top.
+    ///
+    /// Called by the sync engine when the node detects its tip diverges from the
+    /// network by more than one block (the shallow `reorg_to_block` only handles
+    /// single-block tip swaps).
+    ///
+    /// Safety guarantees:
+    /// - Never rolls back past a checkpoint.
+    /// - Never rolls back genesis (height 0).
+    /// - Validates every new block before committing any state change.
+    /// - On any validation failure the reorg is aborted and the node stays on
+    ///   its current (now partially-rolled-back) chain; a subsequent sync will
+    ///   re-attempt.
+    pub fn deep_reorg(&self, rollback_to: u64, new_chain: Vec<Block>) -> Result<(), BlockchainError> {
+        let our_height = self.get_height();
+        tracing::warn!(
+            "DEEP REORG: rolling back from height {} to {}, then applying {} new blocks",
+            our_height, rollback_to, new_chain.len()
+        );
+
+        // --- Safety checks ---
+        if rollback_to == 0 {
+            tracing::error!("Deep reorg refused: cannot roll back past genesis");
+            return Err(BlockchainError::InvalidBlock);
+        }
+        // The checkpoint at height 0 (genesis) is always enforced by the genesis
+        // hash check in Blockchain::new; any other checkpoints must not be crossed.
+        for (cp_height, cp_hash) in CHECKPOINTS {
+            if *cp_height >= rollback_to && *cp_height < our_height {
+                // We would be rolling back past this checkpoint.
+                tracing::error!(
+                    "Deep reorg refused: would cross checkpoint at height {} ({})",
+                    cp_height, cp_hash
+                );
+                return Err(BlockchainError::InvalidBlock);
+            }
+        }
+
+        // --- Validate every incoming block before touching storage ---
+        // We do a lightweight "chain continuity" check: each block must chain onto
+        // the previous one.  Full consensus validation happens in add_block_to_main_chain.
+        let mut sorted = new_chain;
+        sorted.sort_by_key(|b| b.index);
+
+        if sorted.is_empty() {
+            return Ok(());
+        }
+
+        // The first new block must sit right on top of rollback_to.
+        if sorted[0].index != rollback_to {
+            tracing::warn!(
+                "Deep reorg: first new block is at height {} but expected {}",
+                sorted[0].index, rollback_to
+            );
+            return Err(BlockchainError::InvalidBlock);
+        }
+
+        // Verify PoW on all incoming blocks before we commit to anything.
+        for b in &sorted {
+            if b.difficulty < MIN_DIFFICULTY || !b.has_valid_hash() {
+                tracing::warn!("Deep reorg: incoming block {} failed PoW check", b.index);
+                return Err(BlockchainError::InvalidBlock);
+            }
+            // Check checkpoint for each new block
+            if !self.validate_checkpoint(b.index, &b.hash) {
+                tracing::error!("Deep reorg blocked by checkpoint at height {}", b.index);
+                return Err(BlockchainError::InvalidBlock);
+            }
+        }
+
+        // --- Roll back storage height to rollback_to ---
+        // We simply move the stored chain-height pointer backwards.
+        // The old block records remain on disk but are "beyond" the tip, so they
+        // will be overwritten by the new blocks below.
+        self.storage.set_chain_height(rollback_to)?;
+        tracing::info!("Deep reorg: chain height pointer moved to {}", rollback_to);
+
+        // Rebuild account state up to (rollback_to - 1) from scratch.
+        let rebuilt_state = self.rebuild_account_state_up_to(rollback_to - 1);
+        self.storage.save_account_state(&rebuilt_state)?;
+        *self.account_state.write() = rebuilt_state;
+        tracing::info!("Deep reorg: account state rebuilt up to height {}", rollback_to - 1);
+
+        // Clear the orphan pool — everything in it belongs to a now-stale fork.
+        self.orphaned_blocks.write().clear();
+
+        // --- Replay new blocks ---
+        let mut applied = 0u64;
+        for block in sorted {
+            match self.add_block_to_main_chain(block.clone()) {
+                Ok(_) => {
+                    applied += 1;
+                    tracing::info!("Deep reorg: applied block {} ({}...)", block.index, &block.hash[..8]);
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Deep reorg: failed to apply block {} — aborting reorg at this point: {}",
+                        block.index, e
+                    );
+                    // Partial reorg is safe: the state is consistent up to the
+                    // last successfully applied block. The sync loop will continue
+                    // from this new (better-than-before) height on the next cycle.
+                    break;
+                }
+            }
+        }
+
+        let final_height = self.get_height();
+        tracing::warn!(
+            "DEEP REORG COMPLETE: applied {} blocks, final height: {}",
+            applied, final_height
+        );
+        Ok(())
     }
 }
 

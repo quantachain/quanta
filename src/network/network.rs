@@ -555,11 +555,10 @@ impl Network {
     /// 2. Broadcast blocks from the tip triggered redundant GetBlocks requests.
     /// 3. The old "sleep and hope" approach couldn't reliably detect batch completion.
     ///
-    /// New approach:
-    /// - Set syncing=true to suppress broadcast-triggered sync requests
-    /// - Clear sync buffer, send GetBlocks, wait for blocks to arrive in buffer
-    /// - Sort buffered blocks by index and apply sequentially
-    /// - Repeat until caught up
+    /// FORK FIX (v4): Detects "stuck on a fork" condition where the node receives
+    /// valid blocks but cannot apply them because its local tip diverges from the
+    /// network canonical chain. When detected, triggers a deep chain reorg to find
+    /// the common ancestor and switch to the network's heavier chain.
     pub async fn sync_blockchain(&self) -> Result<(), String> {
         let peers = self.peer_manager.get_peers().await;
         
@@ -603,6 +602,10 @@ impl Network {
         
         let mut stall_count = 0u32;
         const MAX_STALLS: u32 = 5; // Give up after 5 consecutive stalls
+        // FORK FIX: Track consecutive batches where we received blocks but height didn't advance.
+        // This is the signature of being stuck on a fork.
+        let mut fork_stall_count = 0u32;
+        const MAX_FORK_STALLS: u32 = 2; // Trigger deep reorg after 2 batches with zero progress
         
         // Batch loop: keep requesting MAX_SYNC_BATCH blocks until caught up.
         loop {
@@ -692,9 +695,10 @@ impl Network {
             let last_idx = blocks_to_apply.last().map(|b| b.index).unwrap_or(0);
             info!("Applying {} sync blocks [{}-{}] sequentially...", batch_count, first_idx, last_idx);
 
+            let height_before = self.blockchain.read().await.get_height();
             let mut applied = 0u64;
             let mut errors = 0u64;
-            for block in blocks_to_apply {
+            for block in blocks_to_apply.iter() {
                 let bc = self.blockchain.write().await;
                 match bc.add_network_block(block.clone()) {
                     Ok(_) => {
@@ -719,8 +723,118 @@ impl Network {
             info!("Sync batch complete: applied {}, errors {}, new height: {}", 
                 applied, errors, new_height);
 
-            // If no blocks were applied at all, we're stuck
-            if applied == 0 {
+            // FORK FIX: Detect "stuck on a fork" condition.
+            // If we received blocks but the chain height didn't advance AT ALL,
+            // we are likely on a private fork whose tip doesn't match the network's
+            // previous_hash chain. Every block at height > our tip gets stored as an
+            // orphan but can't connect — we need a deep reorg.
+            if new_height == height_before && !blocks_to_apply.is_empty() {
+                fork_stall_count += 1;
+                warn!(
+                    "FORK DETECTED: received {} blocks but height unchanged at {} (fork_stall {}/{})",
+                    blocks_to_apply.len(), new_height, fork_stall_count, MAX_FORK_STALLS
+                );
+
+                if fork_stall_count >= MAX_FORK_STALLS {
+                    warn!("Initiating deep reorg to escape fork...");
+                    // Find the common ancestor by walking back from our tip and comparing
+                    // block hashes with the incoming chain. The incoming blocks are sorted
+                    // by index — scan backwards from our tip to find the first match.
+                    let bc = self.blockchain.read().await;
+                    let mut fork_point: Option<u64> = None;
+
+                    // Build a map of incoming block index -> previous_hash for fast lookup
+                    // to find where the peer's chain diverges from ours.
+                    let incoming_by_index: std::collections::HashMap<u64, &Block> = 
+                        blocks_to_apply.iter().map(|b| (b.index, b)).collect();
+
+                    // Walk back from our local tip to find where the peer's chain matches ours.
+                    // The peer's block at height H has previous_hash = hash(H-1) on the peer.
+                    // If our stored hash(H-1) matches that previous_hash, H-1 is the fork point.
+                    let search_start = new_height.saturating_sub(1);
+                    let search_limit = 200u64; // Don't look back more than 200 blocks
+                    for h in (search_start.saturating_sub(search_limit)..=search_start).rev() {
+                        // Check if any incoming block at h+1 points to our block at h
+                        if let Some(incoming_block) = incoming_by_index.get(&(h + 1)) {
+                            if let Some(our_hash) = bc.get_block_hash_at(h) {
+                                if incoming_block.previous_hash == our_hash {
+                                    fork_point = Some(h + 1);
+                                    break;
+                                }
+                            }
+                        }
+                        // Also check: if any incoming block at h points to block h-1 that we
+                        // don't have, that means the fork is before h.
+                        if let Some(incoming_block) = incoming_by_index.get(&h) {
+                            if let Some(our_hash) = bc.get_block_hash_at(h) {
+                                if incoming_block.hash == our_hash {
+                                    // Both chains agree at height h — fork is after
+                                    fork_point = Some(h + 1);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    drop(bc);
+
+                    // Default to rolling back to the height of the first incoming block
+                    // if we couldn't find a matching ancestor in the scan window.
+                    let rollback_to = fork_point.unwrap_or(first_idx);
+                    warn!(
+                        "Deep reorg: fork point determined at height {}, rolling back to {}",
+                        rollback_to.saturating_sub(1), rollback_to
+                    );
+
+                    // Request an extended batch from the peer starting from rollback_to
+                    // to get the canonical chain blocks we need for the reorg.
+                    let reorg_end = max_height.min(rollback_to + MAX_SYNC_BATCH);
+                    info!("Requesting reorg blocks [{}-{}] from peer", rollback_to, reorg_end);
+                    {
+                        let mut buffer = self.sync_buffer.lock().await;
+                        buffer.clear();
+                    }
+                    if let Err(e) = peer.send_message(P2PMessage::GetBlocks {
+                        start_height: rollback_to,
+                        end_height: reorg_end,
+                    }).await {
+                        warn!("Reorg block request failed: {}", e);
+                    } else {
+                        // Wait for reorg blocks
+                        let mut wait = 0u32;
+                        loop {
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+                            wait += 1;
+                            let sz = self.sync_buffer.lock().await.len();
+                            if sz >= (reorg_end - rollback_to) as usize || wait >= 30 {
+                                break;
+                            }
+                        }
+                        let reorg_blocks: Vec<Block> = {
+                            let mut buffer = self.sync_buffer.lock().await;
+                            let mut blocks: Vec<Block> = buffer.drain(..).collect();
+                            blocks.sort_by_key(|b| b.index);
+                            blocks
+                        };
+                        info!("Performing deep reorg with {} blocks starting at {}", reorg_blocks.len(), rollback_to);
+                        let bc = self.blockchain.write().await;
+                        match bc.deep_reorg(rollback_to, reorg_blocks) {
+                            Ok(_) => {
+                                fork_stall_count = 0;
+                                info!("Deep reorg successful, resuming normal sync");
+                            }
+                            Err(e) => {
+                                warn!("Deep reorg failed: {} — will retry", e);
+                            }
+                        }
+                        drop(bc);
+                    }
+                }
+            } else {
+                fork_stall_count = 0; // Height advanced normally, not on a fork
+            }
+
+            // If no blocks were applied at all after fork handling, count toward abort
+            if applied == 0 && new_height == height_before {
                 stall_count += 1;
                 warn!("Sync stall {}/{}: received blocks but none applied", stall_count, MAX_STALLS);
                 if stall_count >= MAX_STALLS {

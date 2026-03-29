@@ -1,9 +1,9 @@
-# QuantaChain Testnet — Alpha v0.3.0 (Testnet V2)
+# QuantaChain Testnet — Alpha v0.4.0 (Testnet V2)
 
 Post-quantum secure blockchain using Falcon-512 signatures and SHA3-256 Proof of Work.
 
 > **⚠️ CRITICAL: TESTNET RESET ⚠️**
-> This release includes a new genesis block. If you are running an older alpha node, you **MUST delete your `quanta_data/` folder** before starting this update. The old chain is incompatible.
+> This release changes the difficulty adjustment algorithm — a consensus-breaking change (hard fork). All nodes **MUST delete their `quanta_data/` folder** and restart. Running old and new nodes together will cause a chain split.
 
 This is a **pre-release testnet build**. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
@@ -72,7 +72,7 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 ## Quick Start with Docker
 
 ### Option 1: Docker Desktop (Graphical Interface)
-1. Open Docker Desktop and find `xd637/quanta-node:v0.3.0-alpha` (or `:latest`) in your Images.
+1. Open Docker Desktop and find `xd637/quanta-node:v0.4.0-alpha` (or `:latest`) in your Images.
 2. Click **Run**.
 3. Under **Optional settings**, configure:
    - **Container name**: `quanta-node`
@@ -85,7 +85,7 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 ### Option 2: Docker CLI
 ```bash
 # Pull the image
-docker pull xd637/quanta-node:v0.3.0-alpha
+docker pull xd637/quanta-node:v0.4.0-alpha
 
 # Run directly (Ensure data persistence!)
 docker run -d \
@@ -93,7 +93,7 @@ docker run -d \
   -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
   -v quanta-data:/home/quanta/quanta_data \
   -v quanta-logs:/home/quanta/logs \
-  xd637/quanta-node:v0.3.0-alpha
+  xd637/quanta-node:v0.4.0-alpha
 ```
 
 ### Option 3: Docker Compose (Recommended)
@@ -175,7 +175,7 @@ docker run -d \
 ```bash
 git clone https://github.com/quantachain/quanta
 cd quanta
-git checkout v0.3.0-alpha
+git checkout v0.4.0-alpha
 cargo build --release
 
 # Run node
@@ -254,6 +254,47 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 | `8333` | P2P Network |
 | `7782` | RPC |
 | `9090` | Prometheus Metrics |
+
+---
+
+## What Changed in Alpha v0.4.0
+
+### 🔧 LWMA Difficulty Algorithm (Consensus Change — Hard Fork)
+
+Replaced the Bitcoin-style 2016-block interval difficulty adjustment with **LWMA (Linearly Weighted Moving Average)**, a per-block algorithm used by Grin, Zcash, and Monero forks.
+
+**Why:** The 2016-block window was dangerous on a small testnet:
+- A high-hashrate miner joining temporarily could mine all 2016 blocks fast, spike difficulty 4×, then leave — causing the network to stall for hours waiting for the next adjustment window.
+- With 30-second block times, 2016 blocks = ~16.8 hours of stuck difficulty. LWMA reduces this to ~22.5 minutes.
+
+**How LWMA works:**
+- Adjusts difficulty on **every block** using the last **45 blocks** (~22.5 min window)
+- Each solve-time is weighted linearly — newest block gets weight 45, oldest gets weight 1
+- Individual solve times are clamped to `[1s … 180s]` to prevent timestamp manipulation
+- Per-block bounds: difficulty can move at most **−25% / +100%** per block
+- All integer math — no `f64`, no platform-dependent rounding (consensus safe)
+
+| Parameter | Old (v0.3.0) | New (v0.4.0) |
+|---|---|---|
+| Algorithm | Bitcoin-style interval | LWMA (Zawy 2017) |
+| Adjustment frequency | Every 2016 blocks | Every block |
+| Window | 2016 blocks (~16.8 hrs) | 45 blocks (~22.5 min) |
+| Recovery time after hashrate change | Up to 16.8 hours | ~22.5 minutes |
+| Per-step cap | 4× up / 0.25× down | 2× up / 0.75× down |
+
+### 🔧 Deep Chain Reorg (Fork Recovery)
+
+Added `deep_reorg()` — a multi-block reorganisation engine that allows the node to escape a private fork and switch to the network's canonical chain.
+
+**Why:** Nodes that mined a block the network rejected could get permanently stuck: every sync batch returned blocks storing as orphans but never connecting, so height never advanced. The stall counter never fired because `add_network_block()` returns `Ok(())` even for orphaned blocks.
+
+**How it works:**
+1. Sync engine detects 2 consecutive batches where blocks arrived but chain height didn't move → **fork detected**
+2. Walks back up to 200 blocks comparing local hashes vs incoming `previous_hash` to find the common ancestor
+3. Rolls back the chain-height pointer to the fork point
+4. Rebuilds account state from genesis up to the fork point
+5. Replays the canonical chain blocks sequentially from there
+6. Safety: never rolls back past a checkpoint, never touches genesis, validates PoW on all incoming blocks before committing
 
 ---
 
