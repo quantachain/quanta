@@ -235,7 +235,7 @@ impl Transaction {
     /// Returns `true` only if ALL checks pass.
     pub fn verify(&self) -> bool {
         // Rule 1: System transactions bypass signature verification.
-        if self.is_coinbase() || self.sender == "TREASURY" {
+        if self.is_coinbase() || self.sender == "TREASURY" || self.is_genesis_premine() {
             return true;
         }
 
@@ -283,6 +283,12 @@ impl Transaction {
     /// Returns `true` if this is a coinbase (mining reward) transaction.
     pub fn is_coinbase(&self) -> bool {
         self.sender == "COINBASE"
+    }
+
+    /// Returns `true` if this is a genesis premine credit.
+    /// Genesis premine funds are immediately spendable (no coinbase maturity lock).
+    pub fn is_genesis_premine(&self) -> bool {
+        self.sender == "GENESIS"
     }
 }
 
@@ -356,10 +362,16 @@ impl AccountState {
         });
 
         if tx.is_coinbase() {
+            // Mining rewards: locked for coinbase_maturity blocks before spending.
             account.locked_balances.push(LockedBalance {
                 amount: tx.amount,
                 unlock_height: current_height + coinbase_maturity,
             });
+        } else if tx.is_genesis_premine() {
+            // Genesis premine: always immediately spendable.
+            // The caller also passes coinbase_maturity=0 for these, but we guard
+            // here explicitly so a future refactor cannot accidentally re-lock them.
+            account.balance = account.balance.saturating_add(tx.amount);
         } else if let TransactionType::TimeLockTransfer { unlock_height } = tx.tx_type {
             account.locked_balances.push(LockedBalance {
                 amount: tx.amount,

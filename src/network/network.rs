@@ -603,9 +603,11 @@ impl Network {
         let mut stall_count = 0u32;
         const MAX_STALLS: u32 = 5; // Give up after 5 consecutive stalls
         // FORK FIX: Track consecutive batches where we received blocks but height didn't advance.
-        // This is the signature of being stuck on a fork.
+        // This is the signature of being stuck on a fork. We trigger faster (after 1 stall)
+        // because the most common cause is a difficulty-mismatch fork; waiting longer just
+        // keeps re-requesting the same failing blocks.
         let mut fork_stall_count = 0u32;
-        const MAX_FORK_STALLS: u32 = 2; // Trigger deep reorg after 2 batches with zero progress
+        const MAX_FORK_STALLS: u32 = 1; // Trigger deep reorg after 1 batch with zero progress
         
         // Batch loop: keep requesting MAX_SYNC_BATCH blocks until caught up.
         loop {
@@ -723,6 +725,14 @@ impl Network {
             info!("Sync batch complete: applied {}, errors {}, new height: {}", 
                 applied, errors, new_height);
 
+            // FORK-STALL FIX: If every block in the batch failed, we are almost certainly
+            // on a diverged fork with a different difficulty sequence. Force an immediate
+            // reorg trigger rather than waiting for the next batch.
+            if applied == 0 && errors > 0 && errors as usize == blocks_to_apply.len() {
+                warn!("ALL {} blocks in batch failed — difficulty-fork detected, forcing reorg trigger", errors);
+                fork_stall_count = fork_stall_count.max(MAX_FORK_STALLS);
+            }
+
             // FORK FIX: Detect "stuck on a fork" condition.
             // If we received blocks but the chain height didn't advance AT ALL,
             // we are likely on a private fork whose tip doesn't match the network's
@@ -749,31 +759,35 @@ impl Network {
                         blocks_to_apply.iter().map(|b| (b.index, b)).collect();
 
                     // Walk back from our local tip to find where the peer's chain matches ours.
-                    // The peer's block at height H has previous_hash = hash(H-1) on the peer.
-                    // If our stored hash(H-1) matches that previous_hash, H-1 is the fork point.
+                    // FORK-STALL FIX: Search up to 500 blocks back instead of 200 — the fork
+                    // point can be further back if the node mined a private fork for a while.
                     let search_start = new_height.saturating_sub(1);
-                    let search_limit = 200u64; // Don't look back more than 200 blocks
+                    let search_limit = 500u64;
                     for h in (search_start.saturating_sub(search_limit)..=search_start).rev() {
                         // Check if any incoming block at h+1 points to our block at h
                         if let Some(incoming_block) = incoming_by_index.get(&(h + 1)) {
                             if let Some(our_hash) = bc.get_block_hash_at(h) {
                                 if incoming_block.previous_hash == our_hash {
                                     fork_point = Some(h + 1);
+                                    info!("Fork point found: incoming block {} prev_hash matches our block {}", h+1, h);
                                     break;
                                 }
                             }
                         }
-                        // Also check: if any incoming block at h points to block h-1 that we
-                        // don't have, that means the fork is before h.
+                        // Also check: if any incoming block at h has same hash as ours
+                        // then chains agree at h — fork is after h.
                         if let Some(incoming_block) = incoming_by_index.get(&h) {
                             if let Some(our_hash) = bc.get_block_hash_at(h) {
                                 if incoming_block.hash == our_hash {
-                                    // Both chains agree at height h — fork is after
                                     fork_point = Some(h + 1);
+                                    info!("Fork point confirmed: chains agree at height {}, fork starts at {}", h, h+1);
                                     break;
                                 }
                             }
                         }
+                    }
+                    if fork_point.is_none() {
+                        warn!("Fork point not found in batch window — defaulting to rollback at first batch index {}", first_idx);
                     }
                     drop(bc);
 
@@ -781,20 +795,22 @@ impl Network {
                     // if we couldn't find a matching ancestor in the scan window.
                     let rollback_to = fork_point.unwrap_or(first_idx);
                     warn!(
-                        "Deep reorg: fork point determined at height {}, rolling back to {}",
+                        "Deep reorg: fork point at height {}, rolling back to {}",
                         rollback_to.saturating_sub(1), rollback_to
                     );
 
-                    // Request an extended batch from the peer starting from rollback_to
-                    // to get the canonical chain blocks we need for the reorg.
+                    // Request an extended batch from the peer starting slightly before rollback_to.
+                    // The 2-block overlap (reorg_start) ensures deep_reorg can validate the
+                    // prev_hash linkage of the first new block against a known good ancestor.
+                    let reorg_start = rollback_to.saturating_sub(2);
                     let reorg_end = max_height.min(rollback_to + MAX_SYNC_BATCH);
-                    info!("Requesting reorg blocks [{}-{}] from peer", rollback_to, reorg_end);
+                    info!("Requesting reorg blocks [{}-{}] from peer (rollback_to={})", reorg_start, reorg_end, rollback_to);
                     {
                         let mut buffer = self.sync_buffer.lock().await;
                         buffer.clear();
                     }
                     if let Err(e) = peer.send_message(P2PMessage::GetBlocks {
-                        start_height: rollback_to,
+                        start_height: reorg_start,
                         end_height: reorg_end,
                     }).await {
                         warn!("Reorg block request failed: {}", e);

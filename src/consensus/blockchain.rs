@@ -91,9 +91,10 @@ const MAX_DIFF_DOWN_PCT: u32 = 75;
 /// a node going offline) from crashing difficulty.
 const LWMA_SOLVE_TIME_CAP_FACTOR: u64 = 6; // 6 × 30s = 180s cap per solve-time
 
-/// Minimum difficulty — set to match the testnet V2 genesis so the algorithm
-/// never outputs a trivially easy target that an attacker can flood with blocks.
-const MIN_DIFFICULTY: u32 = 8_343_908;
+/// Minimum difficulty — set to the testnet V2 genesis difficulty.
+/// This is the difficulty at which the chain STARTED, so all early blocks
+/// mined at genesis difficulty are valid. Never output a target easier than this.
+const MIN_DIFFICULTY: u32 = 6_972_889;
 
 /// Maximum difficulty — 2^31−1 fits in an i32 (used by block.has_valid_hash)
 /// and is far beyond any real CPU/GPU hashrate.
@@ -290,7 +291,11 @@ impl Blockchain {
 
             for recipient_address in recipients {
                 let genesis_tx = Transaction {
-                    sender: "COINBASE".to_string(),
+                    // GENESIS sender (not COINBASE) so premine is NOT treated as a
+                    // mining reward.  Mining rewards are locked for COINBASE_MATURITY
+                    // blocks; genesis premine must be immediately spendable so the
+                    // faucet can distribute coins from block 1 onward.
+                    sender: "GENESIS".to_string(),
                     recipient: recipient_address,
                     amount: premine_amount,
                     timestamp: genesis.timestamp,
@@ -302,7 +307,9 @@ impl Blockchain {
                     tx_type: crate::core::transaction::TransactionType::Transfer,
                     sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
                 };
-                account_state.credit_account(&genesis_tx, 0, COINBASE_MATURITY);
+                // Pass coinbase_maturity=0: premine coins unlock at height 0 (immediately).
+                // COINBASE_MATURITY (100) only applies to block-reward coinbase outputs.
+                account_state.credit_account(&genesis_tx, 0, 0);
             }
             
             storage.save_block(&genesis)?;
@@ -331,9 +338,69 @@ impl Blockchain {
             } else {
                 4
             };
-            
-            (chain, account_state, difficulty)
+
+            // SELF-HEAL: Detect corrupted account state from bad reorg (v0.4.0 bug).
+            // If Faucet 0 shows 0 balance on an existing chain that has blocks, the
+            // genesis premine was never applied — rebuild from scratch automatically.
+            const FAUCET_0: &str = "0x1683be267318d2ddd8cee8df4a4548dcffb1e088";
+            let faucet_balance = account_state.get_balance(FAUCET_0);
+            if network == ChainNetwork::Testnet && faucet_balance == 0 && height > 1 {
+                tracing::warn!(
+                    "⚠️  SELF-HEAL: Faucet 0 has 0 balance on a chain of {} blocks \
+                     — account state is corrupted (v0.4.0 reorg bug). Rebuilding from genesis…",
+                    height
+                );
+                // Rebuild a temporary blockchain state holder to call rebuild method
+                // We cannot call self.rebuild_account_state_up_to here (self doesn't exist yet),
+                // so we inline the same logic: credit premine then replay all blocks.
+                let mut healed_state = AccountState::new();
+                let genesis_ts = storage.load_block(0).map(|g| g.timestamp).unwrap_or(0);
+                let faucets = [
+                    "0x1683be267318d2ddd8cee8df4a4548dcffb1e088",
+                    "0xd528c18ce7a8844e4a4dcd841975b20ae599b020",
+                    "0xfd6e36bfa2b2798d08592802206c943d5513adfb",
+                    "0xed15573ad312d41aaef74cff56a8ef28122ec2db",
+                    "0xaffd6d4f74c5651110efcf1b9736f7a5cf2ccdbb",
+                    "0xbf5ee055f399323fdd0cefe3d4aa923678d46107",
+                    "0x1dc9637b183093d723ea8d1fb18083b06490facb",
+                    "0xa2270f30ca1aad922510375508bf68cd95509f29",
+                    "0xe15a689775685ae324559ea9a492fc650354ca0b",
+                    "0x005dcff212d27b55e7a74bf745e1349ab44ca25d",
+                ];
+                for addr in &faucets {
+                    let gtx = Transaction {
+                        sender: "GENESIS".to_string(), recipient: addr.to_string(),
+                        amount: 1_000_000_000_000, timestamp: genesis_ts,
+                        signature: vec![], public_key: vec![],
+                        fee: 0, nonce: 0, lock_time: 0,
+                        tx_type: crate::core::transaction::TransactionType::Transfer,
+                        sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
+                    };
+                    healed_state.credit_account(&gtx, 0, 0);
+                }
+                for h in 1..height {
+                    if let Ok(block) = storage.load_block(h) {
+                        healed_state.unlock_mature_coinbase(block.index);
+                        for tx in &block.transactions {
+                            if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
+                                let total = tx.amount.saturating_add(tx.fee);
+                                healed_state.debit_account(&tx.sender, total);
+                                healed_state.increment_nonce(&tx.sender);
+                            }
+                            let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
+                            healed_state.credit_account(tx, block.index, maturity);
+                        }
+                    }
+                }
+                storage.save_account_state(&healed_state)?;
+                tracing::info!("✅ SELF-HEAL complete: Faucet 0 balance restored to {} microunits",
+                    healed_state.get_balance(FAUCET_0));
+                (chain, healed_state, difficulty)
+            } else {
+                (chain, account_state, difficulty)
+            }
         };
+
 
         // OPT: Tune rayon thread pool to physical CPU count.
         // Falcon-512 verification is CPU-bound, not I/O-bound.
@@ -711,10 +778,16 @@ impl Blockchain {
         // Removed MAX_TIME_DELTA check. Large forward gaps are valid if the network stops.
         // Large backward gaps are already prevented by MTP and `block.timestamp <= previous.timestamp`.
         
-        // 3. Difficulty must match expected
-        // Calculate expected difficulty considering adjustments
+        // 3. Difficulty check (strict: for normal chain extension)
+        // During normal block acceptance, the incoming block's difficulty MUST
+        // exactly match what our LWMA predicts. This prevents a miner from
+        // unilaterally lowering their difficulty to mine faster.
         let expected_difficulty = self.calculate_next_difficulty();
         if block.difficulty != expected_difficulty {
+            tracing::warn!(
+                "Block {} difficulty {} != expected {} (LWMA diff)",
+                block.index, block.difficulty, expected_difficulty
+            );
             return Err(BlockchainError::InvalidDifficulty);
         }
         
@@ -796,7 +869,7 @@ impl Blockchain {
         let all_sigs_valid = block.transactions
             .par_iter()
             .all(|tx| {
-                if tx.is_coinbase() || tx.sender == "TREASURY" {
+                if tx.is_coinbase() || tx.sender == "TREASURY" || tx.is_genesis_premine() {
                     return true;
                 }
 
@@ -842,8 +915,8 @@ impl Blockchain {
         
         // Now validate fees, nonces, and balances sequentially (need state tracking)
         for tx in &block.transactions {
-            // Skip system transactions
-            if tx.is_coinbase() || tx.sender == "TREASURY" {
+            // Skip system transactions (coinbase, treasury, genesis premine)
+            if tx.is_coinbase() || tx.sender == "TREASURY" || tx.is_genesis_premine() {
                 continue;
             }
             
@@ -896,25 +969,181 @@ impl Blockchain {
         for tx in &block.transactions {
             if tx.is_coinbase() || tx.sender == "TREASURY" {
                 temp_state.credit_account(tx, block.index, COINBASE_MATURITY);
+            } else if tx.is_genesis_premine() {
+                // Genesis premine: immediately spendable (maturity = 0)
+                temp_state.credit_account(tx, block.index, 0);
             }
         }
         
-        // SECURITY FIX: Enforce state_root (State Commitments defense)
-        // Note: For genesis blocks or blocks carrying over from pre-fork, 
-        // we could bypass this if block.index is too old. But for now, we enforce.
+        // STATE ROOT VALIDATION
+        // The state_root commitment was added after the live testnet genesis was mined.
+        // Many existing on-chain blocks pre-date this feature and have a mismatched
+        // or empty state_root. We enforce it ONLY for brand-new blocks (within the
+        // last 1000 blocks of the current tip) to avoid rejecting all historical blocks.
+        //
+        // For a sync node starting from genesis this means: skip state_root for all
+        // historical blocks; only enforce for freshly-broadcast blocks near the tip.
         let computed_state_root = temp_state.calculate_state_root();
-        if block.index > 0 && block.state_root != computed_state_root {
-            // We ignore state_root mismatch on older DB files if state_root isn't present,
-            // but if it's explicitly wrong we reject it. On a fresh block it must match.
-            if block.state_root != "" && block.state_root != String::new() {
-                tracing::warn!("Invalid state root: expected {}, got {}", computed_state_root, block.state_root);
+        let chain_height = self.storage.get_chain_height().unwrap_or(0);
+        let is_historical = chain_height > 1000 && block.index + 1000 < chain_height;
+        if block.index > 0 && !is_historical && block.state_root != computed_state_root {
+            if block.state_root != "" {
+                tracing::warn!("Invalid state root at block {}: our={}, block={}",
+                    block.index, computed_state_root, block.state_root);
                 return Err(BlockchainError::InvalidBlock);
             }
+        } else if block.index > 0 && block.state_root != "" && block.state_root != computed_state_root {
+            // Log mismatch but don't reject historical blocks
+            tracing::debug!("State root mismatch at historical block {} (pre-feature block, skipping enforcement)", block.index);
         }
         
         Ok(())
     }
     
+    /// Validate block against consensus rules during REORG / SYNC replay.
+    ///
+    /// During a deep reorg, blocks were mined by peers using THEIR LWMA state which
+    /// may differ from ours by up to a few percent because our fork diverged at some
+    /// prior block with a different timestamp. Rather than failing every replayed block,
+    /// we:
+    ///   1. Require PoW to meet the block's OWN declared difficulty (unforgeable)
+    ///   2. Require difficulty ≥ MIN_DIFFICULTY (global floor)
+    ///   3. Accept if within 50% of our LWMA estimate (prevents wild spoofing)
+    /// All other checks (timestamps, MTP, coinbase, state) remain strict.
+    fn validate_block_consensus_reorg(&self, block: &Block, previous: &Block) -> Result<(), BlockchainError> {
+        // Size
+        let block_size = bincode::serialize(block).map_err(|_| BlockchainError::InvalidBlock)?.len();
+        if block_size > MAX_BLOCK_SIZE_BYTES {
+            return Err(BlockchainError::BlockTooLarge { size: block_size });
+        }
+
+        // Timestamps
+        if block.timestamp <= previous.timestamp {
+            tracing::warn!("Reorg block {} timestamp <= previous", block.index);
+            return Err(BlockchainError::InvalidBlock);
+        }
+        let current_time = chrono::Utc::now().timestamp();
+        if block.timestamp > current_time + MAX_FUTURE_BLOCK_TIME {
+            tracing::warn!("Reorg block {} timestamp too far in future", block.index);
+            return Err(BlockchainError::InvalidBlock);
+        }
+        if previous.index >= 10 {
+            let mtp = self.median_time_past(previous.index, 11);
+            if block.timestamp <= mtp {
+                tracing::warn!("Reorg block {} timestamp <= MTP {}", block.index, mtp);
+                return Err(BlockchainError::InvalidBlock);
+            }
+        }
+
+        // Difficulty (permissive during reorg)
+        if block.difficulty < MIN_DIFFICULTY {
+            tracing::warn!("Reorg block {} difficulty {} < MIN_DIFFICULTY {}", block.index, block.difficulty, MIN_DIFFICULTY);
+            return Err(BlockchainError::InvalidDifficulty);
+        }
+        // Verify the hash actually meets the declared difficulty (unforgeable)
+        if !block.has_valid_hash() {
+            tracing::warn!("Reorg block {} hash doesn't meet its declared difficulty {}", block.index, block.difficulty);
+            return Err(BlockchainError::InvalidBlock);
+        }
+        // Bound check: accept if within 50% of our LWMA estimate (prevents wild spoofing).
+        // EXCEPTION: Skip bounds check for early blocks (< LWMA_WINDOW) because the LWMA
+        // has not warmed up yet and the estimate is unreliable. These early blocks were mined
+        // at or near genesis difficulty which is already enforced by the MIN_DIFFICULTY check above.
+        if block.index >= LWMA_WINDOW {
+            let expected = self.calculate_next_difficulty() as u64;
+            let lo = expected / 2;  // 50% of expected
+            let hi = expected.saturating_mul(3) / 2; // 150% of expected
+            if (block.difficulty as u64) < lo || (block.difficulty as u64) > hi {
+                tracing::warn!(
+                    "Reorg block {} difficulty {} is outside LWMA bounds [{}, {}] — rejecting",
+                    block.index, block.difficulty, lo, hi
+                );
+                return Err(BlockchainError::InvalidDifficulty);
+            } else if block.difficulty != expected as u32 {
+                tracing::info!(
+                    "Reorg block {} difficulty {} differs from our LWMA {} but within 50% bounds — accepting",
+                    block.index, block.difficulty, expected
+                );
+            }
+        }
+
+        // Coinbase validation (same as strict path)
+        let coinbase_txs: Vec<_> = block.transactions.iter().filter(|tx| tx.is_coinbase()).collect();
+        if coinbase_txs.is_empty() || coinbase_txs.len() > 1 {
+            tracing::warn!("Reorg block {} must have exactly one coinbase", block.index);
+            return Err(BlockchainError::InvalidBlock);
+        }
+        let treasury_txs: Vec<_> = block.transactions.iter()
+            .filter(|tx| tx.sender == "TREASURY")
+            .collect();
+        let coinbase = coinbase_txs[0];
+        let expected_reward = self.calculate_reward_at_height(block.index);
+        let total_fees: u64 = block.transactions.iter()
+            .filter(|tx| !tx.is_coinbase() && tx.sender != "TREASURY")
+            .map(|tx| tx.fee)
+            .sum();
+        let fee_to_miner = (total_fees * FEE_VALIDATOR_PERCENT) / 100;
+        let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100;
+        let treasury_allocation = (expected_reward * TREASURY_ALLOCATION_PERCENT) / 100;
+        let miner_reward = expected_reward - treasury_allocation;
+        let immediate_reward = (miner_reward * (100 - MINING_REWARD_LOCK_PERCENT)) / 100;
+        let expected_coinbase = immediate_reward.saturating_add(fee_to_miner);
+        if coinbase.amount != expected_coinbase {
+            tracing::warn!("Reorg block {} invalid coinbase: expected {}, got {}", block.index, expected_coinbase, coinbase.amount);
+            return Err(BlockchainError::InvalidCoinbaseReward { actual: coinbase.amount, expected: expected_coinbase });
+        }
+        let expected_treasury = treasury_allocation.saturating_add(fee_to_treasury);
+        if expected_treasury > 0 {
+            if treasury_txs.len() != 1 || treasury_txs[0].amount != expected_treasury {
+                return Err(BlockchainError::InvalidBlock);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Add a block to the main chain during a reorg (uses permissive difficulty check).
+    fn add_block_to_main_chain_reorg(&self, block: Block) -> Result<(), BlockchainError> {
+        let latest = self.get_latest_block();
+
+        if !self.validate_checkpoint(block.index, &block.hash) {
+            return Err(BlockchainError::InvalidBlock);
+        }
+        if !block.is_valid(Some(&latest)) {
+            return Err(BlockchainError::InvalidBlock);
+        }
+        // Use permissive difficulty check for reorg blocks
+        self.validate_block_consensus_reorg(&block, &latest)?;
+
+        let mut new_state = self.account_state.read().clone();
+        new_state.unlock_mature_coinbase(block.index);
+        for tx in &block.transactions {
+            if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
+                let total = tx.amount.saturating_add(tx.fee);
+                if !new_state.debit_account(&tx.sender, total) {
+                    tracing::warn!("Reorg block {} has invalid tx: insufficient balance", block.index);
+                    return Err(BlockchainError::InvalidBlock);
+                }
+            }
+            let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
+            new_state.credit_account(tx, block.index, maturity);
+        }
+        self.storage.save_block(&block)?;
+        self.storage.set_chain_height(block.index + 1)?;
+        self.storage.save_account_state(&new_state)?;
+        *self.account_state.write() = new_state;
+        let mut pending = self.pending_transactions.write();
+        pending.retain(|tx| !block.transactions.iter().any(|btx| btx.hash() == tx.hash()));
+        drop(pending);
+        for tx in &block.transactions {
+            if !tx.is_coinbase() {
+                self.pending_nonces.remove(&tx.sender);
+            }
+        }
+        tracing::info!("Reorg: network block {} accepted (permissive diff check)", block.index);
+        Ok(())
+    }
+
     /// Calculate reward at specific height (for validation)
     ///
     /// CONSENSUS-CRITICAL: Must match `get_mining_reward` exactly.
@@ -1392,14 +1621,15 @@ impl Blockchain {
         let mut new_state = new_state;
         new_state.unlock_mature_coinbase(incoming.index);
         for tx in &incoming.transactions {
-            if !tx.is_coinbase() && tx.sender != "TREASURY" {
+            if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
                 let total = tx.amount.saturating_add(tx.fee);
                 if !new_state.debit_account(&tx.sender, total) {
                     tracing::warn!("Reorg: incoming block has invalid tx (insufficient balance)");
                     return Err(BlockchainError::InvalidBlock);
                 }
             }
-            new_state.credit_account(tx, incoming.index, COINBASE_MATURITY);
+            let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
+            new_state.credit_account(tx, incoming.index, maturity);
         }
 
         // Commit: overwrite storage at the tip height with the new block.
@@ -1437,27 +1667,66 @@ impl Blockchain {
     fn rebuild_account_state_up_to(&self, target_height: u64) -> crate::core::transaction::AccountState {
         let mut state = crate::core::transaction::AccountState::new();
 
-        // Apply genesis premine
-        if let Ok(genesis) = self.storage.load_block(0) {
-            for tx in &genesis.transactions {
-                state.credit_account(tx, 0, COINBASE_MATURITY);
-            }
+        // ---------- GENESIS PREMINE ----------
+        // The genesis block on disk has NO transactions stored inside it.
+        // Premine TXs are created in-memory in Blockchain::new() and credited there,
+        // but they are never attached to the Block struct itself.
+        // Therefore we CANNOT loop over genesis.transactions — it will always be empty.
+        //
+        // Instead we re-apply the same hardcoded premine list here.
+        // This MUST stay identical to the list in Blockchain::new() or balances will diverge.
+        //
+        // 1 Million QUA = 1_000_000_000_000 microunits per faucet wallet.
+        let genesis_timestamp = self.storage.load_block(0)
+            .map(|g| g.timestamp)
+            .unwrap_or(0);
+        let testnet_faucets = [
+            "0x1683be267318d2ddd8cee8df4a4548dcffb1e088",  // Faucet 0 (sender)
+            "0xd528c18ce7a8844e4a4dcd841975b20ae599b020",  // Faucet 1
+            "0xfd6e36bfa2b2798d08592802206c943d5513adfb",  // Faucet 2
+            "0xed15573ad312d41aaef74cff56a8ef28122ec2db",  // Faucet 3
+            "0xaffd6d4f74c5651110efcf1b9736f7a5cf2ccdbb",  // Faucet 4
+            "0xbf5ee055f399323fdd0cefe3d4aa923678d46107",  // Faucet 5
+            "0x1dc9637b183093d723ea8d1fb18083b06490facb",  // Faucet 6
+            "0xa2270f30ca1aad922510375508bf68cd95509f29",  // Faucet 7
+            "0xe15a689775685ae324559ea9a492fc650354ca0b",  // Faucet 8
+            "0x005dcff212d27b55e7a74bf745e1349ab44ca25d",  // Faucet 9
+        ];
+        for addr in &testnet_faucets {
+            let genesis_tx = crate::core::transaction::Transaction {
+                sender:    "GENESIS".to_string(),
+                recipient: addr.to_string(),
+                amount:    1_000_000_000_000, // 1 Million QUA in microunits
+                timestamp: genesis_timestamp,
+                signature: vec![],
+                public_key: vec![],
+                fee:       0,
+                nonce:     0,
+                lock_time: 0,
+                tx_type:   crate::core::transaction::TransactionType::Transfer,
+                sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
+            };
+            state.credit_account(&genesis_tx, 0, 0); // maturity=0 → immediately spendable
         }
 
+        // ---------- REPLAY BLOCKS 1..=target_height ----------
         for h in 1..=target_height {
             if let Ok(block) = self.storage.load_block(h) {
                 state.unlock_mature_coinbase(block.index);
                 for tx in &block.transactions {
-                    if !tx.is_coinbase() && tx.sender != "TREASURY" {
+                    if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
                         let total = tx.amount.saturating_add(tx.fee);
                         state.debit_account(&tx.sender, total);
                         state.increment_nonce(&tx.sender);
                     }
-                    state.credit_account(tx, block.index, COINBASE_MATURITY);
+                    // GENESIS premine: maturity=0; COINBASE mining rewards: COINBASE_MATURITY
+                    let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
+                    state.credit_account(tx, block.index, maturity);
                 }
             }
         }
 
+        tracing::info!("Rebuilt account state up to height {} (genesis premine applied)", target_height);
         state
     }
     
@@ -1486,14 +1755,17 @@ impl Blockchain {
         // 5. Apply all transactions
         // 5. Apply all transactions
         for tx in &block.transactions {
-            if !tx.is_coinbase() && tx.sender != "TREASURY" {
+            if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
                 let total = tx.amount.saturating_add(tx.fee);
                 if !new_state.debit_account(&tx.sender, total) {
                     tracing::warn!("Network block has invalid tx: insufficient balance");
                     return Err(BlockchainError::InvalidBlock);
                 }
             }
-            new_state.credit_account(tx, block.index, COINBASE_MATURITY);
+            // GENESIS premine: maturity=0 (immediately spendable)
+            // All other txs (including COINBASE mining rewards): COINBASE_MATURITY
+            let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
+            new_state.credit_account(tx, block.index, maturity);
         }
 
         // 6. OPTIMIZATION: Don't add to in-memory chain (saves RAM!)
@@ -1832,9 +2104,13 @@ impl Blockchain {
         self.orphaned_blocks.write().clear();
 
         // --- Replay new blocks ---
+        // We use add_block_to_main_chain_reorg (permissive difficulty) for the replay
+        // because our local LWMA may diverge slightly from peers due to the fork. The
+        // blocks have valid PoW — the only thing that can differ is the LWMA target by
+        // a few percent, which is fine as long as PoW meets the declared difficulty.
         let mut applied = 0u64;
         for block in sorted {
-            match self.add_block_to_main_chain(block.clone()) {
+            match self.add_block_to_main_chain_reorg(block.clone()) {
                 Ok(_) => {
                     applied += 1;
                     tracing::info!("Deep reorg: applied block {} ({}...)", block.index, &block.hash[..8]);

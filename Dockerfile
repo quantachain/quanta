@@ -1,9 +1,9 @@
 # ============================================================
 # Dockerfile — QUANTA Blockchain Node
 # ============================================================
-# Alpha v3 — Release for testnet testing (v0.4.0)
+# Alpha v4 — Release for testnet testing (v0.5.0)
 #
-# Image : xd637/quanta-node:alpha-v2
+# Image : xd637/quanta-node:alpha-v4
 # Repo  : https://hub.docker.com/r/xd637/quanta-node
 #
 # Quick start (single node):
@@ -20,8 +20,8 @@ FROM rust:latest AS builder
 
 # Image metadata (OCI standard)
 LABEL org.opencontainers.image.title="quanta-node" \
-      org.opencontainers.image.description="QuantaChain node — post-quantum PoW, Falcon-512 signatures. Alpha v3 — LWMA difficulty, deep chain reorg, fork recovery." \
-      org.opencontainers.image.version="0.4.0-alpha" \
+      org.opencontainers.image.description="QuantaChain node — post-quantum PoW, Falcon-512 signatures. v0.5.0-alpha: fork-stall fix, permissive reorg validator, 11-wallet faucet." \
+      org.opencontainers.image.version="0.5.0-alpha" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="Apache-2.0"

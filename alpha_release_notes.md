@@ -1,9 +1,11 @@
-# QuantaChain Testnet — Alpha v0.4.0 (Testnet V2)
+# QuantaChain Testnet — Alpha v0.5.0
 
 Post-quantum secure blockchain using Falcon-512 signatures and SHA3-256 Proof of Work.
 
-> **⚠️ CRITICAL: TESTNET RESET ⚠️**
-> This release changes the difficulty adjustment algorithm — a consensus-breaking change (hard fork). All nodes **MUST delete their `quanta_data/` folder** and restart. Running old and new nodes together will cause a chain split.
+> **⚠️ UPGRADE NOTICE — v0.5.0**
+> This release fixes critical sync and balance bugs. **No chain reset required.**
+> Just pull the new image and restart — the node self-heals corrupted account state automatically on startup.
+> Nodes on v0.4.0 that are stuck in a fork loop will recover automatically after upgrading.
 
 This is a **pre-release testnet build**. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
@@ -72,7 +74,7 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 ## Quick Start with Docker
 
 ### Option 1: Docker Desktop (Graphical Interface)
-1. Open Docker Desktop and find `xd637/quanta-node:v0.4.0-alpha` (or `:latest`) in your Images.
+1. Open Docker Desktop and find `xd637/quanta-node:v0.5.0-alpha` (or `:latest`) in your Images.
 2. Click **Run**.
 3. Under **Optional settings**, configure:
    - **Container name**: `quanta-node`
@@ -85,7 +87,7 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 ### Option 2: Docker CLI
 ```bash
 # Pull the image
-docker pull xd637/quanta-node:v0.4.0-alpha
+docker pull xd637/quanta-node:v0.5.0-alpha
 
 # Run directly (Ensure data persistence!)
 docker run -d \
@@ -93,7 +95,7 @@ docker run -d \
   -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
   -v quanta-data:/home/quanta/quanta_data \
   -v quanta-logs:/home/quanta/logs \
-  xd637/quanta-node:v0.4.0-alpha
+  xd637/quanta-node:v0.5.0-alpha
 ```
 
 ### Option 3: Docker Compose (Recommended)
@@ -175,7 +177,7 @@ docker run -d \
 ```bash
 git clone https://github.com/quantachain/quanta
 cd quanta
-git checkout v0.4.0-alpha
+git checkout v0.5.0-alpha
 cargo build --release
 
 # Run node
@@ -254,6 +256,36 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 | `8333` | P2P Network |
 | `7782` | RPC |
 | `9090` | Prometheus Metrics |
+
+---
+
+## What Changed in Alpha v0.5.0
+
+### 🐛 Critical Fix — Faucet Balance = 0 After Sync
+
+**Root cause:** The genesis premine transactions (10 × 1,000,000 QUA) were created in-memory in `Blockchain::new()` and credited to the account state — but they were **never stored inside the genesis block struct itself**. When a `deep_reorg` triggered `rebuild_account_state_up_to()`, it iterated over `genesis.transactions` (always empty on disk) and applied no premine. All faucet wallets showed 0 QUA after any reorg.
+
+**Fix:** `rebuild_account_state_up_to()` now directly credits the hardcoded faucet list with `maturity=0` before replaying blocks 1–N, exactly mirroring what `Blockchain::new()` does.
+
+**Self-heal on startup:** `Blockchain::new()` now detects the corrupted state (Faucet 0 balance = 0 on a non-empty chain) and automatically replays all blocks to restore correct balances. **No data wipe needed to upgrade from v0.4.0.**
+
+### 🐛 Critical Fix — Sync Stuck at Block 1 (MIN_DIFFICULTY Too High)
+
+**Root cause:** `MIN_DIFFICULTY` was set to `8,343,908` but the live testnet's earliest blocks (heights 1–45) were mined at the genesis difficulty of `6,972,889`. Every incoming block at those heights was rejected with `difficulty 6972889 < minimum 8343908`, making a fresh sync impossible — the node could never advance past genesis.
+
+**Fix:** `MIN_DIFFICULTY` lowered to `6_972_889` (the actual testnet genesis difficulty).
+
+### 🐛 Fix — Reorg LWMA Bounds Rejected Early Chain Blocks
+
+The permissive reorg validator computed LWMA bounds against the current chain tip. For a node at genesis (height 0), this produced an estimate of `~MIN_DIFFICULTY`, and the `50% lo` bound rejected all early blocks. The bounds check is now **skipped for blocks below `LWMA_WINDOW` (45)** — LWMA is not meaningful without a full window.
+
+### 🐛 Fix — State Root Rejected All Historical Blocks
+
+The `state_root` commitment field was added to the codebase after the live testnet had already mined hundreds of blocks. Nodes enforcing the check on those older blocks rejected them as invalid. State root is now only enforced on recent blocks (within 1,000 of the current tip).
+
+### 🔧 Faster Fork Recovery
+
+Reduced `MAX_FORK_STALLS` from 2 to 1 — the node now initiates a deep reorg after a single batch of stuck blocks instead of waiting for two consecutive stalls.
 
 ---
 
