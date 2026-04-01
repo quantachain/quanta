@@ -180,26 +180,35 @@ impl Network {
         loop {
             match listener.accept().await {
                 Ok((stream, addr)) => {
+                    // H-4: Reject inbound connections that would exceed the configured peer limit.
+                    // Without this check a botnet can exhaust connection slots before
+                    // PeerManager.add_peer() is even called.
+                    let current_count = self.peer_manager.peer_count().await;
+                    if current_count >= self.config.max_peers {
+                        // Drop stream immediately — TCP RST is sent on drop.
+                        tracing::debug!("Inbound connection from {} rejected: peer limit {} reached", addr, self.config.max_peers);
+                        drop(stream);
+                        continue;
+                    }
+
                     info!("Incoming connection from {}", addr);
-                    
+
                     let message_tx = self.message_tx.clone();
                     let peer_manager = Arc::clone(&self.peer_manager);
                     let blockchain = Arc::clone(&self.blockchain);
                     let node_id = self.config.node_id.clone();
-                    
+
                     tokio::spawn(async move {
                         match Peer::new(stream, addr).await {
                             Ok(peer) => {
                                 let peer = Arc::new(peer);
-                                
-                                // Perform handshake
+
                                 let blockchain = blockchain.read().await;
                                 let height = blockchain.get_height();
                                 let cumulative_work = blockchain.cumulative_work_at(height);
                                 drop(blockchain);
-                                
+
                                 if let Ok(_) = peer.handshake(PROTOCOL_VERSION, height, cumulative_work, node_id).await {
-                                    // Add peer and start receive task
                                     if peer_manager.add_peer(Arc::clone(&peer)).await.is_ok() {
                                         Self::start_peer_receive_task(peer, message_tx, peer_manager).await;
                                     }
@@ -532,13 +541,39 @@ impl Network {
         self.send_to_peer(addr, P2PMessage::Headers(headers)).await
     }
 
-    /// Handle headers response
-    async fn handle_headers(&self, headers: Vec<crate::network::protocol::BlockHeader>, _peer: Option<Arc<Peer>>) -> Result<(), String> {
+    /// Handle headers response.
+    ///
+    /// Used in two situations:
+    /// 1. During sync — a batch of headers arrives in response to GetHeaders.
+    ///    They are buffered for the sync loop to consume.
+    /// 2. Unsolicited single-header gossip — a peer broadcasts a newly-mined
+    ///    block header (see broadcast_block). If we do not already have that
+    ///    block, trigger an immediate GetBlocks request for it.
+    async fn handle_headers(&self, headers: Vec<crate::network::protocol::BlockHeader>, peer: Option<Arc<Peer>>) -> Result<(), String> {
         if headers.is_empty() {
             return Ok(());
         }
-        
-        // Push to header buffer for sync processor
+
+        // Heuristic: a single-header message is gossip for a new block tip.
+        // A batch of headers (> 1) is a sync response — buffer it as before.
+        if headers.len() == 1 {
+            let h = &headers[0];
+            let our_height = self.blockchain.read().await.get_height();
+            // Only request the block if it is the immediate next block or within
+            // a small forward window (avoids requesting far-future orphans).
+            if h.index > our_height && h.index <= our_height + 5 {
+                if let Some(p) = peer {
+                    debug!("Gossip header for block {} — requesting full block", h.index);
+                    let _ = p.send_message(P2PMessage::GetBlocks {
+                        start_height: h.index,
+                        end_height:   h.index,
+                    }).await;
+                }
+            }
+            return Ok(());
+        }
+
+        // Batch header response — push to buffer for the sync loop.
         let mut buffer = self.header_buffer.lock().await;
         buffer.extend(headers);
         Ok(())
@@ -588,9 +623,18 @@ impl Network {
         self.peer_manager.broadcast(P2PMessage::NewTx(tx)).await;
     }
 
-    /// Broadcast block to all peers
+    /// Broadcast a newly-mined block to all connected peers.
+    ///
+    /// Light gossip: sends only the block header (~200 bytes) rather than the
+    /// full block (~2 MB). Peers that need the full block request it via
+    /// GetBlocks after receiving the header. This reduces per-block broadcast
+    /// bandwidth from O(peers * 2 MB) to O(peers * 200 B).
     pub async fn broadcast_block(&self, block: Block) {
-        self.peer_manager.broadcast(P2PMessage::Block(block)).await;
+        let mut header: crate::network::protocol::BlockHeader = (&block).into();
+        // cumulative_work is not available without a blockchain read; peers
+        // will compute their own value after fetching the full block.
+        header.cumulative_work = 0;
+        self.peer_manager.broadcast(P2PMessage::Headers(vec![header])).await;
     }
 
     /// Synchronize blockchain from peers

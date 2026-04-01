@@ -1,13 +1,14 @@
-# QuantaChain Testnet — Alpha v0.6.0
+# QuantaChain Testnet — Alpha v0.7.0
 
 Post-quantum secure blockchain using Falcon-512 signatures and SHA3-256 Proof of Work.
 
-> **⚠️ UPGRADE NOTICE — v0.6.0 (TESTNET V3 RESET)**
-> This release fixes critical transaction nonce mismatches and deep reorg synchronization issues.
-> Because the consensus rules for mempool assembly were rewritten, **this release requires a hard chain reset.**
-> Prior node operators MUST delete their `quanta_data/` directories to successfully sync the new V3 Genesis block.
+> **UPGRADE NOTICE — v0.7.0 (TESTNET RESET REQUIRED)**
+> This release includes a major sync architecture change (BID) and security hardening.
+> The new cumulative-work peer selection and headers-first sync protocol are incompatible
+> with the previous v0.6.0 chain state.
+> **All node operators MUST delete their `quanta_data/` directories before starting v0.7.0.**
 
-This is a **pre-release testnet build**. Do not use real funds. APIs and chain parameters may change between alpha releases.
+This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
 ---
 
@@ -15,7 +16,7 @@ This is a **pre-release testnet build**. Do not use real funds. APIs and chain p
 
 | Parameter | Value |
 |---|---|
-| Network | Testnet |
+| Network | Testnet (QUA7) |
 | Timestamp | `1775001600` (2026-04-01 00:00:00 UTC) |
 | Testnet Genesis Hash | `00000012d3a2cbb7eb9579330ccdaa4f83ca9e6e016bfe6d2c8a38539cf3733b` |
 | Mainnet Genesis Hash | `1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0` |
@@ -74,38 +75,37 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 ## Quick Start with Docker
 
 ### Option 1: Docker Desktop (Graphical Interface)
-1. Open Docker Desktop and find `xd637/quanta-node:v0.6.0-alpha` (or `:latest`) in your Images.
+1. Open Docker Desktop and find `xd637/quanta-node:v0.7.0-alpha` (or `:latest`) in your Images.
 2. Click **Run**.
 3. Under **Optional settings**, configure:
    - **Container name**: `quanta-node`
    - **Ports**: Map `3000`, `7782`, `8333`, `9090` to themselves.
-   - **Volumes**: 
+   - **Volumes**:
      - Add host path `quanta-data` to container path `/home/quanta/quanta_data`
      - Add host path `quanta-logs` to container path `/home/quanta/logs`
 4. Click **Run**.
 
 ### Option 2: Docker CLI
 ```bash
-# Pull the image
-docker pull xd637/quanta-node:v0.6.0-alpha
+docker pull xd637/quanta-node:v0.7.0-alpha
 
-# Run directly (Ensure data persistence!)
 docker run -d \
   --name quanta-node \
   -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
   -v quanta-data:/home/quanta/quanta_data \
   -v quanta-logs:/home/quanta/logs \
-  xd637/quanta-node:v0.6.0-alpha
+  xd637/quanta-node:v0.7.0-alpha
 ```
 
 ### Option 3: Docker Compose (Recommended)
 
-**If updating from an older version**, delete your old named volume first:
+**REQUIRED: Delete old chain data first (testnet reset)**
 ```bash
 docker compose down -v
+sudo rm -rf ~/quanta_data/*
 ```
 
-Then start the node:
+Then start:
 ```bash
 docker compose -f docker-compose.single.yml up -d
 ```
@@ -114,8 +114,6 @@ docker compose -f docker-compose.single.yml up -d
 
 ## Server Setup (Ubuntu / VPS)
 
-The following instructions guide you through setting up a persistent, always-on Quanta node on a fresh Ubuntu server.
-
 **1. Update system and install Docker:**
 ```bash
 sudo apt update && sudo apt upgrade -y
@@ -123,42 +121,20 @@ curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker ubuntu && newgrp docker
 ```
 
-**2. Open necessary ports (using UFW):**
+**2. Open necessary ports:**
 ```bash
 sudo ufw allow 8333/tcp
 sudo ufw allow 7782/tcp
 sudo ufw allow 3000/tcp
-sudo ufw allow ssh    # Prevents getting locked out
+sudo ufw allow ssh
 sudo ufw --force enable
 ```
 
-**3. Set up directory and start the node (using Host Networking for API Security):**
-```bash
-mkdir -p ~/quanta_data
-sudo chmod 777 ~/quanta_data
-
-docker run -d \
-  --name quanta-node \
-  --restart always \
-  --network host \
-  -v ~/quanta_data:/home/quanta/quanta_data \
-  xd637/quanta-node:latest
-```
-*(Need public Web Wallet access? See `TESTNET_RPC_SETUP.md` for NGINX & SSL setup)*
-
-**4. Check logs:**
-```bash
-docker logs quanta-node --tail 30 -f
-```
-
-**5. Update / Clean Restart (REQUIRED FOR v0.3.0):**
-
-Due to the Testnet V2 reset, you MUST delete your old blockchain data before restarting:
-
+**3. Clean start (REQUIRED for v0.7.0 upgrade):**
 ```bash
 docker stop quanta-node && docker rm quanta-node
 
-# ⚠️ CRITICAL: Delete old blockchain data
+# Delete old blockchain data
 sudo rm -rf ~/quanta_data/*
 
 docker pull xd637/quanta-node:latest
@@ -170,6 +146,11 @@ docker run -d \
   xd637/quanta-node:latest
 ```
 
+**4. Check logs:**
+```bash
+docker logs quanta-node --tail 30 -f
+```
+
 ---
 
 ## Manual Build from Source
@@ -177,10 +158,9 @@ docker run -d \
 ```bash
 git clone https://github.com/quantachain/quanta
 cd quanta
-git checkout v0.6.0-alpha
+git checkout v0.7.0-alpha
 cargo build --release
 
-# Run node
 ./target/release/quanta start -c quanta.toml
 ```
 
@@ -188,61 +168,39 @@ cargo build --release
 
 ## Wallet Management
 
-**Create a new wallet natively:**
 ```bash
+# Native
 ./target/release/quanta new-wallet --file wallet.qua
-```
 
-**Create a raw encrypted wallet using Docker:**
-```bash
+# Docker
 docker exec -it quanta-node quanta new_wallet --file wallet.qua
-```
 
-**Create a new HD Wallet (Recommended! Gives JSON + 24-word recovery phrase):**
-```bash
+# HD Wallet (recommended — 24-word recovery phrase)
 docker exec -it quanta-node quanta new_hd_wallet --file hd_wallet.json
 ```
 
 ---
 
-## Mining (Proof of Work)
+## Mining
 
-**Start CPU miner natively:**
 ```bash
+# Native
 ./target/release/quanta start_mining YOUR_WALLET_ADDRESS --rpc-port 7782
-```
 
-**Start CPU miner using Docker (Background):**
-```bash
+# Docker (background)
 docker exec -d quanta-node quanta start_mining YOUR_WALLET_ADDRESS --rpc-port 7782
-```
 
-**Check Mining Logs in Docker:**
-```bash
-docker logs quanta-node --tail 30 -f
-```
-
-**Stop Mining using Docker:**
-```bash
+# Stop
 docker exec -it quanta-node quanta stop_mining --rpc-port 7782
 ```
 
 ---
 
-## Node Status & Blockchain Info
+## Node Status
 
-**Print Current Blockchain Height:**
-```bash
-docker exec -it quanta-node quanta print_height --rpc-port 7782
-```
-
-**View Full Node Status (Peers, Height, Mempool):**
 ```bash
 docker exec -it quanta-node quanta status --rpc-port 7782
-```
-
-**View Dynamic Mining Status (Difficulty, Blocks Mined, Rewards):**
-```bash
+docker exec -it quanta-node quanta print_height --rpc-port 7782
 docker exec -it quanta-node quanta mining_status --rpc-port 7782
 ```
 
@@ -259,130 +217,218 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 
 ---
 
+## What Changed in Alpha v0.7.0
+
+### Major Architecture — BID (Bitcoin-style Block and Header Download)
+
+The sync engine has been rebuilt around the same two-phase headers-first architecture
+that Bitcoin Core uses for Initial Block Download. This was the primary cause of
+all previous sync stalls, fork loops, and orphan accumulation on the testnet.
+
+**The old problem:**
+Every incoming block triggered a full validation cycle immediately regardless of
+ordering. On a fresh sync or after a reorg, blocks arrived out of sequence, were
+stored as orphans, and the chain never advanced. The stall counter fired, triggering
+another deep reorg, which could fail and leave the node stuck.
+
+**What changed:**
+
+**1. GetHeaders / Headers messages (new P2P protocol messages)**
+
+Two new wire messages — `GetHeaders` and `Headers` — allow a node to download just
+the block headers (index, hash, previous_hash, difficulty, cumulative_work) before
+requesting any full blocks. A header batch is 500 entries max and is a fraction of
+the size of full blocks (which are up to 2 MB each in PQC due to Falcon-512
+signatures).
+
+**2. Cumulative work-based peer selection**
+
+The handshake now exchanges `cumulative_work` (sum of all block difficulties on the
+chain) alongside `height`. When selecting which peer to sync from, the node picks
+the peer with the highest cumulative work — not the highest block height. This
+matches Bitcoin's fork selection rule and prevents a malicious peer from getting a
+node to follow a low-difficulty long chain.
+
+**3. Headers buffer in the sync engine**
+
+A dedicated `header_buffer` collects incoming headers from `GetHeaders` responses.
+The sync loop uses these buffered headers to build a download plan — which height
+ranges are missing — then issues targeted `GetBlocks` requests for only those
+ranges. This eliminates the scatter-gather pattern that caused blocks to arrive
+out of order and be rejected as orphans.
+
+**4. Atomic deep reorg with rollback**
+
+Before this release, a deep reorg that failed partway through (e.g., because the
+incoming chain contained a bad block at block 50 of 100) would leave the node at
+an inconsistent intermediate height. The node now:
+
+- Saves a snapshot of the current chain's blocks before rolling back
+- Applies the new chain blocks one by one
+- If any block fails, rolls back the chain pointer and restores the original chain
+  from the snapshot before returning an error
+
+The node is never left at a partial reorg state.
+
+**5. Height messages carry cumulative work**
+
+`P2PMessage::Height` now carries `cumulative_work` alongside `height`. Nodes
+update both fields on peers during sync, enabling accurate best-peer selection
+throughout a long sync rather than only at handshake time.
+
+> This release requires a testnet reset because the cumulative_work field in
+> the handshake and Height messages changes the binary wire format. Existing
+> v0.6.0 nodes will fail the handshake with v0.7.0 nodes.
+
+---
+
+### Security Fix — Cross-Chain Replay Protection
+
+Added `network_id: u32` to the `Transaction` struct. The field is included in
+`get_signing_bytes()` and `hash()`, meaning every Falcon-512 signature is
+cryptographically bound to a specific network.
+
+| Network | network_id |
+|---|---|
+| Testnet (QUA7) | `0` |
+| Mainnet | `1` |
+
+A transaction signed on Testnet produces an invalid signature on Mainnet and
+vice versa. The field uses `#[serde(default)]` so existing on-chain transactions
+deserialize to `network_id = 0` without a genesis change.
+
+---
+
+### Security Fix — State Root Empty-String Bypass Closed
+
+The previous state root check accepted any block with `state_root = ""` as valid,
+even when the computed state root did not match. A miner could fabricate account
+balances by omitting the state_root field entirely.
+
+Fix: if a block provides a non-empty state_root, it must match the computed value.
+Blocks that genuinely omit state_root (pre-feature legacy blocks) continue to pass.
+
+---
+
+### Security Fix — Reorg Path Was Not Verifying Signatures
+
+`validate_block_consensus_reorg()` checked timestamps, PoW, coinbase amounts, and
+treasury amounts — but skipped transaction signature verification entirely. An
+attacker constructing a longer chain with forged transactions could have them
+accepted during a deep reorg.
+
+Fix: the reorg validator now runs the same parallel Rayon signature pass used by
+`validate_block_consensus()`. The LRU signature cache is shared between both paths,
+so blocks already verified at normal processing time are free to re-apply.
+
+---
+
+### Security Fix — Redundant Serial Signature Verification Removed
+
+`block.is_valid()` ran a serial Falcon-512 verification loop over all transactions,
+then `validate_block_consensus()` ran an identical parallel Rayon pass immediately
+after. Every block's signatures were being verified twice, adding ~1800 ms of
+redundant PQC work per block.
+
+`block.is_valid()` now only checks structural integrity: hash, PoW, Merkle root,
+and chain linkage. All signature verification is owned by the parallel Rayon pass.
+
+---
+
+### Security Fix — Inbound Peer Connection Cap
+
+`listen_for_connections()` previously accepted every inbound TCP connection before
+`PeerManager.add_peer()` could enforce the `max_peers` limit. A botnet could
+exhaust OS connection slots before the limit check ran.
+
+Fix: the node checks `peer_manager.peer_count()` before accepting the TCP stream.
+If the node is at capacity, the stream is dropped immediately (TCP RST).
+
+---
+
+### Improvement — network_id Propagated from Node Config
+
+Coinbase and treasury system transactions now read `network_id` from the node's
+configured `ChainNetwork` via `self.network.network_id()` instead of a hardcoded
+`0`. Mainnet nodes will correctly stamp `network_id = 1` on all system-generated
+transactions from launch.
+
+### Improvement — Light Block Gossip
+
+`broadcast_block()` previously sent the full 2 MB block to every connected peer
+on every new block found. This is now a header-only announcement (~200 bytes).
+Peers that need the full block request it via `GetBlocks`. Per-block broadcast
+bandwidth drops from O(peers x 2 MB) to O(peers x 200 B).
+
+---
+
 ## What Changed in Alpha v0.6.0
 
-### 🐛 Critical Bug Fix — Block Template Nonce Sequence (Network Stall Fix)
+### Critical Fix — Block Template Nonce Sequence (Network Stall Fix)
 
-**Root Cause:** The mempool block assembler sorted transactions strictly by descending fee. If a user sent two transactions, the miner could include them out of nonce-order. The sequentially-validating consensus engine would immediately reject the miner\'s block with InvalidNonce, causing network-wide stalls.
-**Fix:** Block templates now use a simulated State buffer. Transactions are assembled with absolute sequential nonce guarantees, permanently preventing self-orphaning blocks.
+The mempool block assembler sorted transactions by descending fee without enforcing
+nonce ordering. A user submitting multiple transactions could have them included
+out of sequence, causing the consensus engine to reject the block with `InvalidNonce`.
 
-### 🐛 Critical Bug Fix — Permanent Nonce Desync on Reorg
+Block templates now use a simulated state buffer that enforces absolute sequential
+nonce ordering regardless of fee priority.
 
-**Root Cause:** The 
-eorg_to_block handler correctly rolled back and reapplied balances for 1-block reorgs, but failed to call increment_nonce() for transactions in the new block. A user whose transaction landed in a reorg block became permanently frozen with an on-chain nonce of 0.
-**Fix:** Added the missing increment_nonce() call into the reorg block application loop.
+### Critical Fix — Permanent Nonce Desync on Reorg
 
----
+The `reorg_to_block` handler reapplied balances but did not call `increment_nonce()`.
+Any sender whose transaction landed in a reorg block became permanently unable to
+send further transactions (on-chain nonce stuck at 0).
 
+### Critical Fix — Faucet Balance Zero After Sync
 
-### 🐛 Critical Fix — Faucet Balance = 0 After Sync
+Genesis premine transactions were applied in-memory during `Blockchain::new()` but
+not stored inside the genesis block struct on disk. `rebuild_account_state_up_to()`
+iterated `genesis.transactions` (always empty on disk) and applied no premine, so
+all faucet wallets showed 0 QUA after any deep reorg.
 
-**Root cause:** The genesis premine transactions (10 × 1,000,000 QUA) were created in-memory in `Blockchain::new()` and credited to the account state — but they were **never stored inside the genesis block struct itself**. When a `deep_reorg` triggered `rebuild_account_state_up_to()`, it iterated over `genesis.transactions` (always empty on disk) and applied no premine. All faucet wallets showed 0 QUA after any reorg.
+### Critical Fix — Sync Stuck at Block 1
 
-**Fix:** `rebuild_account_state_up_to()` now directly credits the hardcoded faucet list with `maturity=0` before replaying blocks 1–N, exactly mirroring what `Blockchain::new()` does.
-
-**Self-heal on startup:** `Blockchain::new()` now detects the corrupted state (Faucet 0 balance = 0 on a non-empty chain) and automatically replays all blocks to restore correct balances. **No data wipe needed to upgrade from v0.5.0.**
-
-### 🐛 Critical Fix — Sync Stuck at Block 1 (MIN_DIFFICULTY Too High)
-
-**Root cause:** `MIN_DIFFICULTY` was set to `8,343,908` but the live testnet's earliest blocks (heights 1–45) were mined at the genesis difficulty of `6,972,889`. Every incoming block at those heights was rejected with `difficulty 6972889 < minimum 8343908`, making a fresh sync impossible — the node could never advance past genesis.
-
-**Fix:** `MIN_DIFFICULTY` lowered to `6_972_889` (the actual testnet genesis difficulty).
-
-### 🐛 Fix — Reorg LWMA Bounds Rejected Early Chain Blocks
-
-The permissive reorg validator computed LWMA bounds against the current chain tip. For a node at genesis (height 0), this produced an estimate of `~MIN_DIFFICULTY`, and the `50% lo` bound rejected all early blocks. The bounds check is now **skipped for blocks below `LWMA_WINDOW` (45)** — LWMA is not meaningful without a full window.
-
-### 🐛 Fix — State Root Rejected All Historical Blocks
-
-The `state_root` commitment field was added to the codebase after the live testnet had already mined hundreds of blocks. Nodes enforcing the check on those older blocks rejected them as invalid. State root is now only enforced on recent blocks (within 1,000 of the current tip).
-
-### 🔧 Faster Fork Recovery
-
-Reduced `MAX_FORK_STALLS` from 2 to 1 — the node now initiates a deep reorg after a single batch of stuck blocks instead of waiting for two consecutive stalls.
+`MIN_DIFFICULTY` was higher than the actual difficulty of early testnet blocks,
+causing every incoming block at those heights to be rejected immediately.
 
 ---
 
-## What Changed in Alpha v0.6.0
+## What Changed in Alpha v0.5.0
 
-### 🐛 Critical Bug Fix — Block Template Nonce Sequence (Network Stall Fix)
-
-**Root Cause:** The mempool block assembler sorted transactions strictly by descending fee. If a user sent two transactions, the miner could include them out of nonce-order. The sequentially-validating consensus engine would immediately reject the miner\'s block with InvalidNonce, causing network-wide stalls.
-**Fix:** Block templates now use a simulated State buffer. Transactions are assembled with absolute sequential nonce guarantees, permanently preventing self-orphaning blocks.
-
-### 🐛 Critical Bug Fix — Permanent Nonce Desync on Reorg
-
-**Root Cause:** The 
-eorg_to_block handler correctly rolled back and reapplied balances for 1-block reorgs, but failed to call increment_nonce() for transactions in the new block. A user whose transaction landed in a reorg block became permanently frozen with an on-chain nonce of 0.
-**Fix:** Added the missing increment_nonce() call into the reorg block application loop.
-
----
-
-
-### 🔧 LWMA Difficulty Algorithm (Consensus Change — Hard Fork)
-
-Replaced the Bitcoin-style 2016-block interval difficulty adjustment with **LWMA (Linearly Weighted Moving Average)**, a per-block algorithm used by Grin, Zcash, and Monero forks.
-
-**Why:** The 2016-block window was dangerous on a small testnet:
-- A high-hashrate miner joining temporarily could mine all 2016 blocks fast, spike difficulty 4×, then leave — causing the network to stall for hours waiting for the next adjustment window.
-- With 30-second block times, 2016 blocks = ~16.8 hours of stuck difficulty. LWMA reduces this to ~22.5 minutes.
-
-**How LWMA works:**
-- Adjusts difficulty on **every block** using the last **45 blocks** (~22.5 min window)
-- Each solve-time is weighted linearly — newest block gets weight 45, oldest gets weight 1
-- Individual solve times are clamped to `[1s … 180s]` to prevent timestamp manipulation
-- Per-block bounds: difficulty can move at most **−25% / +100%** per block
-- All integer math — no `f64`, no platform-dependent rounding (consensus safe)
-
-| Parameter | Old (v0.3.0) | New (v0.5.0) |
-|---|---|---|
-| Algorithm | Bitcoin-style interval | LWMA (Zawy 2017) |
-| Adjustment frequency | Every 2016 blocks | Every block |
-| Window | 2016 blocks (~16.8 hrs) | 45 blocks (~22.5 min) |
-| Recovery time after hashrate change | Up to 16.8 hours | ~22.5 minutes |
-| Per-step cap | 4× up / 0.25× down | 2× up / 0.75× down |
-
-### 🔧 Deep Chain Reorg (Fork Recovery)
-
-Added `deep_reorg()` — a multi-block reorganisation engine that allows the node to escape a private fork and switch to the network's canonical chain.
-
-**Why:** Nodes that mined a block the network rejected could get permanently stuck: every sync batch returned blocks storing as orphans but never connecting, so height never advanced. The stall counter never fired because `add_network_block()` returns `Ok(())` even for orphaned blocks.
-
-**How it works:**
-1. Sync engine detects 2 consecutive batches where blocks arrived but chain height didn't move → **fork detected**
-2. Walks back up to 200 blocks comparing local hashes vs incoming `previous_hash` to find the common ancestor
-3. Rolls back the chain-height pointer to the fork point
-4. Rebuilds account state from genesis up to the fork point
-5. Replays the canonical chain blocks sequentially from there
-6. Safety: never rolls back past a checkpoint, never touches genesis, validates PoW on all incoming blocks before committing
+- LWMA (Linearly Weighted Moving Average) difficulty algorithm. Adjusts every block
+  on a 45-block window (~22.5 min). Replaces 2016-block Bitcoin-style intervals.
+- `deep_reorg()` multi-block reorganisation engine.
+- Parallel Rayon signature verification with LRU cache (serial ~1800 ms to parallel
+  ~300 ms for a full 1200-tx block).
+- Bloom filter for O(1) mempool duplicate detection.
+- Atomic orphan pool.
 
 ---
 
 ## What Changed in Alpha v0.3.0 (Testnet V2)
 
-- **Testnet V2 Genesis Reset:** Restarted the testnet with a realistic genesis difficulty (`6,972,889`) to properly enforce ~30s block times.
-- **Difficulty Adjustment Fix:** Removed the broken ±15% bounding cap on difficulty adjustments. The algorithm is now mathematically equivalent to Bitcoin's formula with a 4x clamp, resolving the issue where difficulty failed to adjust correctly.
-- **Weighted Peer Reputation:** Replaced the flat 3-strike system with a Bitcoin-style DoSMan weighted scoring system (0-100). Serious consensus violations (e.g., invalid blocks) result in immediate bans (Score: +50), while minor issues like invalid txs (Score: +10) or message floods (Score: +20) accumulate gradually.
-- **Wallet & Mining CLI Improvements:** 
-  - `quanta new_wallet` now clearly prints your generated address to the terminal.
-  - `quanta mining_status` no longer silently truncates your public address, and clearly states if mining is idle instead of looking stuck.
-  - Mining will no longer start unnecessarily if your node is out of sync.
-- **Block Explorer API:** Added full support for paginated address history (`/api/address/:address/txs`), address lookup (`/api/address/:address`), $O(1)$ transaction lookup by hash (`/api/tx/:hash`), and latest block feeds (`/api/blocks/latest`).
-- **Network Routing Fixes:** Nodes no longer request duplicate blocks during broadcasts, fixing the persistent sync stall bug ("stuck at 272").
+- Testnet V2 genesis reset with realistic difficulty (6,972,889).
+- Bitcoin-style DoSMan weighted peer scoring (0-100) replacing flat 3-strike system.
+- Block explorer API: address history, tx lookup, latest blocks.
+- Subnet Sybil protection (IPv4 /24, IPv6 /48).
+- Persistent IP ban list.
 
 ---
 
 ## What Changed in Alpha v0.2.0
 
-- Mnemonic-based faucet wallet system (10 reserve wallets, BIP-39 derived)
-- Genesis timestamp updated to 2026-03-21
-- Security audit 2 applied: nonce atomicity, coinbase validation, MTP timestamp rule, per-sender mempool cap, state root enforcement
-- Block size increased to 2 MB to accommodate Falcon-512 transaction sizes
-- License changed from MIT to Apache 2.0
+- Mnemonic-based faucet wallet system (10 reserve wallets, BIP-39 derived).
+- Security audit: nonce atomicity, coinbase validation, MTP timestamp rule,
+  per-sender mempool cap, state root enforcement.
+- Block size increased to 2 MB for Falcon-512 transaction sizes.
+- License changed to Apache 2.0.
+
+---
 
 ## Security Notice
 
-This release has undergone internal audit only. It has NOT been formally verified by a third-party security firm. Do not use for real financial transactions.
+This release has undergone internal audit only. It has not been formally verified
+by a third-party security firm. Do not use for real financial transactions.
 
 Falcon-512 and Kyber-1024 implementations are based on NIST PQC Round 3 finalists.
 

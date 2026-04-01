@@ -203,33 +203,42 @@ fn apply_annual_reduction(start: u64, years: u64) -> u64 {
     reward
 }
 
-/// Thread-safe blockchain with persistent storage (OPTIMIZED)
-
-/// 
-/// CRITICAL CHANGE: No longer stores full chain in memory!
-/// Before: 3.15M blocks × 2 MB = 20 GB RAM (crashes!)
-/// After: Only genesis block + recent blocks = 2 GB RAM
+/// Thread-safe blockchain with persistent storage.
+///
+/// Blocks are NOT kept in memory beyond genesis. All historical blocks are
+/// loaded on-demand from the storage layer (RocksDB). The in-memory `chain`
+/// vec holds only the genesis block so that `get_latest_block()` always has
+/// something to return on a freshly-loaded node before the first disk read.
 pub struct Blockchain {
-    chain: Arc<RwLock<Vec<Block>>>, // ONLY stores genesis block now
+    /// Contains only the genesis block. All other blocks are stored on disk.
+    chain: Arc<RwLock<Vec<Block>>>,
     pending_transactions: Arc<RwLock<Vec<Transaction>>>,
     account_state: Arc<RwLock<AccountState>>,
-    pending_nonces: Arc<DashMap<String, u64>>, // ATOMIC: Track highest pending nonce
+    /// Tracks the highest pending nonce per sender (concurrent-safe).
+    pending_nonces: Arc<DashMap<String, u64>>,
     storage: Arc<BlockchainStorage>,
     orphaned_blocks: Arc<RwLock<VecDeque<Block>>>,
+    /// The network this node is configured for (Mainnet or Testnet).
+    network: ChainNetwork,
 
-    // OPT-1: Signature verification cache
-    // Saves ~1.5ms per cached Falcon-512 verification (80% hit rate in practice)
+    // OPT-1: Signature verification cache.
+    // Saves ~1.5 ms per cached Falcon-512 verification (80% hit rate in practice).
+    // Only successful verifications are cached — caching `false` would allow a
+    // cache-poisoning attack where one invalid tx permanently rejects valid txs
+    // with the same hash.
     signature_cache: Arc<Mutex<LruCache<String, bool>>>,
 
-    // OPT-2 (PQC): Bloom filter for O(1) mempool duplicate detection
-    // Before: O(n) scan over pending txs — at 1200 txs × 1713 bytes = 2MB scan every add
-    // After:  O(1) probabilistic check — false-positive rate ~0.01% at 50k capacity
+    // OPT-2: Bloom filter for O(1) mempool duplicate detection.
+    // At 1200 txs x 1713 bytes = 2 MB per block, an O(n) scan on every
+    // mempool add caused measurable latency. False-positive rate ~0.01%
+    // at 50k capacity — any false positive is a dropped (not accepted) tx,
+    // which is safe.
     mempool_bloom: Arc<PLMutex<Bloom<String>>>,
 
-    // OPT-3 (PQC): Public key deserialization cache
-    // Falcon-512 public keys are 897 bytes each. When a sender submits N txs in one block,
-    // we were deserializing the same 897-byte key N times. Cache gives O(1) after first hit.
-    // Key = sender address, Value = raw public key bytes (already verified)
+    // OPT-3: Public key deserialization cache.
+    // Falcon-512 public keys are 897 bytes each. When a block contains
+    // multiple txs from the same sender, the same 897-byte key would be
+    // deserialized repeatedly. Cache gives O(1) after the first hit.
     pubkey_cache: Arc<DashMap<String, Vec<u8>>>,
 }
 
@@ -306,6 +315,7 @@ impl Blockchain {
                     lock_time: 0,
                     tx_type: crate::core::transaction::TransactionType::Transfer,
                     sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
+                    network_id: 0, // Testnet; system tx bypasses sig check
                 };
                 // Pass coinbase_maturity=0: premine coins unlock at height 0 (immediately).
                 // COINBASE_MATURITY (100) only applies to block-reward coinbase outputs.
@@ -375,6 +385,7 @@ impl Blockchain {
                         fee: 0, nonce: 0, lock_time: 0,
                         tx_type: crate::core::transaction::TransactionType::Transfer,
                         sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
+                        network_id: 0,
                     };
                     healed_state.credit_account(&gtx, 0, 0);
                 }
@@ -414,25 +425,17 @@ impl Blockchain {
             .build_global() {
             tracing::warn!("Could not configure rayon thread pool: {} (using default config)", e);
         }
-        tracing::info!("Rayon thread pool: {} physical cores for Falcon-512 verification", physical_cores);
-
+        
         Ok(Self {
-            chain: Arc::new(RwLock::new(chain)), // Only genesis in memory!
+            chain: Arc::new(RwLock::new(chain)),
             pending_transactions: Arc::new(RwLock::new(Vec::new())),
             account_state: Arc::new(RwLock::new(account_state)),
             pending_nonces: Arc::new(DashMap::new()),
             storage,
             orphaned_blocks: Arc::new(RwLock::new(VecDeque::new())),
-            // OPT-1: Signature verification cache (100k entries)
-            signature_cache: Arc::new(Mutex::new(
-                LruCache::new(NonZeroUsize::new(100_000).unwrap())
-            )),
-            // OPT-2 (PQC): Bloom filter — sized for 50k pending txs, 0.01% false-positive rate
-            // At Falcon-512 tx sizes, 50k mempool = ~85 MB — bloom avoids scanning all of it
-            mempool_bloom: Arc::new(PLMutex::new(
-                Bloom::new_for_fp_rate(50_000, 0.0001)
-            )),
-            // OPT-3 (PQC): Public key cache — DashMap for lock-free concurrent reads
+            network,
+            signature_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(100_000).unwrap()))),
+            mempool_bloom: Arc::new(PLMutex::new(Bloom::new_for_fp_rate(50_000, 0.0001))),
             pubkey_cache: Arc::new(DashMap::new()),
         })
     }
@@ -668,6 +671,7 @@ impl Blockchain {
             lock_time: 0,
             tx_type: crate::core::transaction::TransactionType::Transfer,
             sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
+            network_id: self.network.network_id(),
         };
         
         // Treasury allocation transaction (if any)
@@ -686,6 +690,7 @@ impl Blockchain {
                 lock_time: 0,
                 tx_type: crate::core::transaction::TransactionType::Transfer,
                 sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
+                network_id: self.network.network_id(),
             };
             all_transactions.push(treasury_tx);
         }
@@ -999,25 +1004,18 @@ impl Blockchain {
         }
         
         // STATE ROOT VALIDATION
-        // The state_root commitment was added after the live testnet genesis was mined.
-        // Many existing on-chain blocks pre-date this feature and have a mismatched
-        // or empty state_root. We enforce it ONLY for brand-new blocks (within the
-        // last 1000 blocks of the current tip) to avoid rejecting all historical blocks.
-        //
-        // For a sync node starting from genesis this means: skip state_root for all
-        // historical blocks; only enforce for freshly-broadcast blocks near the tip.
+        // If the block provides a state_root, it must match our computed value.
+        // Blocks that omit state_root (empty string) are accepted — they pre-date
+        // this feature. This is safe because the Merkle root already commits to
+        // all transaction data; state_root adds an extra account-state binding
+        // for nodes that compute it.
         let computed_state_root = temp_state.calculate_state_root();
-        let chain_height = self.storage.get_chain_height().unwrap_or(0);
-        let is_historical = chain_height > 1000 && block.index + 1000 < chain_height;
-        if block.index > 0 && !is_historical && block.state_root != computed_state_root {
-            if block.state_root != "" {
-                tracing::warn!("Invalid state root at block {}: our={}, block={}",
-                    block.index, computed_state_root, block.state_root);
-                return Err(BlockchainError::InvalidBlock);
-            }
-        } else if block.index > 0 && block.state_root != "" && block.state_root != computed_state_root {
-            // Log mismatch but don't reject historical blocks
-            tracing::debug!("State root mismatch at historical block {} (pre-feature block, skipping enforcement)", block.index);
+        if block.index > 0 && !block.state_root.is_empty() && block.state_root != computed_state_root {
+            tracing::warn!(
+                "Invalid state root at block {}: computed={}, block={}",
+                block.index, computed_state_root, block.state_root
+            );
+            return Err(BlockchainError::InvalidBlock);
         }
         
         Ok(())
@@ -1090,7 +1088,7 @@ impl Blockchain {
             }
         }
 
-        // Coinbase validation (same as strict path)
+        // Coinbase and treasury amounts (same checks as the strict path)
         let coinbase_txs: Vec<_> = block.transactions.iter().filter(|tx| tx.is_coinbase()).collect();
         if coinbase_txs.is_empty() || coinbase_txs.len() > 1 {
             tracing::warn!("Reorg block {} must have exactly one coinbase", block.index);
@@ -1120,6 +1118,35 @@ impl Blockchain {
             if treasury_txs.len() != 1 || treasury_txs[0].amount != expected_treasury {
                 return Err(BlockchainError::InvalidBlock);
             }
+        }
+
+        // H-1 FIX: Verify all user-signed transaction signatures on the reorg path.
+        // Previously this check was missing, allowing a crafted reorg chain to include
+        // unsigned or forged transactions that would pass without cryptographic validation.
+        // We reuse the same parallel Rayon + cache approach used in validate_block_consensus.
+        let all_sigs_valid = block.transactions
+            .par_iter()
+            .all(|tx| {
+                if tx.is_coinbase() || tx.sender == "TREASURY" || tx.is_genesis_premine() {
+                    return true;
+                }
+                let tx_hash = tx.hash();
+                {
+                    let mut cache = self.signature_cache.lock().unwrap();
+                    if let Some(&is_valid) = cache.get(&tx_hash) {
+                        return is_valid;
+                    }
+                }
+                let is_valid = tx.verify();
+                if is_valid {
+                    let mut cache = self.signature_cache.lock().unwrap();
+                    cache.put(tx_hash, true);
+                }
+                is_valid
+            });
+        if !all_sigs_valid {
+            tracing::warn!("Reorg block {} contains invalid transaction signatures", block.index);
+            return Err(BlockchainError::InvalidSignature);
         }
 
         Ok(())
@@ -1683,7 +1710,7 @@ impl Blockchain {
             }
         }
 
-        tracing::info!("✓ Reorg complete: replaced tip at height {} with block {}",
+        tracing::info!("Reorg complete: replaced tip at height {} with block {}",
             incoming.index, &incoming.hash[..8]);
         Ok(())
     }
@@ -1731,6 +1758,7 @@ impl Blockchain {
                 lock_time: 0,
                 tx_type:   crate::core::transaction::TransactionType::Transfer,
                 sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
+                network_id: 0,
             };
             state.credit_account(&genesis_tx, 0, 0); // maturity=0 → immediately spendable
         }
@@ -1778,8 +1806,7 @@ impl Blockchain {
         // Unlock any mature coinbase rewards
         new_state.unlock_mature_coinbase(block.index);
 
-        // 5. Apply all transactions
-        // 5. Apply all transactions
+        // Apply all transactions to update the new state
         for tx in &block.transactions {
             if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
                 let total = tx.amount.saturating_add(tx.fee);
@@ -1819,7 +1846,7 @@ impl Blockchain {
             }
         }
 
-        tracing::info!(" Network block {} accepted", block.index);
+        tracing::info!("Network block {} accepted at height {}", block.index, block.index);
         Ok(())
     }
 
@@ -2317,5 +2344,3 @@ mod tests {
             "TREASURY_ADDRESS changed! Update this test AND generate a new genesis block.");
     }
 }
-
-

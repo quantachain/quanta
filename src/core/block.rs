@@ -157,59 +157,54 @@ impl Block {
         }
     }
 
-    /// Validate block structure and hash
+    /// Validate block structure and PoW.
+    ///
+    /// Checks: hash integrity, proof-of-work, Merkle root, and previous-block
+    /// linkage. Transaction signature verification is intentionally NOT done
+    /// here — it is performed in parallel by Rayon inside
+    /// `Blockchain::validate_block_consensus()`. Running it here as well would
+    /// double the Falcon-512 verification work (~1800 ms per block).
     pub fn is_valid(&self, previous_block: Option<&Block>) -> bool {
-        // Check hash is correct
+        // 1. Hash integrity
         if self.hash != self.calculate_hash() {
-            tracing::warn!("Block {}: invalid hash calculation", self.index);
+            tracing::warn!("Block {}: hash does not match contents", self.index);
             return false;
         }
 
-        // Check proof-of-work
+        // 2. Proof-of-work
         if !self.has_valid_hash() {
-            tracing::warn!("Block {}: invalid proof-of-work", self.index);
+            tracing::warn!("Block {}: hash does not meet declared difficulty {}", self.index, self.difficulty);
             return false;
         }
 
-        // CRITICAL: Validate merkle root (prevents merkle root lying)
+        // 3. Merkle root integrity
         let tree = MerkleTree::from_transactions(&self.transactions);
         let computed_root = tree.root_hash().unwrap_or_else(|| "0".repeat(64));
         if self.merkle_root != computed_root {
             tracing::warn!(
-                "Block {}: invalid merkle root: expected {}, got {}",
-                self.index, computed_root, self.merkle_root
+                "Block {}: Merkle root mismatch: block={} computed={}",
+                self.index, self.merkle_root, computed_root
             );
             return false;
         }
 
-        // Check previous hash linkage
+        // 4. Chain linkage and timestamp
         if let Some(prev) = previous_block {
             if self.previous_hash != prev.hash {
-                tracing::warn!("Block {}: invalid previous hash linkage", self.index);
+                tracing::warn!("Block {}: previous_hash does not match parent {}", self.index, prev.index);
                 return false;
             }
             if self.index != prev.index + 1 {
-                tracing::warn!("Block {}: invalid block index (expected {})", self.index, prev.index + 1);
+                tracing::warn!("Block {}: index {} is not parent index {} + 1", self.index, self.index, prev.index);
                 return false;
             }
-            
-            // SECURITY FIX (MEDIUM): Validate timestamp is reasonable
             if self.timestamp <= prev.timestamp {
-                tracing::warn!("Block {}: timestamp must be after previous block", self.index);
+                tracing::warn!("Block {}: timestamp {} is not after parent timestamp {}", self.index, self.timestamp, prev.timestamp);
                 return false;
             }
-            
             let current_time = chrono::Utc::now().timestamp();
             if self.timestamp > current_time + 7200 {
-                tracing::warn!("Block {}: timestamp too far in future (>2h)", self.index);
-                return false;
-            }
-        }
-
-        // Verify all transaction signatures
-        for tx in &self.transactions {
-            if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.verify() {
-                tracing::warn!("Block {}: invalid transaction signature (tx: {})", self.index, tx.hash());
+                tracing::warn!("Block {}: timestamp {} is more than 2 hours in the future", self.index, self.timestamp);
                 return false;
             }
         }

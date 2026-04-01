@@ -1,5 +1,6 @@
 use serde::{Serialize, Deserialize};
 use crate::crypto::{verify_signature_strict, canonical_signing_hash};
+use crate::core::{TESTNET_NETWORK_ID};
 use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
@@ -57,7 +58,7 @@ pub struct Transaction {
     pub public_key: Vec<u8>,
     pub fee: u64,
     pub nonce: u64,
-    /// The block height before which this transaction cannot be included. 
+    /// The block height before which this transaction cannot be included.
     /// Defaults to 0 (no lock time). Prevents fee sniping.
     #[serde(default)]
     pub lock_time: u64,
@@ -66,6 +67,19 @@ pub struct Transaction {
     /// Included in the signing payload so that scheme substitution is rejected.
     #[serde(default)]
     pub sig_scheme: SignatureScheme,
+    /// Chain network identifier — prevents cross-chain replay attacks.
+    ///
+    /// FROZEN VALUES (never renumber):
+    ///   0 = Testnet  (QUA7 and all future testnets — **current default**)
+    ///   1 = Mainnet
+    ///
+    /// `#[serde(default)]` keeps this backwards-compatible when deserializing
+    /// old transactions from disk or the network; they will read as 0 (Testnet),
+    /// which is correct for the existing QUA7 testnet chain.
+    /// Wallets and the node must set this to `config.network_type.network_id()`
+    /// before signing.
+    #[serde(default)]
+    pub network_id: u32,
 }
 
 /// Transaction types supported by the protocol.
@@ -91,6 +105,9 @@ impl Transaction {
             lock_time: 0,
             tx_type: TransactionType::Transfer,
             sig_scheme: SignatureScheme::Falcon512,
+            // Default to Testnet (0). The caller must override with
+            // `tx.network_id = config.network_type.network_id()` before signing.
+            network_id: TESTNET_NETWORK_ID,
         }
     }
 
@@ -115,6 +132,7 @@ impl Transaction {
             lock_time: 0,
             tx_type: TransactionType::TimeLockTransfer { unlock_height },
             sig_scheme: SignatureScheme::Falcon512,
+            network_id: TESTNET_NETWORK_ID,
         }
     }
 
@@ -128,6 +146,7 @@ impl Transaction {
     ///   - All integers encoded as LITTLE-ENDIAN.
     ///   - Strings encoded as UTF-8.
     ///   - `sig_scheme` encoded as a single byte (its u8 discriminant).
+    ///   - `network_id` encoded as 4 LE bytes — cross-chain replay protection.
     ///   - `public_key` included to bind the signature to a specific key.
     ///   - Signature field is EXCLUDED (you cannot sign the signature).
     ///
@@ -136,7 +155,7 @@ impl Transaction {
     /// prepends the domain tag and applies SHA3-256, yielding a 32-byte value
     /// that is then signed with Falcon-512.
     pub fn get_signing_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(256);
+        let mut buf = Vec::with_capacity(260);
 
         buf.extend_from_slice(self.sender.as_bytes());
         buf.extend_from_slice(self.recipient.as_bytes());
@@ -148,6 +167,9 @@ impl Transaction {
         buf.extend_from_slice(&self.public_key);
         // Include sig_scheme so that scheme substitution attacks fail.
         buf.push(self.sig_scheme as u8);
+        // Include network_id so that cross-chain replay attacks fail.
+        // A Testnet signature (network_id=0) is invalid on Mainnet (1).
+        buf.extend_from_slice(&self.network_id.to_le_bytes());
 
         match &self.tx_type {
             TransactionType::Transfer => buf.push(0u8),
@@ -201,6 +223,7 @@ impl Transaction {
         hasher.update(&self.lock_time.to_le_bytes());
         hasher.update(&self.public_key);
         hasher.update(&[self.sig_scheme as u8]);
+        hasher.update(&self.network_id.to_le_bytes());
 
         match &self.tx_type {
             TransactionType::Transfer => hasher.update(&[0u8]),
@@ -625,7 +648,27 @@ mod tests {
             lock_time: 0,
             tx_type: TransactionType::Transfer,
             sig_scheme: SignatureScheme::Falcon512,
+            network_id: 0,
         };
         assert!(tx.verify(), "Coinbase must bypass signature verification");
+    }
+
+    /// A Testnet-signed transaction must be rejected if `network_id` is changed
+    /// to Mainnet — proving cross-chain replay protection is in effect.
+    #[test]
+    fn test_cross_chain_replay_rejected() {
+        use crate::core::{TESTNET_NETWORK_ID, MAINNET_NETWORK_ID};
+        let kp = FalconKeypair::generate();
+        // Sign as Testnet (network_id = 0)
+        let mut tx = signed_transfer(&kp, 1_000, 1);
+        assert_eq!(tx.network_id, TESTNET_NETWORK_ID);
+        assert!(tx.verify(), "Testnet-signed tx must verify on Testnet");
+
+        // Mutate to Mainnet — signature payload now differs, must fail.
+        tx.network_id = MAINNET_NETWORK_ID;
+        assert!(
+            !tx.verify(),
+            "Testnet-signed tx must NOT verify on Mainnet (cross-chain replay rejected)"
+        );
     }
 }
