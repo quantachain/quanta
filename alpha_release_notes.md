@@ -2,10 +2,10 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and SHA3-256 Proof of Work.
 
-> **⚠️ UPGRADE NOTICE — v0.6.0**
-> This release fixes critical sync and balance bugs. **No chain reset required.**
-> Just pull the new image and restart — the node self-heals corrupted account state automatically on startup.
-> Nodes on v0.5.0 that are stuck in a fork loop will recover automatically after upgrading.
+> **⚠️ UPGRADE NOTICE — v0.6.0 (TESTNET V3 RESET)**
+> This release fixes critical transaction nonce mismatches and deep reorg synchronization issues.
+> Because the consensus rules for mempool assembly were rewritten, **this release requires a hard chain reset.**
+> Prior node operators MUST delete their `quanta_data/` directories to successfully sync the new V3 Genesis block.
 
 This is a **pre-release testnet build**. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
