@@ -93,8 +93,8 @@ const LWMA_SOLVE_TIME_CAP_FACTOR: u64 = 6; // 6 × 30s = 180s cap per solve-time
 
 /// Minimum difficulty — set to the testnet V2 genesis difficulty.
 /// This is the difficulty at which the chain STARTED, so all early blocks
-/// mined at genesis difficulty are valid. Never output a target easier than this.
-const MIN_DIFFICULTY: u32 = 6_972_889;
+/// Mined at genesis difficulty are valid. Never output a target easier than this.
+const MIN_DIFFICULTY: u32 = 8_304_130;
 
 /// Maximum difficulty — 2^31−1 fits in an i32 (used by block.has_valid_hash)
 /// and is far beyond any real CPU/GPU hashrate.
@@ -164,9 +164,9 @@ const MAX_ADDRESS_LEN: usize = 128;
 /// CONSENSUS-CRITICAL: Genesis block hashes (prevent chain-split attacks)
 /// Mainnet genesis — pending final mining before mainnet launch.
 const GENESIS_HASH: &str = "1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0";
-/// Testnet Alpha V2 genesis — difficulty 6_972_889 (~30s/block).
+/// Testnet Alpha genesis — difficulty 8_304_130 (~30s/block).
 /// Old nodes on the previous testnet genesis will be rejected by this hash check.
-const TESTNET_GENESIS_HASH: &str = "0000000379f963c94f47e9d949a288c9f68caa9d2399a3efa9ed844bf6bf52e2";
+const TESTNET_GENESIS_HASH: &str = "00000012d3a2cbb7eb9579330ccdaa4f83ca9e6e016bfe6d2c8a38539cf3733b";
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)
@@ -238,7 +238,7 @@ impl Blockchain {
     pub fn new(storage: Arc<BlockchainStorage>, network: ChainNetwork) -> Result<Self, BlockchainError> {
         // OPTIMIZATION: Only load genesis to verify chain exists
         // All other blocks loaded on-demand from disk
-        let chain = storage.load_chain()?;
+        let _chain = storage.load_chain()?;
         let account_state = storage.load_account_state()?.unwrap_or_else(AccountState::new);
         
         // OPTIMIZATION: load_chain only returns genesis or empty if new.
@@ -593,19 +593,42 @@ impl Blockchain {
         let mut transactions = Vec::new();
         let mut block_size = 0usize;
         
-        // Select transactions that fit in block limits (prioritize high fees)
-        for tx in sorted_txs.iter() {
-            if transactions.len() >= MAX_BLOCK_TRANSACTIONS {
-                break;
+        // Use a temporary state to validate nonces and balances as we add them, 
+        // to prevent mining invalid blocks (which stall the network with orphaned blocks).
+        let mut temp_state = self.account_state.read().clone();
+        
+        let mut added_any = true;
+        while added_any && transactions.len() < MAX_BLOCK_TRANSACTIONS {
+            added_any = false;
+            let mut i = 0;
+            while i < sorted_txs.len() {
+                let tx = &sorted_txs[i];
+                let expected_nonce = temp_state.get_nonce(&tx.sender) + 1;
+                
+                if tx.nonce == expected_nonce {
+                    let tx_size = bincode::serialize(tx).unwrap_or_default().len();
+                    if block_size + tx_size <= MAX_BLOCK_SIZE_BYTES {
+                        let total_required = tx.amount.saturating_add(tx.fee);
+                        if temp_state.debit_account(&tx.sender, total_required) {
+                            temp_state.increment_nonce(&tx.sender);
+                            transactions.push(tx.clone());
+                            block_size += tx_size;
+                            added_any = true;
+                        }
+                    }
+                    sorted_txs.remove(i);
+                } else if tx.nonce < expected_nonce {
+                    // Stale nonce, skip and remove
+                    sorted_txs.remove(i);
+                } else {
+                    // Nonce is too high right now; keep it in sorted_txs in case the missing preceding tx is found later
+                    i += 1;
+                }
+                
+                if transactions.len() >= MAX_BLOCK_TRANSACTIONS {
+                    break;
+                }
             }
-            
-            let tx_size = bincode::serialize(tx).unwrap_or_default().len();
-            if block_size + tx_size > MAX_BLOCK_SIZE_BYTES {
-                break;
-            }
-            
-            transactions.push(tx.clone());
-            block_size += tx_size;
         }
         
         // Create coinbase transaction with fee distribution
@@ -1124,6 +1147,7 @@ impl Blockchain {
                     tracing::warn!("Reorg block {} has invalid tx: insufficient balance", block.index);
                     return Err(BlockchainError::InvalidBlock);
                 }
+                new_state.increment_nonce(&tx.sender);
             }
             let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
             new_state.credit_account(tx, block.index, maturity);
@@ -1596,7 +1620,7 @@ impl Blockchain {
         //
         // For a full deep reorg this would need to replay from the fork point, but
         // for a 1-deep swap the snapshot at tip−1 is exactly what we need.
-        let pre_tip_state = self.storage.load_account_state()
+        let _pre_tip_state = self.storage.load_account_state()
             .ok()
             .flatten();
         
@@ -1627,6 +1651,8 @@ impl Blockchain {
                     tracing::warn!("Reorg: incoming block has invalid tx (insufficient balance)");
                     return Err(BlockchainError::InvalidBlock);
                 }
+                // CRITICAL: Increment nonce so the sender's next transaction uses the right nonce
+                new_state.increment_nonce(&tx.sender);
             }
             let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
             new_state.credit_account(tx, incoming.index, maturity);
@@ -1761,6 +1787,7 @@ impl Blockchain {
                     tracing::warn!("Network block has invalid tx: insufficient balance");
                     return Err(BlockchainError::InvalidBlock);
                 }
+                new_state.increment_nonce(&tx.sender);
             }
             // GENESIS premine: maturity=0 (immediately spendable)
             // All other txs (including COINBASE mining rewards): COINBASE_MATURITY

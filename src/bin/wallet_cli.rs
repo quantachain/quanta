@@ -454,12 +454,14 @@ fn read_new_password(label: &str) -> String {
 }
 
 async fn fetch_balance(node: &str, address: &str) -> u64 {
-    let url = format!("{}/balance/{}", node, address);
+    let url = format!("{}/api/balance/{}", node, address);
     let resp = reqwest::get(&url).await;
     match resp {
         Ok(r) => {
             if let Ok(j) = r.json::<serde_json::Value>().await {
-                j["balance"].as_u64().unwrap_or(0)
+                j["balance_microunits"].as_u64()
+                    .or_else(|| j["balance"].as_u64())
+                    .unwrap_or(0)
             } else { 0 }
         }
         Err(_) => {
@@ -470,7 +472,8 @@ async fn fetch_balance(node: &str, address: &str) -> u64 {
 }
 
 async fn fetch_nonce(node: &str, address: &str) -> u64 {
-    let url = format!("{}/nonce/{}", node, address);
+    // GET /api/balance/:address returns { balance_microunits, nonce, address }
+    let url = format!("{}/api/balance/{}", node, address);
     let resp = reqwest::get(&url).await;
     match resp {
         Ok(r) => {
@@ -483,7 +486,7 @@ async fn fetch_nonce(node: &str, address: &str) -> u64 {
 }
 
 async fn broadcast_tx(node: &str, tx: &Transaction) -> Result<String, String> {
-    let url = format!("{}/transactions", node);
+    let url = format!("{}/api/transactions/submit", node);
     let client = reqwest::Client::new();
     let resp = client.post(&url)
         .json(tx)

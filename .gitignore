@@ -39,3 +39,7 @@ Thumbs.db
 # Remove emojis
 remove_emojis.py
 docs/
+
+#Faucet
+
+src/bin/distribute_faucet.rs

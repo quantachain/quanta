@@ -403,7 +403,7 @@ impl Network {
 
         let blockchain = self.blockchain.read().await;
         let latest = blockchain.get_latest_block();
-        let our_height = blockchain.get_height();
+        let _our_height = blockchain.get_height();
         drop(blockchain);
 
         if block.index > latest.index + 100 {

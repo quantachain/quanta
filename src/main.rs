@@ -204,6 +204,10 @@ enum Commands {
         /// Database path
         #[arg(short, long, default_value = "./quanta_data")]
         db: String,
+
+        /// Network type (mainnet or testnet)
+        #[arg(long, default_value = "testnet")]
+        network: String,
     },
     
     /// Send coins to another address
@@ -220,6 +224,9 @@ enum Commands {
         /// Database path
         #[arg(short, long, default_value = "./quanta_data")]
         db: String,
+        /// Network type (mainnet or testnet)
+        #[arg(long, default_value = "testnet")]
+        network: String,
     },
     
     /// Show blockchain statistics
@@ -227,6 +234,9 @@ enum Commands {
         /// Database path
         #[arg(short, long, default_value = "./quanta_data")]
         db: String,
+        /// Network type (mainnet or testnet)
+        #[arg(long, default_value = "testnet")]
+        network: String,
     },
     
     /// Validate the blockchain
@@ -234,6 +244,9 @@ enum Commands {
         /// Database path
         #[arg(short, long, default_value = "./quanta_data")]
         db: String,
+        /// Network type (mainnet or testnet)
+        #[arg(long, default_value = "testnet")]
+        network: String,
     },
     
     /// Run demo with sample transactions
@@ -789,7 +802,7 @@ async fn main() {
             println!("\nWallet Address: {}\n", wallet.address);
         }
 
-        Commands::Mine { wallet: wallet_file, db } => {
+        Commands::Mine { wallet: wallet_file, db, network } => {
             let password = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
                 p
             } else {
@@ -804,9 +817,14 @@ async fn main() {
                     return;
                 }
             };
+
+            let network_type = match network.as_str() {
+                "testnet" => core::ChainNetwork::Testnet,
+                _ => core::ChainNetwork::Mainnet,
+            };
             
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
-            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, core::ChainNetwork::Mainnet).expect("Failed to initialize blockchain")));
+            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, network_type).expect("Failed to initialize blockchain")));
             
             println!("  Mining new block...");
             let mine_result = blockchain.write().await.mine_pending_transactions(wallet.address.clone());
@@ -820,7 +838,7 @@ async fn main() {
             }
         }
 
-        Commands::Send { wallet: wallet_file, to, amount, db } => {
+        Commands::Send { wallet: wallet_file, to, amount, db, network } => {
             let password = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
                 p
             } else {
@@ -835,9 +853,14 @@ async fn main() {
                     return;
                 }
             };
+
+            let network_type = match network.as_str() {
+                "testnet" => core::ChainNetwork::Testnet,
+                _ => core::ChainNetwork::Mainnet,
+            };
             
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
-            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, core::ChainNetwork::Mainnet).expect("Failed to initialize blockchain")));
+            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, network_type).expect("Failed to initialize blockchain")));
             
             // Convert QUA to microunits
             let amount_microunits = qua_to_microunits(amount);
@@ -866,9 +889,10 @@ async fn main() {
                 sig_scheme: SignatureScheme::Falcon512,
             };
             
-            // Sign transaction
-            let signing_data = tx.get_signing_data();
-            tx.signature = wallet.keypair.sign_transaction_canonical(&signing_data);
+            // Sign transaction — pass raw signing BYTES (not the hash) to sign_transaction_canonical
+            // sign_transaction_canonical internally hashes with SHA3-256(SIGNING_DOMAIN || data)
+            let signing_bytes = tx.get_signing_bytes();
+            tx.signature = wallet.keypair.sign_transaction_canonical(&signing_bytes);
             
             let add_result = blockchain.write().await.add_transaction(tx);
             match add_result {
@@ -881,9 +905,13 @@ async fn main() {
             }
         }
 
-        Commands::Stats { db } => {
+        Commands::Stats { db, network } => {
+            let network_type = match network.as_str() {
+                "testnet" => core::ChainNetwork::Testnet,
+                _ => core::ChainNetwork::Mainnet,
+            };
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
-            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, core::ChainNetwork::Mainnet).expect("Failed to initialize blockchain")));
+            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, network_type).expect("Failed to initialize blockchain")));
             let stats = blockchain.read().await.get_stats();
             
             let reward_qua = microunits_to_qua(stats.mining_reward);
@@ -908,9 +936,13 @@ async fn main() {
             println!("");
         }
 
-        Commands::Validate { db } => {
+        Commands::Validate { db, network } => {
+            let network_type = match network.as_str() {
+                "testnet" => core::ChainNetwork::Testnet,
+                _ => core::ChainNetwork::Mainnet,
+            };
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
-            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, core::ChainNetwork::Mainnet).expect("Failed to initialize blockchain")));
+            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, network_type).expect("Failed to initialize blockchain")));
             
             println!("Validating blockchain...");
             

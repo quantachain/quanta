@@ -1,11 +1,11 @@
-# QuantaChain Testnet — Alpha v0.5.0
+# QuantaChain Testnet — Alpha v0.6.0
 
 Post-quantum secure blockchain using Falcon-512 signatures and SHA3-256 Proof of Work.
 
-> **⚠️ UPGRADE NOTICE — v0.5.0**
+> **⚠️ UPGRADE NOTICE — v0.6.0**
 > This release fixes critical sync and balance bugs. **No chain reset required.**
 > Just pull the new image and restart — the node self-heals corrupted account state automatically on startup.
-> Nodes on v0.4.0 that are stuck in a fork loop will recover automatically after upgrading.
+> Nodes on v0.5.0 that are stuck in a fork loop will recover automatically after upgrading.
 
 This is a **pre-release testnet build**. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
@@ -16,10 +16,10 @@ This is a **pre-release testnet build**. Do not use real funds. APIs and chain p
 | Parameter | Value |
 |---|---|
 | Network | Testnet |
-| Timestamp | `1774483200` (2026-03-26 00:00:00 UTC) |
-| Testnet Genesis Hash | `0000000379f963c94f47e9d949a288c9f68caa9d2399a3efa9ed844bf6bf52e2` |
+| Timestamp | `1775001600` (2026-04-01 00:00:00 UTC) |
+| Testnet Genesis Hash | `00000012d3a2cbb7eb9579330ccdaa4f83ca9e6e016bfe6d2c8a38539cf3733b` |
 | Mainnet Genesis Hash | `1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0` |
-| Difficulty | 6,972,889 (Testnet) / 16,777,216 (Mainnet) |
+| Difficulty | 8,304,130 (Testnet) / 16,777,216 (Mainnet) |
 | Block Time | 30 seconds |
 
 ---
@@ -74,7 +74,7 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 ## Quick Start with Docker
 
 ### Option 1: Docker Desktop (Graphical Interface)
-1. Open Docker Desktop and find `xd637/quanta-node:v0.5.0-alpha` (or `:latest`) in your Images.
+1. Open Docker Desktop and find `xd637/quanta-node:v0.6.0-alpha` (or `:latest`) in your Images.
 2. Click **Run**.
 3. Under **Optional settings**, configure:
    - **Container name**: `quanta-node`
@@ -87,7 +87,7 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 ### Option 2: Docker CLI
 ```bash
 # Pull the image
-docker pull xd637/quanta-node:v0.5.0-alpha
+docker pull xd637/quanta-node:v0.6.0-alpha
 
 # Run directly (Ensure data persistence!)
 docker run -d \
@@ -95,7 +95,7 @@ docker run -d \
   -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
   -v quanta-data:/home/quanta/quanta_data \
   -v quanta-logs:/home/quanta/logs \
-  xd637/quanta-node:v0.5.0-alpha
+  xd637/quanta-node:v0.6.0-alpha
 ```
 
 ### Option 3: Docker Compose (Recommended)
@@ -177,7 +177,7 @@ docker run -d \
 ```bash
 git clone https://github.com/quantachain/quanta
 cd quanta
-git checkout v0.5.0-alpha
+git checkout v0.6.0-alpha
 cargo build --release
 
 # Run node
@@ -259,7 +259,21 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 
 ---
 
-## What Changed in Alpha v0.5.0
+## What Changed in Alpha v0.6.0
+
+### 🐛 Critical Bug Fix — Block Template Nonce Sequence (Network Stall Fix)
+
+**Root Cause:** The mempool block assembler sorted transactions strictly by descending fee. If a user sent two transactions, the miner could include them out of nonce-order. The sequentially-validating consensus engine would immediately reject the miner\'s block with InvalidNonce, causing network-wide stalls.
+**Fix:** Block templates now use a simulated State buffer. Transactions are assembled with absolute sequential nonce guarantees, permanently preventing self-orphaning blocks.
+
+### 🐛 Critical Bug Fix — Permanent Nonce Desync on Reorg
+
+**Root Cause:** The 
+eorg_to_block handler correctly rolled back and reapplied balances for 1-block reorgs, but failed to call increment_nonce() for transactions in the new block. A user whose transaction landed in a reorg block became permanently frozen with an on-chain nonce of 0.
+**Fix:** Added the missing increment_nonce() call into the reorg block application loop.
+
+---
+
 
 ### 🐛 Critical Fix — Faucet Balance = 0 After Sync
 
@@ -267,7 +281,7 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 
 **Fix:** `rebuild_account_state_up_to()` now directly credits the hardcoded faucet list with `maturity=0` before replaying blocks 1–N, exactly mirroring what `Blockchain::new()` does.
 
-**Self-heal on startup:** `Blockchain::new()` now detects the corrupted state (Faucet 0 balance = 0 on a non-empty chain) and automatically replays all blocks to restore correct balances. **No data wipe needed to upgrade from v0.4.0.**
+**Self-heal on startup:** `Blockchain::new()` now detects the corrupted state (Faucet 0 balance = 0 on a non-empty chain) and automatically replays all blocks to restore correct balances. **No data wipe needed to upgrade from v0.5.0.**
 
 ### 🐛 Critical Fix — Sync Stuck at Block 1 (MIN_DIFFICULTY Too High)
 
@@ -289,7 +303,21 @@ Reduced `MAX_FORK_STALLS` from 2 to 1 — the node now initiates a deep reorg af
 
 ---
 
-## What Changed in Alpha v0.4.0
+## What Changed in Alpha v0.6.0
+
+### 🐛 Critical Bug Fix — Block Template Nonce Sequence (Network Stall Fix)
+
+**Root Cause:** The mempool block assembler sorted transactions strictly by descending fee. If a user sent two transactions, the miner could include them out of nonce-order. The sequentially-validating consensus engine would immediately reject the miner\'s block with InvalidNonce, causing network-wide stalls.
+**Fix:** Block templates now use a simulated State buffer. Transactions are assembled with absolute sequential nonce guarantees, permanently preventing self-orphaning blocks.
+
+### 🐛 Critical Bug Fix — Permanent Nonce Desync on Reorg
+
+**Root Cause:** The 
+eorg_to_block handler correctly rolled back and reapplied balances for 1-block reorgs, but failed to call increment_nonce() for transactions in the new block. A user whose transaction landed in a reorg block became permanently frozen with an on-chain nonce of 0.
+**Fix:** Added the missing increment_nonce() call into the reorg block application loop.
+
+---
+
 
 ### 🔧 LWMA Difficulty Algorithm (Consensus Change — Hard Fork)
 
@@ -306,7 +334,7 @@ Replaced the Bitcoin-style 2016-block interval difficulty adjustment with **LWMA
 - Per-block bounds: difficulty can move at most **−25% / +100%** per block
 - All integer math — no `f64`, no platform-dependent rounding (consensus safe)
 
-| Parameter | Old (v0.3.0) | New (v0.4.0) |
+| Parameter | Old (v0.3.0) | New (v0.5.0) |
 |---|---|---|
 | Algorithm | Bitcoin-style interval | LWMA (Zawy 2017) |
 | Adjustment frequency | Every 2016 blocks | Every block |

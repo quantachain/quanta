@@ -128,8 +128,8 @@ docker run -d \
   -v ~/quanta_data:/home/quanta/quanta_data \
   xd637/quanta-node:latest
 
-docker build -t xd637/quanta-node:v0.5.0-alpha -t xd637/quanta-node:latest .
+docker build -t xd637/quanta-node:v0.6.0-alpha -t xd637/quanta-node:latest .
 
-docker push xd637/quanta-node:v0.5.0-alpha
+docker push xd637/quanta-node:v0.6.0-alpha
 docker push xd637/quanta-node:latest
 
