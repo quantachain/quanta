@@ -11,6 +11,7 @@ pub enum P2PMessage {
     Version {
         version: u32,
         height: u64,
+        cumulative_work: u128,
         timestamp: i64,
         node_id: String,
     },
@@ -31,7 +32,10 @@ pub enum P2PMessage {
     },
     Headers(Vec<BlockHeader>),
     GetHeight,
-    Height(u64),
+    Height {
+        height: u64,
+        cumulative_work: u128,
+    },
 
     // Transaction propagation
     NewTx(Transaction),
@@ -63,6 +67,7 @@ pub struct BlockHeader {
     pub hash: String,
     pub nonce: u64,
     pub difficulty: u32,
+    pub cumulative_work: u128,
     #[serde(default)]
     pub state_root: String,
 }
@@ -76,6 +81,7 @@ impl From<&Block> for BlockHeader {
             hash: block.hash.clone(),
             nonce: block.nonce,
             difficulty: block.difficulty,
+            cumulative_work: 0, // Should be populated by the sender using block context
             state_root: block.state_root.clone(),
         }
     }
@@ -88,7 +94,7 @@ pub const PING_INTERVAL_SECS: u64 = 60;
 pub const PEER_TIMEOUT_SECS: u64 = 180;
 
 /// Network magic bytes (prevents testnet/mainnet message mixing)
-pub const TESTNET_MAGIC: [u8; 4] = *b"QUA6"; // Quanta Testnet V6
+pub const TESTNET_MAGIC: [u8; 4] = *b"QUA7"; // Quanta Testnet V7 (Headers-First Sync)
 pub const MAINNET_MAGIC: [u8; 4] = *b"QUAM"; // Quanta Mainnet
 
 /// Default to Testnet magic for current Alpha phase
@@ -112,7 +118,7 @@ impl NetworkMessage {
 /// Message handler trait for processing P2P messages
 #[async_trait::async_trait]
 pub trait MessageHandler: Send + Sync {
-    async fn handle_version(&self, version: u32, height: u64, node_id: String) -> Result<(), String>;
+    async fn handle_version(&self, version: u32, height: u64, cumulative_work: u128, node_id: String) -> Result<(), String>;
     async fn handle_block(&self, block: Block) -> Result<(), String>;
     async fn handle_transaction(&self, tx: Transaction) -> Result<(), String>;
     async fn handle_get_blocks(&self, start: u64, end: u64) -> Result<Vec<Block>, String>;

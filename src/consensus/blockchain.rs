@@ -94,7 +94,7 @@ const LWMA_SOLVE_TIME_CAP_FACTOR: u64 = 6; // 6 × 30s = 180s cap per solve-time
 /// Minimum difficulty — set to the testnet V2 genesis difficulty.
 /// This is the difficulty at which the chain STARTED, so all early blocks
 /// Mined at genesis difficulty are valid. Never output a target easier than this.
-const MIN_DIFFICULTY: u32 = 8_304_130;
+pub const MIN_DIFFICULTY: u32 = 8_304_130;
 
 /// Maximum difficulty — 2^31−1 fits in an i32 (used by block.has_valid_hash)
 /// and is far beyond any real CPU/GPU hashrate.
@@ -1450,7 +1450,7 @@ impl Blockchain {
 
     /// Compute cumulative PoW (sum of difficulty) for the chain up to `tip_height`.
     /// Higher = more total work done = the chain every honest node should follow.
-    fn cumulative_work_at(&self, tip_height: u64) -> u128 {
+    pub fn cumulative_work_at(&self, tip_height: u64) -> u128 {
         // Sum difficulties from block 1 (genesis has no PoW) up to tip (inclusive).
         // We read from storage, so this is O(tip_height) — only called during fork
         // resolution which is rare.
@@ -2114,6 +2114,14 @@ impl Blockchain {
             }
         }
 
+        // --- Backup original chain in case of failure ---
+        let mut original_chain = Vec::new();
+        for i in rollback_to..our_height {
+            if let Ok(b) = self.storage.load_block(i) {
+                original_chain.push(b);
+            }
+        }
+
         // --- Roll back storage height to rollback_to ---
         // We simply move the stored chain-height pointer backwards.
         // The old block records remain on disk but are "beyond" the tip, so they
@@ -2131,11 +2139,8 @@ impl Blockchain {
         self.orphaned_blocks.write().clear();
 
         // --- Replay new blocks ---
-        // We use add_block_to_main_chain_reorg (permissive difficulty) for the replay
-        // because our local LWMA may diverge slightly from peers due to the fork. The
-        // blocks have valid PoW — the only thing that can differ is the LWMA target by
-        // a few percent, which is fine as long as PoW meets the declared difficulty.
         let mut applied = 0u64;
+        let mut reorg_failed = false;
         for block in sorted {
             match self.add_block_to_main_chain_reorg(block.clone()) {
                 Ok(_) => {
@@ -2144,15 +2149,29 @@ impl Blockchain {
                 }
                 Err(e) => {
                     tracing::warn!(
-                        "Deep reorg: failed to apply block {} — aborting reorg at this point: {}",
+                        "Deep reorg: failed to apply block {} — aborting reorg: {}",
                         block.index, e
                     );
-                    // Partial reorg is safe: the state is consistent up to the
-                    // last successfully applied block. The sync loop will continue
-                    // from this new (better-than-before) height on the next cycle.
+                    reorg_failed = true;
                     break;
                 }
             }
+        }
+
+        if reorg_failed {
+            tracing::warn!("Rolling back the failed reorg to restore original chain...");
+            let _ = self.storage.set_chain_height(rollback_to);
+            let restored_state = self.rebuild_account_state_up_to(rollback_to - 1);
+            let _ = self.storage.save_account_state(&restored_state);
+            *self.account_state.write() = restored_state;
+            
+            for block in original_chain {
+                if let Err(e) = self.add_block_to_main_chain_reorg(block.clone()) {
+                    tracing::error!("CRITICAL: Failed to restore original chain at block {}: {}", block.index, e);
+                    break;
+                }
+            }
+            return Err(BlockchainError::InvalidBlock);
         }
 
         let final_height = self.get_height();

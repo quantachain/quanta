@@ -16,6 +16,7 @@ pub struct PeerInfo {
     pub node_id: String,
     pub version: u32,
     pub height: u64,
+    pub cumulative_work: u128,
     pub connected_at: i64,
     pub last_seen: i64,
     /// Weighted misbehavior score (0–100). Replaces the old binary strike system.
@@ -51,6 +52,7 @@ impl Peer {
             node_id: String::new(),
             version: 0,
             height: 0,
+            cumulative_work: 0,
             connected_at: chrono::Utc::now().timestamp(),
             last_seen: chrono::Utc::now().timestamp(),
             misbehavior_score: 0,
@@ -141,17 +143,19 @@ impl Peer {
     }
 
     /// Update peer information after handshake
-    pub async fn update_info(&self, node_id: String, version: u32, height: u64) {
+    pub async fn update_info(&self, node_id: String, version: u32, height: u64, cumulative_work: u128) {
         let mut info = self.info.write().await;
         info.node_id = node_id;
         info.version = version;
         info.height = height;
+        info.cumulative_work = cumulative_work;
     }
 
     /// Update peer height specifically (e.g. from Height messages)
-    pub async fn update_height(&self, height: u64) {
+    pub async fn update_height(&self, height: u64, cumulative_work: u128) {
         let mut info = self.info.write().await;
         info.height = height;
+        info.cumulative_work = cumulative_work;
     }
 
     /// Get peer information
@@ -200,11 +204,12 @@ impl Peer {
     }
 
     /// Perform handshake with peer
-    pub async fn handshake(&self, our_version: u32, our_height: u64, our_node_id: String) -> Result<(), String> {
+    pub async fn handshake(&self, our_version: u32, our_height: u64, our_cumulative_work: u128, our_node_id: String) -> Result<(), String> {
         // Send our version
         let version_msg = P2PMessage::Version {
             version: our_version,
             height: our_height,
+            cumulative_work: our_cumulative_work,
             timestamp: chrono::Utc::now().timestamp(),
             node_id: our_node_id,
         };
@@ -213,8 +218,8 @@ impl Peer {
 
         // Wait for their version
         match self.receive_message().await? {
-            P2PMessage::Version { version, height, node_id, .. } => {
-                self.update_info(node_id, version, height).await;
+            P2PMessage::Version { version, height, cumulative_work, node_id, .. } => {
+                self.update_info(node_id, version, height, cumulative_work).await;
 
                 // Send verack
                 self.send_message(P2PMessage::VerAck).await?;

@@ -61,6 +61,8 @@ pub struct Network {
     /// SYNC FIX: Mutex-protected sync block buffer. Sync response blocks
     /// are collected here and applied sequentially, not concurrently.
     sync_buffer: Arc<tokio::sync::Mutex<Vec<Block>>>,
+    /// Header sync buffer
+    header_buffer: Arc<tokio::sync::Mutex<Vec<crate::network::protocol::BlockHeader>>>,
 }
 
 impl Network {
@@ -86,6 +88,7 @@ impl Network {
             discovery,
             syncing: Arc::new(AtomicBool::new(false)),
             sync_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            header_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -190,8 +193,12 @@ impl Network {
                                 let peer = Arc::new(peer);
                                 
                                 // Perform handshake
-                                let height = blockchain.read().await.get_chain().len() as u64;
-                                if let Ok(_) = peer.handshake(PROTOCOL_VERSION, height, node_id).await {
+                                let blockchain = blockchain.read().await;
+                                let height = blockchain.get_height();
+                                let cumulative_work = blockchain.cumulative_work_at(height);
+                                drop(blockchain);
+                                
+                                if let Ok(_) = peer.handshake(PROTOCOL_VERSION, height, cumulative_work, node_id).await {
                                     // Add peer and start receive task
                                     if peer_manager.add_peer(Arc::clone(&peer)).await.is_ok() {
                                         Self::start_peer_receive_task(peer, message_tx, peer_manager).await;
@@ -255,10 +262,11 @@ impl Network {
         
         // Perform handshake
         let blockchain = self.blockchain.read().await;
-        let height = blockchain.get_chain().len() as u64;
+        let height = blockchain.get_height();
+        let cumulative_work = blockchain.cumulative_work_at(height);
         drop(blockchain);
         
-        peer.handshake(PROTOCOL_VERSION, height, self.config.node_id.clone()).await?;
+        peer.handshake(PROTOCOL_VERSION, height, cumulative_work, self.config.node_id.clone()).await?;
         
         // Add to peer manager
         self.peer_manager.add_peer(Arc::clone(&peer)).await?;
@@ -309,13 +317,19 @@ impl Network {
             P2PMessage::GetBlocks { start_height, end_height } => {
                 self.handle_get_blocks(addr, start_height, end_height).await?;
             }
+            P2PMessage::GetHeaders { start_height } => {
+                self.handle_get_headers(addr, start_height).await?;
+            }
+            P2PMessage::Headers(headers) => {
+                self.handle_headers(headers, peer).await?;
+            }
             P2PMessage::GetHeight => {
                 self.handle_get_height(addr).await?;
             }
-            P2PMessage::Height(height) => {
-                debug!("Peer {} has height {}", addr, height);
+            P2PMessage::Height { height, cumulative_work } => {
+                debug!("Peer {} has height {} (work {})", addr, height, cumulative_work);
                 if let Some(p) = &peer {
-                    p.update_height(height).await;
+                    p.update_height(height, cumulative_work).await;
                 }
             }
             P2PMessage::GetMempool => {
@@ -498,13 +512,46 @@ impl Network {
         Ok(())
     }
 
+    /// Handle get headers request
+    async fn handle_get_headers(&self, addr: SocketAddr, start: u64) -> Result<(), String> {
+        let blockchain = self.blockchain.read().await;
+        let height = blockchain.get_height();
+        let end = height.min(start + 500); // 500 headers maximum per batch
+        
+        let mut headers = Vec::with_capacity((end.saturating_sub(start) + 1) as usize);
+        for i in start..=end {
+            if let Some(block) = blockchain.load_block_from_storage(i) {
+                let mut header: crate::network::protocol::BlockHeader = (&block).into();
+                header.cumulative_work = blockchain.cumulative_work_at(i);
+                headers.push(header);
+            }
+        }
+        drop(blockchain);
+        
+        info!("Serving {} headers [{}-{}] to peer {}", headers.len(), start, end, addr);
+        self.send_to_peer(addr, P2PMessage::Headers(headers)).await
+    }
+
+    /// Handle headers response
+    async fn handle_headers(&self, headers: Vec<crate::network::protocol::BlockHeader>, _peer: Option<Arc<Peer>>) -> Result<(), String> {
+        if headers.is_empty() {
+            return Ok(());
+        }
+        
+        // Push to header buffer for sync processor
+        let mut buffer = self.header_buffer.lock().await;
+        buffer.extend(headers);
+        Ok(())
+    }
+
     /// Handle get height request — BETA FIX: use storage height, not in-memory chain length
     async fn handle_get_height(&self, addr: SocketAddr) -> Result<(), String> {
         let blockchain = self.blockchain.read().await;
         // get_height() reads from storage — correct even after thousands of blocks
         let height = blockchain.get_height();
+        let cumulative_work = blockchain.cumulative_work_at(height);
         
-        self.send_to_peer(addr, P2PMessage::Height(height)).await
+        self.send_to_peer(addr, P2PMessage::Height { height, cumulative_work }).await
     }
 
     /// Handle get mempool request — HIGH-3 FIX: cap response to 100 txs
@@ -561,27 +608,29 @@ impl Network {
     /// the common ancestor and switch to the network's heavier chain.
     pub async fn sync_blockchain(&self) -> Result<(), String> {
         let peers = self.peer_manager.get_peers().await;
+        if peers.is_empty() { return Ok(()); }
         
-        if peers.is_empty() {
-            return Ok(());
-        }
+        info!("Starting HEADERS-FIRST blockchain synchronization");
         
-        info!("Starting blockchain synchronization");
-        
-        // Ask all peers for their current height
+        // Ask all peers for their current height & work
         for peer in &peers {
             let _ = peer.send_message(P2PMessage::GetHeight).await;
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
         
-        // Find peer with highest height
-        let mut max_height = self.blockchain.read().await.get_height();
+        // Find best peer based on cumulative_work
+        let mut max_work = {
+            let bc = self.blockchain.read().await;
+            bc.cumulative_work_at(bc.get_height())
+        };
         let mut best_peer: Option<Arc<Peer>> = None;
+        let mut target_height = 0;
         
         for peer in &peers {
             let info = peer.get_info().await;
-            if info.height > max_height {
-                max_height = info.height;
+            if info.cumulative_work > max_work || (info.cumulative_work == max_work && info.height > target_height) {
+                max_work = info.cumulative_work;
+                target_height = info.height;
                 best_peer = Some(Arc::clone(peer));
             }
         }
@@ -589,296 +638,158 @@ impl Network {
         let peer = match best_peer {
             Some(p) => p,
             None => {
-                info!("Already at chain tip — no sync needed");
+                info!("Already on the heaviest chain — no sync needed");
                 return Ok(());
             }
         };
         
-        info!("Syncing from peer {} at height {} (we are at {})", 
-            peer.address().await, max_height, self.blockchain.read().await.get_height());
-        
-        // SYNC FIX: Set syncing flag to suppress broadcast-triggered GetBlocks requests
         self.syncing.store(true, Ordering::SeqCst);
         
-        let mut stall_count = 0u32;
-        const MAX_STALLS: u32 = 5; // Give up after 5 consecutive stalls
-        // FORK FIX: Track consecutive batches where we received blocks but height didn't advance.
-        // This is the signature of being stuck on a fork. We trigger faster (after 1 stall)
-        // because the most common cause is a difficulty-mismatch fork; waiting longer just
-        // keeps re-requesting the same failing blocks.
-        let mut fork_stall_count = 0u32;
-        const MAX_FORK_STALLS: u32 = 1; // Trigger deep reorg after 1 batch with zero progress
+        let our_height = self.blockchain.read().await.get_height();
+        info!("Syncing from peer {} (target work: {}, height: {})", peer.address().await, max_work, target_height);
         
-        // Batch loop: keep requesting MAX_SYNC_BATCH blocks until caught up.
+        let mut current_sync_height = our_height;
+        let mut stall_count = 0;
+        
         loop {
-            let our_height = self.blockchain.read().await.get_height();
-            if our_height >= max_height {
-                break;
-            }
-
-            // Clear the sync buffer before requesting a new batch
-            {
-                let mut buffer = self.sync_buffer.lock().await;
-                buffer.clear();
-            }
-
-            let end_height = max_height.min(our_height + MAX_SYNC_BATCH);
-            info!("Sync batch: requesting blocks [{}-{}] (target: {})", our_height, end_height, max_height);
-
-            if let Err(e) = peer.send_message(P2PMessage::GetBlocks {
-                start_height: our_height,
-                end_height,
-            }).await {
-                warn!("Sync request failed: {} — aborting sync", e);
-                break;
-            }
-
-            // SYNC FIX: Wait for blocks to arrive in the sync buffer.
-            // Poll the buffer until no new blocks have arrived for a timeout period.
-            let expected_blocks = (end_height - our_height) as usize;
-            let mut wait_cycles = 0u32;
-            let max_wait_cycles = 30; // 30 × 500ms = 15 seconds max wait per batch
-            let mut last_buffer_size = 0usize;
-            let mut no_progress_count = 0u32;
+            if current_sync_height >= target_height { break; }
             
+            // Step 1: Request Headers
+            // We search back 500 blocks to naturally find the fork point if one exists
+            let search_start = current_sync_height.saturating_sub(500);
+            
+            {
+                let mut hb = self.header_buffer.lock().await;
+                hb.clear();
+            }
+            
+            if let Err(e) = peer.send_message(P2PMessage::GetHeaders { start_height: search_start }).await {
+                warn!("Header request failed: {}", e);
+                break;
+            }
+            
+            // Wait for headers
+            let mut wait = 0;
             loop {
                 tokio::time::sleep(Duration::from_millis(500)).await;
-                wait_cycles += 1;
-                
-                let buffer_size = self.sync_buffer.lock().await.len();
-                
-                if buffer_size >= expected_blocks {
-                    info!("Sync buffer full: {}/{} blocks received", buffer_size, expected_blocks);
-                    break;
-                }
-                
-                if buffer_size == last_buffer_size {
-                    no_progress_count += 1;
-                } else {
-                    no_progress_count = 0;
-                    last_buffer_size = buffer_size;
-                }
-                
-                // If no new blocks for 3 seconds or max wait reached, process what we have
-                if no_progress_count >= 6 || wait_cycles >= max_wait_cycles {
-                    if buffer_size > 0 {
-                        info!("Sync buffer partial: {}/{} blocks after {}ms", 
-                            buffer_size, expected_blocks, wait_cycles * 500);
-                    } else {
-                        warn!("No sync blocks received after {}ms", wait_cycles * 500);
-                    }
-                    break;
-                }
+                wait += 1;
+                let sz = self.header_buffer.lock().await.len();
+                if sz > 0 || wait >= 20 { break; } // 10s timeout
             }
-
-            // SYNC FIX: Extract blocks from buffer, sort by index, and apply sequentially
-            let blocks_to_apply: Vec<Block> = {
-                let mut buffer = self.sync_buffer.lock().await;
-                let mut blocks: Vec<Block> = buffer.drain(..).collect();
-                blocks.sort_by_key(|b| b.index);
-                blocks
+            
+            let headers: Vec<crate::network::protocol::BlockHeader> = {
+                let mut hb = self.header_buffer.lock().await;
+                let mut h: Vec<_> = hb.drain(..).collect();
+                h.sort_by_key(|x| x.index);
+                h
             };
-
-            if blocks_to_apply.is_empty() {
+            
+            if headers.is_empty() {
                 stall_count += 1;
-                warn!("Sync stall {}/{}: no blocks received, retrying...", stall_count, MAX_STALLS);
-                if stall_count >= MAX_STALLS {
-                    warn!("Sync stalled {} times — aborting. Will retry on next peer cycle.", MAX_STALLS);
-                    break;
-                }
-                // Wait a bit before retrying (connection might need to reconnect)
-                tokio::time::sleep(Duration::from_secs(3)).await;
+                if stall_count >= 3 { break; }
                 continue;
             }
-            stall_count = 0; // Reset on progress
-
-            let batch_count = blocks_to_apply.len();
-            let first_idx = blocks_to_apply.first().map(|b| b.index).unwrap_or(0);
-            let last_idx = blocks_to_apply.last().map(|b| b.index).unwrap_or(0);
-            info!("Applying {} sync blocks [{}-{}] sequentially...", batch_count, first_idx, last_idx);
-
-            let height_before = self.blockchain.read().await.get_height();
-            let mut applied = 0u64;
-            let mut errors = 0u64;
-            for block in blocks_to_apply.iter() {
-                let bc = self.blockchain.write().await;
-                match bc.add_network_block(block.clone()) {
-                    Ok(_) => {
-                        applied += 1;
-                        if applied % 100 == 0 {
-                            info!("Sync progress: applied {}/{} blocks (height: {})", 
-                                applied, batch_count, block.index + 1);
-                        }
-                    }
-                    Err(e) => {
-                        errors += 1;
-                        if errors <= 5 {
-                            warn!("Sync: failed to apply block {}: {}", block.index, e);
-                        }
-                        // Don't break — later blocks might still apply (orphan processing)
-                    }
-                }
-                drop(bc);
-            }
-
-            let new_height = self.blockchain.read().await.get_height();
-            info!("Sync batch complete: applied {}, errors {}, new height: {}", 
-                applied, errors, new_height);
-
-            // FORK-STALL FIX: If every block in the batch failed, we are almost certainly
-            // on a diverged fork with a different difficulty sequence. Force an immediate
-            // reorg trigger rather than waiting for the next batch.
-            if applied == 0 && errors > 0 && errors as usize == blocks_to_apply.len() {
-                warn!("ALL {} blocks in batch failed — difficulty-fork detected, forcing reorg trigger", errors);
-                fork_stall_count = fork_stall_count.max(MAX_FORK_STALLS);
-            }
-
-            // FORK FIX: Detect "stuck on a fork" condition.
-            // If we received blocks but the chain height didn't advance AT ALL,
-            // we are likely on a private fork whose tip doesn't match the network's
-            // previous_hash chain. Every block at height > our tip gets stored as an
-            // orphan but can't connect — we need a deep reorg.
-            if new_height == height_before && !blocks_to_apply.is_empty() {
-                fork_stall_count += 1;
-                warn!(
-                    "FORK DETECTED: received {} blocks but height unchanged at {} (fork_stall {}/{})",
-                    blocks_to_apply.len(), new_height, fork_stall_count, MAX_FORK_STALLS
-                );
-
-                if fork_stall_count >= MAX_FORK_STALLS {
-                    warn!("Initiating deep reorg to escape fork...");
-                    // Find the common ancestor by walking back from our tip and comparing
-                    // block hashes with the incoming chain. The incoming blocks are sorted
-                    // by index — scan backwards from our tip to find the first match.
-                    let bc = self.blockchain.read().await;
-                    let mut fork_point: Option<u64> = None;
-
-                    // Build a map of incoming block index -> previous_hash for fast lookup
-                    // to find where the peer's chain diverges from ours.
-                    let incoming_by_index: std::collections::HashMap<u64, &Block> = 
-                        blocks_to_apply.iter().map(|b| (b.index, b)).collect();
-
-                    // Walk back from our local tip to find where the peer's chain matches ours.
-                    // FORK-STALL FIX: Search up to 500 blocks back instead of 200 — the fork
-                    // point can be further back if the node mined a private fork for a while.
-                    let search_start = new_height.saturating_sub(1);
-                    let search_limit = 500u64;
-                    for h in (search_start.saturating_sub(search_limit)..=search_start).rev() {
-                        // Check if any incoming block at h+1 points to our block at h
-                        if let Some(incoming_block) = incoming_by_index.get(&(h + 1)) {
-                            if let Some(our_hash) = bc.get_block_hash_at(h) {
-                                if incoming_block.previous_hash == our_hash {
-                                    fork_point = Some(h + 1);
-                                    info!("Fork point found: incoming block {} prev_hash matches our block {}", h+1, h);
-                                    break;
-                                }
-                            }
-                        }
-                        // Also check: if any incoming block at h has same hash as ours
-                        // then chains agree at h — fork is after h.
-                        if let Some(incoming_block) = incoming_by_index.get(&h) {
-                            if let Some(our_hash) = bc.get_block_hash_at(h) {
-                                if incoming_block.hash == our_hash {
-                                    fork_point = Some(h + 1);
-                                    info!("Fork point confirmed: chains agree at height {}, fork starts at {}", h, h+1);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if fork_point.is_none() {
-                        warn!("Fork point not found in batch window. Aborting deep reorg to protect local chain.");
+            stall_count = 0;
+            
+            // Step 2: Validate Headers & Find Fork Point
+            let bc = self.blockchain.read().await;
+            let mut fork_point = None;
+            for h in headers.iter().rev() {
+                if let Some(our_hash) = bc.get_block_hash_at(h.index) {
+                    if our_hash == h.hash {
+                        fork_point = Some(h.index + 1);
                         break;
                     }
-                    drop(bc);
-
-                    let rollback_to = fork_point.unwrap();
-                    warn!(
-                        "Deep reorg: fork point at height {}, rolling back to {}",
-                        rollback_to.saturating_sub(1), rollback_to
-                    );
-
-                    // Request an extended batch from the peer starting slightly before rollback_to.
-                    // The 2-block overlap (reorg_start) ensures deep_reorg can validate the
-                    // prev_hash linkage of the first new block against a known good ancestor.
-                    let reorg_start = rollback_to.saturating_sub(2);
-                    let reorg_end = max_height.min(rollback_to + MAX_SYNC_BATCH);
-                    info!("Requesting reorg blocks [{}-{}] from peer (rollback_to={})", reorg_start, reorg_end, rollback_to);
-                    {
-                        let mut buffer = self.sync_buffer.lock().await;
-                        buffer.clear();
-                    }
-                    if let Err(e) = peer.send_message(P2PMessage::GetBlocks {
-                        start_height: reorg_start,
-                        end_height: reorg_end,
-                    }).await {
-                        warn!("Reorg block request failed: {}", e);
-                    } else {
-                        // Wait for reorg blocks
-                        let mut wait = 0u32;
-                        loop {
-                            tokio::time::sleep(Duration::from_millis(500)).await;
-                            wait += 1;
-                            let sz = self.sync_buffer.lock().await.len();
-                            if sz >= (reorg_end - rollback_to) as usize || wait >= 30 {
-                                break;
-                            }
-                        }
-                        let reorg_blocks: Vec<Block> = {
-                            let mut buffer = self.sync_buffer.lock().await;
-                            let mut blocks: Vec<Block> = buffer.drain(..).collect();
-                            blocks.sort_by_key(|b| b.index);
-                            blocks
-                        };
-                        info!("Performing deep reorg with {} blocks starting at {}", reorg_blocks.len(), rollback_to);
-                        let bc = self.blockchain.write().await;
-                        match bc.deep_reorg(rollback_to, reorg_blocks) {
-                            Ok(_) => {
-                                fork_stall_count = 0;
-                                info!("Deep reorg successful, resuming normal sync");
-                            }
-                            Err(e) => {
-                                warn!("Deep reorg failed: {} — will retry", e);
-                            }
-                        }
-                        drop(bc);
+                }
+            }
+            drop(bc);
+            
+            let request_start = fork_point.unwrap_or(headers[0].index);
+            let request_end = headers.last().unwrap().index;
+            
+            if request_start > request_end {
+                current_sync_height = request_end;
+                continue;
+            }
+            
+            // Validate PoW of the unseen headers
+            let unseen_headers: Vec<_> = headers.into_iter().filter(|h| h.index >= request_start).collect();
+            let mut valid_headers = true;
+            for h in &unseen_headers {
+                if h.difficulty < crate::consensus::blockchain::MIN_DIFFICULTY {
+                    valid_headers = false;
+                    break;
+                }
+            }
+            
+            if !valid_headers {
+                warn!("Peer sent headers with invalid PoW - aborting sync");
+                peer.add_misbehavior(50).await;
+                break;
+            }
+            
+            // Step 3: Request Full Blocks for the validated headers
+            info!("Headers validated. Requesting full blocks [{}-{}]", request_start, request_end);
+            {
+                let mut sb = self.sync_buffer.lock().await;
+                sb.clear();
+            }
+            
+            if let Err(e) = peer.send_message(P2PMessage::GetBlocks { start_height: request_start, end_height: request_end }).await {
+                warn!("Block request failed: {}", e);
+                break;
+            }
+            
+            wait = 0;
+            let expected = (request_end.saturating_sub(request_start) + 1) as usize;
+            loop {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+                wait += 1;
+                let sz = self.sync_buffer.lock().await.len();
+                if sz >= expected || wait >= 30 { break; }
+            }
+            
+            let blocks: Vec<Block> = {
+                let mut sb = self.sync_buffer.lock().await;
+                let mut b: Vec<_> = sb.drain(..).collect();
+                b.sort_by_key(|x| x.index);
+                b
+            };
+            
+            if blocks.is_empty() {
+                warn!("Peer did not yield requested blocks");
+                break;
+            }
+            
+            // Step 4: Apply Blocks
+            let bc_height = self.blockchain.read().await.get_height();
+            if request_start <= bc_height {
+                // This is a fork/reorg
+                let bc = self.blockchain.write().await;
+                match bc.deep_reorg(request_start, blocks.clone()) {
+                    Ok(_) => info!("Reorg to heavier chain successful"),
+                    Err(e) => {
+                        warn!("Reorg failed: {}", e);
+                        peer.add_misbehavior(50).await;
+                        break;
                     }
                 }
             } else {
-                fork_stall_count = 0; // Height advanced normally, not on a fork
-            }
-
-            // If no blocks were applied at all after fork handling, count toward abort
-            if applied == 0 && new_height == height_before {
-                stall_count += 1;
-                warn!("Sync stall {}/{}: received blocks but none applied", stall_count, MAX_STALLS);
-                if stall_count >= MAX_STALLS {
-                    warn!("Sync permanently stalled — aborting.");
-                    break;
+                // Normal extension
+                let bc = self.blockchain.write().await;
+                for b in blocks {
+                    if let Err(e) = bc.add_network_block(b) {
+                        warn!("Failed to add block: {}", e);
+                        break;
+                    }
                 }
             }
-
-            // Refresh peer tip in case it grew while we were syncing
-            let _ = peer.send_message(P2PMessage::GetHeight).await;
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            let info = peer.get_info().await;
-            if info.height > max_height {
-                max_height = info.height;
-            }
+            
+            current_sync_height = request_end;
         }
         
-        // SYNC FIX: Clear syncing state
         self.syncing.store(false, Ordering::SeqCst);
-        
-        let final_height = self.blockchain.read().await.get_height();
-        info!("Blockchain sync complete — height: {}", final_height);
-        
-        // If we're still behind, schedule another sync attempt
-        if final_height < max_height {
-            info!("Still behind (at {} vs target {}), will continue syncing on next cycle", 
-                final_height, max_height);
-        }
-        
+        info!("Sync cycle complete. Current height: {}", self.blockchain.read().await.get_height());
         Ok(())
     }
 
