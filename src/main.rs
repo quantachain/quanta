@@ -269,7 +269,7 @@ async fn main() {
     match cli.command {
         Commands::Start { config, network, port, network_port, rpc_port, db, bootstrap, no_network } => {
             // Load configuration with RPC port override
-            let mut cfg = QuantaConfig::load_with_overrides(
+            let cfg = QuantaConfig::load_with_overrides(
                 config,
                 port,
                 network_port,

@@ -1,3 +1,4 @@
+#[allow(deprecated)]
 use quanta::crypto::{QuantumWallet, HDWallet, TreasuryMultisig, TreasuryMultisigV2, MultiSigTransaction};
 use quanta::core::transaction::{Transaction, TransactionType, SignatureScheme};
 use clap::{Parser, Subcommand};
@@ -320,6 +321,7 @@ async fn main() {
                     #[allow(deprecated)]
                     let ts = TreasuryMultisig::from_json(&json)
                         .expect("Invalid treasury setup JSON (tried both V2 and legacy V1 formats)");
+                    #[allow(deprecated)]
                     (ts.address, ts.required, ts.public_keys.len())
                 };
 

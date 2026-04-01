@@ -103,12 +103,11 @@ fn main() {
 
     let mine_start = Instant::now();
     let mut nonce: u64 = 0;
-    let mut hash  = String::new();
 
-    loop {
-        hash = block_hash(GENESIS_TIMESTAMP, nonce, difficulty);
-        if meets_target(&hash, difficulty) {
-            break;
+    let hash = loop {
+        let h = block_hash(GENESIS_TIMESTAMP, nonce, difficulty);
+        if meets_target(&h, difficulty) {
+            break h;
         }
         nonce += 1;
         if nonce % 500_000 == 0 {
@@ -117,7 +116,7 @@ fn main() {
             eprintln!("  ... {:.1}s  {:.0}M hashes  {:.0} H/s",
                 secs, nonce as f64 / 1_000_000.0, rate);
         }
-    }
+    };
 
     let mine_secs = mine_start.elapsed().as_secs_f64();
     println!();
