@@ -88,7 +88,7 @@ pub const PING_INTERVAL_SECS: u64 = 60;
 pub const PEER_TIMEOUT_SECS: u64 = 180;
 
 /// Network magic bytes (prevents testnet/mainnet message mixing)
-pub const TESTNET_MAGIC: [u8; 4] = *b"QUAX"; // Quanta Testnet
+pub const TESTNET_MAGIC: [u8; 4] = *b"QUA6"; // Quanta Testnet V6
 pub const MAINNET_MAGIC: [u8; 4] = *b"QUAM"; // Quanta Mainnet
 
 /// Default to Mainnet magic if not specified (legacy support)

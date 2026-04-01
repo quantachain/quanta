@@ -787,13 +787,12 @@ impl Network {
                         }
                     }
                     if fork_point.is_none() {
-                        warn!("Fork point not found in batch window — defaulting to rollback at first batch index {}", first_idx);
+                        warn!("Fork point not found in batch window. Aborting deep reorg to protect local chain.");
+                        break;
                     }
                     drop(bc);
 
-                    // Default to rolling back to the height of the first incoming block
-                    // if we couldn't find a matching ancestor in the scan window.
-                    let rollback_to = fork_point.unwrap_or(first_idx);
+                    let rollback_to = fork_point.unwrap();
                     warn!(
                         "Deep reorg: fork point at height {}, rolling back to {}",
                         rollback_to.saturating_sub(1), rollback_to
