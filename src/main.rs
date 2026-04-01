@@ -882,11 +882,12 @@ async fn main() {
                 timestamp: Utc::now().timestamp(),
                 signature: vec![],
                 public_key: wallet.keypair.public_key.clone(),
-                fee: 1000, // 0.001 QUA default fee
+                fee: 1000,
                 nonce: next_nonce,
                 lock_time: 0,
                 tx_type: TransactionType::Transfer,
                 sig_scheme: SignatureScheme::Falcon512,
+                network_id: 0,
             };
             
             // Sign transaction — pass raw signing BYTES (not the hash) to sign_transaction_canonical
@@ -1007,11 +1008,12 @@ async fn run_demo(db_path: &str) {
         timestamp: Utc::now().timestamp(),
         signature: vec![],
         public_key: wallet1.keypair.public_key.clone(),
-        fee: 1000, // 0.001 QUA
+        fee: 1000,
         nonce: nonce1,
         lock_time: 0,
         tx_type: TransactionType::Transfer,
         sig_scheme: SignatureScheme::Falcon512,
+        network_id: 0,
     };
     let signing_data1 = tx1.get_signing_data();
     tx1.signature = wallet1.keypair.sign_transaction_canonical(&signing_data1);
@@ -1041,6 +1043,7 @@ async fn run_demo(db_path: &str) {
         lock_time: 0,
         tx_type: TransactionType::Transfer,
         sig_scheme: SignatureScheme::Falcon512,
+        network_id: 0,
     };
     let signing_data2 = tx2.get_signing_data();
     tx2.signature = wallet1.keypair.sign_transaction_canonical(&signing_data2);

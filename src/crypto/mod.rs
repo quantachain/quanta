@@ -3,6 +3,7 @@ pub mod wallet;
 pub mod hd_wallet;
 pub mod multisig;
 
+#[allow(unused_imports)]
 pub use signatures::{
     FalconKeypair,
     verify_signature_strict,
@@ -14,7 +15,8 @@ pub use signatures::{
     FALCON512_SIG_MIN_BYTES,
     SIGNING_DOMAIN,
 };
-pub use wallet::QuantumWallet;
-pub use hd_wallet::HDWallet;
+#[allow(unused_imports)]
 #[allow(deprecated)]
 pub use multisig::{MultiSigTransaction, TreasuryMultisig, TreasuryMultisigV2, multisig_address};
+pub use wallet::QuantumWallet;
+pub use hd_wallet::HDWallet;

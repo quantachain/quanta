@@ -2,8 +2,11 @@ pub mod block;
 pub mod transaction;
 pub mod merkle;
 
+#[allow(unused_imports)]
 pub use block::Block;
+#[allow(unused_imports)]
 pub use transaction::{Transaction, TransactionType, AccountState, AccountBalance, SignatureScheme};
+#[allow(unused_imports)]
 pub use merkle::MerkleTree;
 
 use serde::{Serialize, Deserialize};
