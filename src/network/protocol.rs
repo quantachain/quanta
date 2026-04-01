@@ -91,8 +91,8 @@ pub const PEER_TIMEOUT_SECS: u64 = 180;
 pub const TESTNET_MAGIC: [u8; 4] = *b"QUA6"; // Quanta Testnet V6
 pub const MAINNET_MAGIC: [u8; 4] = *b"QUAM"; // Quanta Mainnet
 
-/// Default to Mainnet magic if not specified (legacy support)
-pub const NETWORK_MAGIC: [u8; 4] = MAINNET_MAGIC;
+/// Default to Testnet magic for current Alpha phase
+pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;
 
 impl NetworkMessage {
     /// Create network message with magic bytes
