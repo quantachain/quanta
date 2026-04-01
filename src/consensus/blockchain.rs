@@ -2123,14 +2123,23 @@ impl Blockchain {
             return Ok(());
         }
 
-        // The first new block must sit right on top of rollback_to.
-        if sorted[0].index != rollback_to {
+        // Derive the actual rollback target from the first block in the batch.
+        // The sync loop gives us `rollback_to` from the fork-point header scan, but the
+        // block batch starts at `sorted[0].index` which may equal rollback_to exactly OR
+        // may be the fork-point block itself (i.e. rollback_to - 1 if fork_point was found
+        // as "the last common block + 1"). Accept any value in [rollback_to-1, rollback_to].
+        // Anything further away indicates a real mismatch — reject it.
+        let effective_rollback = sorted[0].index;
+        if effective_rollback != rollback_to && effective_rollback + 1 != rollback_to {
             tracing::warn!(
-                "Deep reorg: first new block is at height {} but expected {}",
-                sorted[0].index, rollback_to
+                "Deep reorg: first new block is at height {} but expected {} (±1) — aborting",
+                effective_rollback, rollback_to
             );
             return Err(BlockchainError::InvalidBlock);
         }
+        // Use the actual first-block index as our rollback target so that
+        // rollback_to consistently equals sorted[0].index for all downstream logic.
+        let rollback_to = effective_rollback;
 
         // Verify PoW on all incoming blocks before we commit to anything.
         for b in &sorted {

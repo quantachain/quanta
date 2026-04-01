@@ -42,3 +42,5 @@ docs/
 #Faucet
 
 src/bin/distribute_faucet.rs
+
+VPS_BUILD_GUIDE.md

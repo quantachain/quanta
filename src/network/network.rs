@@ -786,11 +786,14 @@ impl Network {
             
             wait = 0;
             let expected = (request_end.saturating_sub(request_start) + 1) as usize;
+            // Use a longer timeout for large reorg batches (fork may be 100+ blocks deep).
+            // Previous 15s timeout (30×500ms) was too short for PQC blocks (~2 MB each).
+            let max_wait = if expected > 50 { 120 } else { 60 }; // 60s normal, 120s large reorg
             loop {
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 wait += 1;
                 let sz = self.sync_buffer.lock().await.len();
-                if sz >= expected || wait >= 30 { break; }
+                if sz >= expected || wait >= max_wait { break; }
             }
             
             let blocks: Vec<Block> = {
@@ -813,8 +816,11 @@ impl Network {
                 match bc.deep_reorg(request_start, blocks.clone()) {
                     Ok(_) => info!("Reorg to heavier chain successful"),
                     Err(e) => {
-                        warn!("Reorg failed: {}", e);
-                        peer.add_misbehavior(50).await;
+                        // Reorg failures are almost always caused by our own sync logic
+                        // (timeout, partial batch, stale rollback_to) — NOT peer misbehavior.
+                        // Do NOT penalize the peer here; just abort this sync cycle and
+                        // let the next periodic sync retry with a fresh header scan.
+                        warn!("Reorg failed (will retry next sync cycle): {}", e);
                         break;
                     }
                 }
