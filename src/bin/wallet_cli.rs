@@ -1,4 +1,4 @@
-use quanta::crypto::{QuantumWallet, HDWallet, FalconKeypair, TreasuryMultisig, TreasuryMultisigV2, MultiSigTransaction};
+use quanta::crypto::{QuantumWallet, HDWallet, TreasuryMultisig, TreasuryMultisigV2, MultiSigTransaction};
 use quanta::core::transaction::{Transaction, TransactionType, SignatureScheme};
 use clap::{Parser, Subcommand};
 use chrono::Utc;
@@ -234,6 +234,8 @@ async fn main() {
                 lock_time: 0,
                 tx_type:   TransactionType::Transfer,
                 sig_scheme: SignatureScheme::Falcon512,
+                // Testnet. A --network flag can be added later to select mainnet (1).
+                network_id: 0,
             };
 
             let signing_bytes = tx.get_signing_bytes();
@@ -382,6 +384,7 @@ async fn main() {
             let wallet = QuantumWallet::load_quantum_safe(&key, &pwd)
                 .expect("Failed to load treasury key wallet");
 
+            #[allow(deprecated)]
             TreasuryMultisig::sign_proposal(&mut prop, index, &wallet.keypair)
                 .expect("Failed to sign proposal");
 

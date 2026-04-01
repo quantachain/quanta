@@ -112,9 +112,11 @@ const MIN_REWARD: u64 = 5_000_000; // 5 QUA floor (reached after ~20 years)
 const BLOCKS_PER_YEAR: u64 = 1_051_200; // 365.25 days * 86400 / 30 seconds
 
 // UNIQUE FEATURES - Network Bootstrap
+#[allow(dead_code)]
 const BOOTSTRAP_PHASE_BLOCKS: u64 = 315_360; // First month gets network usage boost
 
 // SUSTAINABLE ECONOMICS - Fee Structure & Value Capture
+#[allow(dead_code)]
 const BASE_TRANSACTION_FEE: u64 = 1_000; // 0.001 QUA minimum (prevents spam)
 const FEE_BURN_PERCENT: u64 = 70; // 70% of fees burned (deflationary pressure)
 const FEE_TREASURY_PERCENT: u64 = 20; // 20% to development treasury
@@ -135,6 +137,7 @@ const TREASURY_ADDRESS: &str = "ms69216b1d10425689704d5ae3b2a4aa17049f59b1";
 
 // ANTI-DUMP MECHANISM - Mining Reward Lockup
 const MINING_REWARD_LOCK_PERCENT: u64 = 50; // 50% of mining rewards locked
+#[allow(dead_code)]
 const MINING_REWARD_LOCK_BLOCKS: u64 = 157_680; // ~54.75 days vesting (157,680 × 30s)
 
 // Security limits
@@ -758,6 +761,7 @@ impl Blockchain {
     
     /// Get current difficulty — reads from STORAGE (the real chain), not the
     /// in-memory `chain` vec which only holds genesis after startup.
+    #[allow(dead_code)]
     fn get_current_difficulty(&self) -> u32 {
         let height = self.get_height();
         if height == 0 {

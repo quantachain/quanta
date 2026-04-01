@@ -33,6 +33,7 @@ pub const SIGNING_DOMAIN: &[u8] = b"QUANTA_TX_V1:";
 
 #[derive(Zeroize)]
 #[zeroize(drop)]
+#[allow(dead_code)] // Exists for its Zeroize drop guard; zeroes secret key bytes on drop.
 struct SecretKeyBytes(Vec<u8>);
 
 // ---------------------------------------------------------------------------
