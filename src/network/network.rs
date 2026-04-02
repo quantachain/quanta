@@ -63,6 +63,12 @@ pub struct Network {
     sync_buffer: Arc<tokio::sync::Mutex<Vec<Block>>>,
     /// Header sync buffer
     header_buffer: Arc<tokio::sync::Mutex<Vec<crate::network::protocol::BlockHeader>>>,
+    /// REORG FIX: The exact [start, end] block index range currently being
+    /// downloaded by the sync loop. Set just before GetBlocks is sent;
+    /// cleared after the buffer is drained. Allows handle_new_block to
+    /// buffer deep-reorg blocks whose index is BELOW the current chain tip
+    /// (the old `block.index > latest.index` check silently dropped them).
+    sync_request_range: Arc<tokio::sync::Mutex<Option<(u64, u64)>>>,
 }
 
 impl Network {
@@ -89,6 +95,7 @@ impl Network {
             syncing: Arc::new(AtomicBool::new(false)),
             sync_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             header_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            sync_request_range: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -436,16 +443,24 @@ impl Network {
             return Ok(());
         }
 
-        // SYNC FIX: If syncing and block is in the sync range, buffer it
-        // for ordered sequential application.
-        // We do this BEFORE the seen_blocks check, because previously-failed blocks
-        // might be in the seen cache and we need to process them during a sync!
-        if is_syncing && block.index > latest.index && block.index <= latest.index + 1500 {
-            let mut buffer = self.sync_buffer.lock().await;
-            if buffer.len() < (MAX_SYNC_BATCH as usize + 200) {
-                buffer.push(block);
+        // REORG FIX: Use the exact requested range (sync_request_range) to decide
+        // whether to buffer this block during sync. The old condition
+        //   `block.index > latest.index`
+        // silently dropped any reorg block whose index is AT or BELOW the current
+        // chain tip. During a deep reorg we request blocks [fork_point .. tip-1] which
+        // are all BELOW the current tip, so they were never buffered — causing
+        // "99/100 blocks, first block at height N+1 instead of N" failures.
+        if is_syncing {
+            let range_opt = *self.sync_request_range.lock().await;
+            if let Some((rstart, rend)) = range_opt {
+                if block.index >= rstart && block.index <= rend {
+                    let mut buffer = self.sync_buffer.lock().await;
+                    if buffer.len() < (MAX_SYNC_BATCH as usize + 200) {
+                        buffer.push(block);
+                    }
+                    return Ok(());
+                }
             }
-            return Ok(());
         }
 
         // BETA FIX: Deduplication — only process + re-broadcast if not seen before.
@@ -803,7 +818,13 @@ impl Network {
                 sb.clear();
             }
             
+            // Announce the requested range BEFORE sending GetBlocks so that
+            // handle_new_block can buffer arriving blocks — including reorg blocks
+            // whose index is BELOW the current chain tip.
+            *self.sync_request_range.lock().await = Some((request_start, batch_end));
+            
             if let Err(e) = peer.send_message(P2PMessage::GetBlocks { start_height: request_start, end_height: batch_end }).await {
+                *self.sync_request_range.lock().await = None;
                 warn!("Block request failed: {}", e);
                 break;
             }
@@ -841,6 +862,8 @@ impl Network {
                 b.sort_by_key(|x| x.index);
                 b
             };
+            // Clear the range — blocks arriving now are NOT part of this batch.
+            *self.sync_request_range.lock().await = None;
             
             if blocks.is_empty() {
                 warn!("Peer did not yield requested blocks");
@@ -881,6 +904,7 @@ impl Network {
         }
         
         self.syncing.store(false, Ordering::SeqCst);
+        *self.sync_request_range.lock().await = None; // ensure cleared on any exit path
         info!("Sync cycle complete. Current height: {}", self.blockchain.read().await.get_height());
         Ok(())
     }
