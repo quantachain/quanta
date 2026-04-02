@@ -791,28 +791,48 @@ impl Network {
                 break;
             }
             
-            // Step 3: Request Full Blocks for the validated headers
-            info!("Headers validated. Requesting full blocks [{}-{}]", request_start, request_end);
+            // Step 3: Request Full Blocks for the validated headers.
+            // CAP to 100 blocks per request — PQC blocks are ~2 MB each, so 500 at once
+            // is ~1 GB which reliably times out on normal VPS links. 100 blocks ≈ 200 MB
+            // which transfers comfortably within a 60-second window at ~30 Mbps.
+            const BLOCK_BATCH_CAP: u64 = 100;
+            let batch_end = request_end.min(request_start + BLOCK_BATCH_CAP - 1);
+            info!("Headers validated. Requesting full blocks [{}-{}]", request_start, batch_end);
             {
                 let mut sb = self.sync_buffer.lock().await;
                 sb.clear();
             }
             
-            if let Err(e) = peer.send_message(P2PMessage::GetBlocks { start_height: request_start, end_height: request_end }).await {
+            if let Err(e) = peer.send_message(P2PMessage::GetBlocks { start_height: request_start, end_height: batch_end }).await {
                 warn!("Block request failed: {}", e);
                 break;
             }
             
-            wait = 0;
-            let expected = (request_end.saturating_sub(request_start) + 1) as usize;
-            // Use a longer timeout for large reorg batches (fork may be 100+ blocks deep).
-            // Previous 15s timeout (30×500ms) was too short for PQC blocks (~2 MB each).
-            let max_wait = if expected > 50 { 120 } else { 60 }; // 60s normal, 120s large reorg
+            // Idle-based timeout: reset the idle counter each time a new block arrives.
+            // This ensures a slow-but-progressing transfer is never cut off prematurely,
+            // while still stopping if the peer goes silent for 30 seconds.
+            let expected = (batch_end.saturating_sub(request_start) + 1) as usize;
+            let idle_timeout_iters = 60u32; // 60 × 500 ms = 30 s idle timeout
+            let mut idle_count = 0u32;
+            let mut last_seen_sz = 0usize;
             loop {
                 tokio::time::sleep(Duration::from_millis(500)).await;
-                wait += 1;
                 let sz = self.sync_buffer.lock().await.len();
-                if sz >= expected || wait >= max_wait { break; }
+                if sz >= expected {
+                    break; // all blocks received
+                }
+                if sz > last_seen_sz {
+                    // Progress — reset idle counter
+                    idle_count = 0;
+                    last_seen_sz = sz;
+                } else {
+                    idle_count += 1;
+                    if idle_count >= idle_timeout_iters {
+                        warn!("Block download idle timeout after {}s — received {}/{} blocks",
+                            idle_timeout_iters / 2, sz, expected);
+                        break;
+                    }
+                }
             }
             
             let blocks: Vec<Block> = {
