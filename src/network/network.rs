@@ -692,15 +692,30 @@ impl Network {
         let our_height = self.blockchain.read().await.get_height();
         info!("Syncing from peer {} (target work: {}, height: {})", peer.address().await, max_work, target_height);
         
-        let mut current_sync_height = our_height;
+        // Re-read actual chain height each iteration — after a deep_reorg the chain height
+        // is the reorg tip, which may differ from what we started with.
+        let mut current_sync_height = self.blockchain.read().await.get_height();
         let mut stall_count = 0;
+        // Track whether this is the very first iteration so we use a wide lookback
+        // to detect potential fork points. On subsequent iterations the chain is
+        // already at the right tip and we only need a small anchor window.
+        let mut first_iteration = true;
         
         loop {
+            // Always re-read the actual chain height — it changes after every reorg/apply.
+            current_sync_height = self.blockchain.read().await.get_height();
             if current_sync_height >= target_height { break; }
             
-            // Step 1: Request Headers
-            // We search back 500 blocks to naturally find the fork point if one exists
-            let search_start = current_sync_height.saturating_sub(500);
+            // Step 1: Request Headers.
+            // On the first pass search back up to 500 blocks to find a possible fork point.
+            // On subsequent passes we are already on the canonical tip, so a small
+            // lookback (10 blocks) is enough to anchor the chain and save bandwidth.
+            let search_start = if first_iteration {
+                current_sync_height.saturating_sub(500)
+            } else {
+                current_sync_height.saturating_sub(10)
+            };
+            first_iteration = false;
             
             {
                 let mut hb = self.header_buffer.lock().await;
@@ -752,7 +767,11 @@ impl Network {
             let request_end = headers.last().unwrap().index;
             
             if request_start > request_end {
-                current_sync_height = request_end;
+                // All headers in this batch are already part of our chain.
+                // current_sync_height was refreshed at the top of the loop from the
+                // actual chain height, so the next iteration will correctly advance
+                // the search window forward.
+                info!("Sync: all headers [{}-{}] already applied, advancing window", request_start, request_end);
                 continue;
             }
             
@@ -835,7 +854,10 @@ impl Network {
                 }
             }
             
-            current_sync_height = request_end;
+            // current_sync_height is refreshed at the top of the loop from the actual
+            // chain height, so we do NOT set it here — doing so would use request_end
+            // (capped by the 500-header window) instead of the real post-reorg height,
+            // which was the root cause of the post-reorg stall bug.
         }
         
         self.syncing.store(false, Ordering::SeqCst);
