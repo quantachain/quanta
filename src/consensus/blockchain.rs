@@ -174,12 +174,19 @@ const TESTNET_GENESIS_HASH: &str = "00000012d3a2cbb7eb9579330ccdaa4f83ca9e6e016b
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)
 // Add checkpoints every ~1000 blocks for devnet, ~10000 for mainnet
-const CHECKPOINTS: &[(u64, &str)] = &[
+//
+// TESTNET checkpoints — fetched live from rpc.quantachain.org
+// Never add a checkpoint you haven't independently verified.
+const TESTNET_CHECKPOINTS: &[(u64, &str)] = &[
+    (0,      TESTNET_GENESIS_HASH),
+    (10_000, "0000013b6f5f570de0605eac1e7c2fde87f8ce30ca26acc26a9a78d9c18374d5"),
+    // Add more as the chain grows:
+    // (20_000, "<block_20000_hash>"),
+];
+
+// MAINNET checkpoints — empty until mainnet launch
+const MAINNET_CHECKPOINTS: &[(u64, &str)] = &[
     (0, GENESIS_HASH),
-    // Add more checkpoints as network matures:
-    // (1000, "<block_1000_hash>"),
-    // (5000, "<block_5000_hash>"),
-    // (10000, "<block_10000_hash>"),
 ];
 
 /// Apply the annual reward reduction using PURE INTEGER MATH.
@@ -445,7 +452,11 @@ impl Blockchain {
 
     /// Validate block against checkpoints (prevents deep reorgs)
     fn validate_checkpoint(&self, height: u64, hash: &str) -> bool {
-        for (checkpoint_height, checkpoint_hash) in CHECKPOINTS {
+        let checkpoints = match self.network {
+            ChainNetwork::Testnet => TESTNET_CHECKPOINTS,
+            ChainNetwork::Mainnet => MAINNET_CHECKPOINTS,
+        };
+        for (checkpoint_height, checkpoint_hash) in checkpoints {
             if *checkpoint_height == height {
                 if hash != *checkpoint_hash {
                     tracing::error!(
