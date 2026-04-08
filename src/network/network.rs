@@ -304,18 +304,18 @@ impl Network {
         
         while let Some((addr, msg)) = rx.recv().await {
             // Find the peer object to pass to the handler for strike management
-            let mut peer = None;
+            let mut peer_opt = None;
             for p in self.peer_manager.get_peers().await {
                 if p.address().await == addr {
-                    peer = Some(p);
+                    peer_opt = Some(p);
                     break;
                 }
             }
 
             let network = Arc::clone(&self);
             tokio::spawn(async move {
-                if let Err(e) = network.handle_message(addr, msg, peer).await {
-                    error!("Error handling message from {}: {}", addr, e);
+                if let Err(e) = network.handle_message(addr, msg.clone(), peer_opt).await {
+                    error!("Error handling message {:?} from {}: {}", msg, addr, e);
                 }
             });
         }
@@ -334,7 +334,7 @@ impl Network {
                 self.handle_get_blocks(addr, start_height, end_height).await?;
             }
             P2PMessage::GetHeaders { start_height } => {
-                self.handle_get_headers(addr, start_height).await?;
+                self.handle_get_headers(addr, start_height, peer.clone()).await?;
             }
             P2PMessage::Headers(headers) => {
                 self.handle_headers(headers, peer).await?;
@@ -537,12 +537,13 @@ impl Network {
     }
 
     /// Handle get headers request
-    async fn handle_get_headers(&self, addr: SocketAddr, start: u64) -> Result<(), String> {
+    async fn handle_get_headers(&self, addr: SocketAddr, start: u64, peer: Option<Arc<Peer>>) -> Result<(), String> {
         let blockchain = self.blockchain.read().await;
         let height = blockchain.get_height();
         let end = height.min(start + 500); // 500 headers maximum per batch
         
-        let mut headers = Vec::with_capacity((end.saturating_sub(start) + 1) as usize);
+        let mut headers = Vec::new();
+        // Allow sending up to 500 headers or less depending on what the storage holds
         for i in start..=end {
             if let Some(block) = blockchain.load_block_from_storage(i) {
                 let mut header: crate::network::protocol::BlockHeader = (&block).into();
@@ -553,7 +554,12 @@ impl Network {
         drop(blockchain);
         
         info!("Serving {} headers [{}-{}] to peer {}", headers.len(), start, end, addr);
-        self.send_to_peer(addr, P2PMessage::Headers(headers)).await
+        if let Some(p) = peer {
+            let _ = p.send_message(P2PMessage::Headers(headers)).await;
+        } else {
+            self.send_to_peer(addr, P2PMessage::Headers(headers)).await?;
+        }
+        Ok(())
     }
 
     /// Handle headers response.

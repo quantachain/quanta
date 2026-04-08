@@ -200,13 +200,28 @@ impl PeerDiscovery {
         
         // Add seeds if we don't have enough healthy peers
         if healthy.len() < count {
-            healthy.extend(self.seed_nodes.iter().copied());
+            for seed in &self.seed_nodes {
+                if !healthy.contains(seed) {
+                    healthy.push(*seed);
+                }
+            }
         }
         
         let mut rng = rand::thread_rng();
         healthy.shuffle(&mut rng);
         
-        healthy.into_iter().take(count).collect()
+        // Deduplicate before returning
+        let mut unique = Vec::new();
+        for addr in healthy {
+            if !unique.contains(&addr) {
+                unique.push(addr);
+                if unique.len() == count {
+                    break;
+                }
+            }
+        }
+        
+        unique
     }
     
     /// Check if peer is currently banned
