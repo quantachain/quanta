@@ -484,23 +484,6 @@ impl Network {
                 // also receive the block (essential for mesh topology with 6+ nodes).
                 self.broadcast_block(block.clone()).await;
 
-                // SYNC FIX: Don't do recursive sync requests here.
-                // The main sync_blockchain loop handles this properly.
-                // Only request more blocks if NOT in a sync operation.
-                if !is_syncing {
-                    if let Some(p) = peer {
-                        let peer_info = p.get_info().await;
-                        if peer_info.height > block.index + 1 {
-                            let end_height = peer_info.height.min(block.index + MAX_SYNC_BATCH);
-                            info!("Requesting next blocks: {} → {}", block.index + 1, end_height);
-                            let _ = p.send_message(P2PMessage::GetBlocks {
-                                start_height: block.index + 1,
-                                end_height,
-                            }).await;
-                        }
-                    }
-                }
-
                 Ok(())
             }
             Err(e) => {
