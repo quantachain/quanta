@@ -710,12 +710,11 @@ impl Network {
         
         self.syncing.store(true, Ordering::SeqCst);
         
-        let our_height = self.blockchain.read().await.get_height();
+        let _our_height = self.blockchain.read().await.get_height();
         info!("Syncing from peer {} (target work: {}, height: {})", peer.address().await, max_work, target_height);
         
         // Re-read actual chain height each iteration — after a deep_reorg the chain height
         // is the reorg tip, which may differ from what we started with.
-        let mut current_sync_height = self.blockchain.read().await.get_height();
         let mut stall_count = 0;
         // Track whether this is the very first iteration so we use a wide lookback
         // to detect potential fork points. On subsequent iterations the chain is
@@ -724,7 +723,7 @@ impl Network {
         
         loop {
             // Always re-read the actual chain height — it changes after every reorg/apply.
-            current_sync_height = self.blockchain.read().await.get_height();
+            let current_sync_height = self.blockchain.read().await.get_height();
             if current_sync_height >= target_height { break; }
             
             // Step 1: Request Headers.

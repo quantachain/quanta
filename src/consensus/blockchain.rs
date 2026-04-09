@@ -2113,7 +2113,11 @@ impl Blockchain {
         }
         // The checkpoint at height 0 (genesis) is always enforced by the genesis
         // hash check in Blockchain::new; any other checkpoints must not be crossed.
-        for (cp_height, cp_hash) in CHECKPOINTS {
+        let checkpoints = match self.network {
+            ChainNetwork::Testnet => TESTNET_CHECKPOINTS,
+            ChainNetwork::Mainnet => MAINNET_CHECKPOINTS,
+        };
+        for (cp_height, cp_hash) in checkpoints {
             if *cp_height >= rollback_to && *cp_height < our_height {
                 // We would be rolling back past this checkpoint.
                 tracing::error!(
