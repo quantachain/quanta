@@ -1,12 +1,10 @@
-# QuantaChain Testnet — Alpha v0.7.0
+# QuantaChain Testnet — Alpha v0.7.1
 
 Post-quantum secure blockchain using Falcon-512 signatures and SHA3-256 Proof of Work.
 
-> **UPGRADE NOTICE — v0.7.0 (TESTNET RESET REQUIRED)**
-> This release includes a major sync architecture change (BID) and security hardening.
-> The new cumulative-work peer selection and headers-first sync protocol are incompatible
-> with the previous v0.6.0 chain state.
-> **All node operators MUST delete their `quanta_data/` directories before starting v0.7.0.**
+> **v0.7.1 — No testnet reset required.**
+> Drop-in upgrade from v0.7.0. All node operators can upgrade by pulling the new image and restarting.
+> Existing `quanta_data/` directories are fully compatible.
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
@@ -75,7 +73,7 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 ## Quick Start with Docker
 
 ### Option 1: Docker Desktop (Graphical Interface)
-1. Open Docker Desktop and find `xd637/quanta-node:v0.7.0-alpha` (or `:latest`) in your Images.
+1. Open Docker Desktop and find `xd637/quanta-node:v0.7.1-alpha` (or `:latest`) in your Images.
 2. Click **Run**.
 3. Under **Optional settings**, configure:
    - **Container name**: `quanta-node`
@@ -87,26 +85,21 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 
 ### Option 2: Docker CLI
 ```bash
-docker pull xd637/quanta-node:v0.7.0-alpha
+docker pull xd637/quanta-node:v0.7.1-alpha
 
 docker run -d \
   --name quanta-node \
   -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
   -v quanta-data:/home/quanta/quanta_data \
   -v quanta-logs:/home/quanta/logs \
-  xd637/quanta-node:v0.7.0-alpha
+  xd637/quanta-node:v0.7.1-alpha
 ```
 
 ### Option 3: Docker Compose (Recommended)
 
-**REQUIRED: Delete old chain data first (testnet reset)**
+**Upgrading from v0.7.0 — no data wipe needed:**
 ```bash
-docker compose down -v
-sudo rm -rf ~/quanta_data/*
-```
-
-Then start:
-```bash
+docker compose -f docker-compose.single.yml pull
 docker compose -f docker-compose.single.yml up -d
 ```
 
@@ -130,14 +123,10 @@ sudo ufw allow ssh
 sudo ufw --force enable
 ```
 
-**3. Clean start (REQUIRED for v0.7.0 upgrade):**
+**3. Upgrade to v0.7.1 (no data wipe required):**
 ```bash
-docker stop quanta-node && docker rm quanta-node
-
-# Delete old blockchain data
-sudo rm -rf ~/quanta_data/*
-
 docker pull xd637/quanta-node:latest
+docker stop quanta-node && docker rm quanta-node
 docker run -d \
   --name quanta-node \
   --restart always \
@@ -158,7 +147,7 @@ docker logs quanta-node --tail 30 -f
 ```bash
 git clone https://github.com/quantachain/quanta
 cd quanta
-git checkout v0.7.0-alpha
+git checkout v0.7.1-alpha
 cargo build --release
 
 ./target/release/quanta start -c quanta.toml
@@ -217,211 +206,120 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 
 ---
 
+## What Changed in Alpha v0.7.1
+
+**No testnet reset. No wire format change. Drop-in upgrade.**
+
+### Fix — `deep_reorg` used wrong validator on peer blocks
+
+`add_block_to_main_chain_reorg()` was calling `validate_block_consensus()` — the strict
+validator that requires the incoming block's difficulty to exactly match the local LWMA.
+During a deep reorg, peer blocks were mined against *their* LWMA which can differ slightly
+from ours (the two chains diverged at a prior block with a different timestamp).
+
+Fix: reorg path now calls `validate_block_consensus_reorg()`, the 50%-bounds permissive
+validator that was already written for this purpose but wasn't being used.
+
+### Fix — `deep_reorg` corrupted `cumulative_work` counter
+
+After rolling back the chain, the in-memory `cumulative_work` was still at the old tip's
+value. Each new block applied by `add_block_to_main_chain_reorg` *added* to this stale
+total, producing a `cumulative_work` value roughly double the correct amount. This caused
+the node to always believe it had more work than all peers and skip future syncs.
+
+Fix: `deep_reorg` now recomputes the correct base work from storage before replaying
+new blocks, and resets both the in-memory counter and the sled key to this value.
+
+### Fix — single-block tip swap (`reorg_to_block`) never updated `cumulative_work`
+
+The 1-deep reorg path correctly swapped the block and rebuilt account state, but never
+adjusted the `cumulative_work` counter. The counter was left at the old tip's value.
+
+Fix: subtracts the old tip's difficulty and adds the incoming tip's difficulty after commit.
+
+### Fix — `add_block_to_main_chain_reorg` had dangling orphan code (compile error)
+
+A previous edit left a `if !tx.is_coinbase() { ... }` block without its enclosing
+`for tx in &block.transactions` loop. This was a compile-time error in practice.
+
+Fix: restored the complete nonce-clearing loop matching `add_block_to_main_chain`.
+
+### Fix — linear sync treated as reorg (`request_start <= bc_height` → `< bc_height`)
+
+When the sync engine requested the next batch of blocks starting exactly at the current
+chain height, `request_start == bc_height` evaluated true for the reorg branch and
+triggered a `deep_reorg` call. This caused O(n²) behaviour during normal linear sync —
+every downloaded block triggered a full chain rollback and account-state rebuild.
+
+Fix: condition changed to strictly-less-than so only blocks *below* the current tip
+are treated as a reorg.
+
+### Improvement — Storage: no per-block `fsync`
+
+`save_block` and `save_account_state` no longer call `db.flush()` after every write.
+Sled's write-ahead log guarantees crash safety without a per-block fsync. A single
+`flush_storage()` call is issued at the end of each sync batch and after mining a block.
+At 18,000 blocks × ~5 ms/fsync this removes ~90 seconds of wasted IO during IBD.
+
+### Improvement — O(1) cumulative work lookup
+
+`cumulative_work` is now stored as a sled key and kept in an in-memory `Arc<Mutex<u128>>`.
+`cumulative_work_at(tip)` returns the stored value in O(1) for the current tip.
+Previously every call scanned all blocks from genesis (O(height) disk reads while
+holding the blockchain read lock — the primary cause of seed-node connection timeouts).
+
+### Improvement — Account state snapshots every 1000 blocks
+
+`add_block_to_main_chain` now saves a full account state snapshot at every 1000-block
+boundary. `rebuild_account_state_up_to()` loads the nearest snapshot and replays only
+the delta — previously it always replayed from genesis, O(height) on every reorg.
+
+---
+
 ## What Changed in Alpha v0.7.0
 
-### Major Architecture — BID (Bitcoin-style Block and Header Download)
+> **UPGRADE NOTICE — v0.7.0 required a testnet reset.**
+> The cumulative_work handshake field changed the binary wire format.
+> v0.6.0 and v0.7.0 nodes are not mutually compatible.
 
-The sync engine has been rebuilt around the same two-phase headers-first architecture
-that Bitcoin Core uses for Initial Block Download. This was the primary cause of
-all previous sync stalls, fork loops, and orphan accumulation on the testnet.
+### Major Architecture — Headers-First Sync (Bitcoin IBD style)
 
-**The old problem:**
-Every incoming block triggered a full validation cycle immediately regardless of
-ordering. On a fresh sync or after a reorg, blocks arrived out of sequence, were
-stored as orphans, and the chain never advanced. The stall counter fired, triggering
-another deep reorg, which could fail and leave the node stuck.
+Two new wire messages — `GetHeaders` and `Headers` — allow a syncing node to download
+light headers (index, hash, previous_hash, difficulty, cumulative_work) before requesting
+full blocks. The sync engine validates headers first, finds the fork point, then requests
+only the missing full blocks in ordered batches.
 
-**What changed:**
+### Cumulative work-based peer selection
 
-**1. GetHeaders / Headers messages (new P2P protocol messages)**
+The handshake now exchanges `cumulative_work` alongside `height`. Sync always targets
+the peer with the highest cumulative PoW — not the tallest chain.
 
-Two new wire messages — `GetHeaders` and `Headers` — allow a node to download just
-the block headers (index, hash, previous_hash, difficulty, cumulative_work) before
-requesting any full blocks. A header batch is 500 entries max and is a fraction of
-the size of full blocks (which are up to 2 MB each in PQC due to Falcon-512
-signatures).
+### Atomic deep reorg with rollback
 
-**2. Cumulative work-based peer selection**
+Failed reorgs no longer leave the node at a partial intermediate state. The original
+chain is saved before rollback and restored on failure.
 
-The handshake now exchanges `cumulative_work` (sum of all block difficulties on the
-chain) alongside `height`. When selecting which peer to sync from, the node picks
-the peer with the highest cumulative work — not the highest block height. This
-matches Bitcoin's fork selection rule and prevents a malicious peer from getting a
-node to follow a low-difficulty long chain.
+### Security — Cross-chain replay protection
 
-**3. Headers buffer in the sync engine**
+`network_id: u32` added to `Transaction`. Signatures are cryptographically bound to a
+specific network. Testnet = `0`, Mainnet = `1`.
 
-A dedicated `header_buffer` collects incoming headers from `GetHeaders` responses.
-The sync loop uses these buffered headers to build a download plan — which height
-ranges are missing — then issues targeted `GetBlocks` requests for only those
-ranges. This eliminates the scatter-gather pattern that caused blocks to arrive
-out of order and be rejected as orphans.
+### Security — State root empty-string bypass closed
 
-**4. Atomic deep reorg with rollback**
+Blocks with `state_root = ""` can no longer bypass state root validation.
 
-Before this release, a deep reorg that failed partway through (e.g., because the
-incoming chain contained a bad block at block 50 of 100) would leave the node at
-an inconsistent intermediate height. The node now:
+### Security — Reorg path now verifies all transaction signatures
 
-- Saves a snapshot of the current chain's blocks before rolling back
-- Applies the new chain blocks one by one
-- If any block fails, rolls back the chain pointer and restores the original chain
-  from the snapshot before returning an error
+`validate_block_consensus_reorg()` now runs the parallel Rayon signature pass.
 
-The node is never left at a partial reorg state.
+### Security — Inbound peer connection cap
 
-**5. Height messages carry cumulative work**
+`listen_for_connections()` now enforces `max_peers` before accepting the TCP stream.
 
-`P2PMessage::Height` now carries `cumulative_work` alongside `height`. Nodes
-update both fields on peers during sync, enabling accurate best-peer selection
-throughout a long sync rather than only at handshake time.
+### Improvement — Light block gossip
 
-> This release requires a testnet reset because the cumulative_work field in
-> the handshake and Height messages changes the binary wire format. Existing
-> v0.6.0 nodes will fail the handshake with v0.7.0 nodes.
-
----
-
-### Security Fix — Cross-Chain Replay Protection
-
-Added `network_id: u32` to the `Transaction` struct. The field is included in
-`get_signing_bytes()` and `hash()`, meaning every Falcon-512 signature is
-cryptographically bound to a specific network.
-
-| Network | network_id |
-|---|---|
-| Testnet (QUA7) | `0` |
-| Mainnet | `1` |
-
-A transaction signed on Testnet produces an invalid signature on Mainnet and
-vice versa. The field uses `#[serde(default)]` so existing on-chain transactions
-deserialize to `network_id = 0` without a genesis change.
-
----
-
-### Security Fix — State Root Empty-String Bypass Closed
-
-The previous state root check accepted any block with `state_root = ""` as valid,
-even when the computed state root did not match. A miner could fabricate account
-balances by omitting the state_root field entirely.
-
-Fix: if a block provides a non-empty state_root, it must match the computed value.
-Blocks that genuinely omit state_root (pre-feature legacy blocks) continue to pass.
-
----
-
-### Security Fix — Reorg Path Was Not Verifying Signatures
-
-`validate_block_consensus_reorg()` checked timestamps, PoW, coinbase amounts, and
-treasury amounts — but skipped transaction signature verification entirely. An
-attacker constructing a longer chain with forged transactions could have them
-accepted during a deep reorg.
-
-Fix: the reorg validator now runs the same parallel Rayon signature pass used by
-`validate_block_consensus()`. The LRU signature cache is shared between both paths,
-so blocks already verified at normal processing time are free to re-apply.
-
----
-
-### Security Fix — Redundant Serial Signature Verification Removed
-
-`block.is_valid()` ran a serial Falcon-512 verification loop over all transactions,
-then `validate_block_consensus()` ran an identical parallel Rayon pass immediately
-after. Every block's signatures were being verified twice, adding ~1800 ms of
-redundant PQC work per block.
-
-`block.is_valid()` now only checks structural integrity: hash, PoW, Merkle root,
-and chain linkage. All signature verification is owned by the parallel Rayon pass.
-
----
-
-### Security Fix — Inbound Peer Connection Cap
-
-`listen_for_connections()` previously accepted every inbound TCP connection before
-`PeerManager.add_peer()` could enforce the `max_peers` limit. A botnet could
-exhaust OS connection slots before the limit check ran.
-
-Fix: the node checks `peer_manager.peer_count()` before accepting the TCP stream.
-If the node is at capacity, the stream is dropped immediately (TCP RST).
-
----
-
-### Improvement — network_id Propagated from Node Config
-
-Coinbase and treasury system transactions now read `network_id` from the node's
-configured `ChainNetwork` via `self.network.network_id()` instead of a hardcoded
-`0`. Mainnet nodes will correctly stamp `network_id = 1` on all system-generated
-transactions from launch.
-
-### Improvement — Light Block Gossip
-
-`broadcast_block()` previously sent the full 2 MB block to every connected peer
-on every new block found. This is now a header-only announcement (~200 bytes).
-Peers that need the full block request it via `GetBlocks`. Per-block broadcast
-bandwidth drops from O(peers x 2 MB) to O(peers x 200 B).
-
----
-
-## What Changed in Alpha v0.6.0
-
-### Critical Fix — Block Template Nonce Sequence (Network Stall Fix)
-
-The mempool block assembler sorted transactions by descending fee without enforcing
-nonce ordering. A user submitting multiple transactions could have them included
-out of sequence, causing the consensus engine to reject the block with `InvalidNonce`.
-
-Block templates now use a simulated state buffer that enforces absolute sequential
-nonce ordering regardless of fee priority.
-
-### Critical Fix — Permanent Nonce Desync on Reorg
-
-The `reorg_to_block` handler reapplied balances but did not call `increment_nonce()`.
-Any sender whose transaction landed in a reorg block became permanently unable to
-send further transactions (on-chain nonce stuck at 0).
-
-### Critical Fix — Faucet Balance Zero After Sync
-
-Genesis premine transactions were applied in-memory during `Blockchain::new()` but
-not stored inside the genesis block struct on disk. `rebuild_account_state_up_to()`
-iterated `genesis.transactions` (always empty on disk) and applied no premine, so
-all faucet wallets showed 0 QUA after any deep reorg.
-
-### Critical Fix — Sync Stuck at Block 1
-
-`MIN_DIFFICULTY` was higher than the actual difficulty of early testnet blocks,
-causing every incoming block at those heights to be rejected immediately.
-
----
-
-## What Changed in Alpha v0.5.0
-
-- LWMA (Linearly Weighted Moving Average) difficulty algorithm. Adjusts every block
-  on a 45-block window (~22.5 min). Replaces 2016-block Bitcoin-style intervals.
-- `deep_reorg()` multi-block reorganisation engine.
-- Parallel Rayon signature verification with LRU cache (serial ~1800 ms to parallel
-  ~300 ms for a full 1200-tx block).
-- Bloom filter for O(1) mempool duplicate detection.
-- Atomic orphan pool.
-
----
-
-## What Changed in Alpha v0.3.0 (Testnet V2)
-
-- Testnet V2 genesis reset with realistic difficulty (6,972,889).
-- Bitcoin-style DoSMan weighted peer scoring (0-100) replacing flat 3-strike system.
-- Block explorer API: address history, tx lookup, latest blocks.
-- Subnet Sybil protection (IPv4 /24, IPv6 /48).
-- Persistent IP ban list.
-
----
-
-## What Changed in Alpha v0.2.0
-
-- Mnemonic-based faucet wallet system (10 reserve wallets, BIP-39 derived).
-- Security audit: nonce atomicity, coinbase validation, MTP timestamp rule,
-  per-sender mempool cap, state root enforcement.
-- Block size increased to 2 MB for Falcon-512 transaction sizes.
-- License changed to Apache 2.0.
+`broadcast_block()` sends only the block header (~200 B) instead of the full block
+(~2 MB). Peers request the full block if they need it.
 
 ---
 
