@@ -1,0 +1,150 @@
+# Changelog
+
+All notable changes to QuantaChain are documented here.
+
+Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)  
+Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
+
+---
+
+## [Unreleased]
+
+---
+
+## [0.7.1-alpha] — 2026-04-10
+
+> **No testnet reset. Drop-in upgrade from v0.7.0.**
+
+### Fixed
+- `add_block_to_main_chain_reorg` called the strict `validate_block_consensus` instead
+  of the permissive `validate_block_consensus_reorg` — peer reorg blocks were rejected
+  if their difficulty didn't exactly match our local LWMA
+- `deep_reorg` did not reset `cumulative_work` before replaying new blocks — the stale
+  old-chain work value caused double-counting, making the node think it always had more
+  work than peers and skip future syncs
+- `reorg_to_block` (single-block tip swap) never updated `cumulative_work` — counter
+  was left at the old tip's value after every shallow reorg
+- `add_block_to_main_chain_reorg` had a dangling orphan code block (missing
+  `for tx in &block.transactions` loop header) — compile error on affected builds
+- `sync_blockchain`: `request_start <= bc_height` changed to `request_start < bc_height`
+  — linear sync was incorrectly triggering `deep_reorg` when downloading the next
+  sequential block, causing O(n²) account-state rebuilds during IBD
+
+### Changed
+- `save_block` and `save_account_state` no longer call `db.flush()` after every write —
+  sled WAL guarantees crash safety; a single flush is issued at end of sync batch and
+  after mining. Removes ~90 s of wasted fsync IO during an 18k-block IBD
+- `cumulative_work` is now persisted in sled and cached in memory (`Arc<Mutex<u128>>`) —
+  `cumulative_work_at(tip)` is O(1) for the current tip; previously O(height) disk scan
+  while holding the blockchain read lock (primary cause of seed-node connection timeouts)
+- Account state snapshots saved every 1000 blocks — `rebuild_account_state_up_to()`
+  loads the nearest snapshot and replays only the delta instead of always from genesis
+
+---
+
+## [0.7.0-alpha] — 2026-04-08
+
+> **Testnet reset required.** Wire format changed (cumulative_work in handshake/Height).
+
+### Added
+- `GetHeaders` / `Headers` P2P messages — headers-first sync (Bitcoin IBD architecture)
+- `header_buffer` in the sync engine — collects headers before planning block downloads
+- `sync_request_range` — exact [start, end] range set before GetBlocks so
+  `handle_new_block` can buffer reorg blocks whose index is below the current tip
+- `cumulative_work: u128` field in `P2PMessage::Height` and handshake
+- `validate_block_consensus_reorg()` — permissive difficulty validator (50% LWMA bounds)
+  for reorg replay path; full sig verification included
+- `network_id: u32` field in `Transaction` — included in signing bytes and hash,
+  cryptographically binding signatures to a specific network (replay protection)
+- Inbound connection cap in `listen_for_connections()` — enforces `max_peers` before
+  accepting the TCP stream (botnet exhaustion protection)
+- Keep-alive ping during block download (every 15 s) — prevents seed from closing
+  idle-looking connection during slow batch transfer
+- Sub-batch block serving in `handle_get_blocks` (20 blocks + `yield_now`) — releases
+  read lock between sub-batches so other tasks (mining, heartbeat) can run on seed
+- Partial-batch guard — skips `deep_reorg` if received block count ≠ expected
+- Atomic deep reorg with full rollback — saves original chain before rollback, restores
+  on failure; node never left at a partial intermediate state
+- `seen_blocks` / `seen_txs` LRU dedup caches — prevents broadcast storms
+- `sync_request_range` mutex — allows reorg blocks (index ≤ tip) to be buffered during sync
+
+### Fixed
+- State root empty-string bypass — `state_root = ""` could skip state root validation
+- Reorg path skipped transaction signature verification entirely
+- Duplicate serial signature verification — `block.is_valid()` ran a redundant serial
+  Falcon-512 pass before the parallel Rayon pass in `validate_block_consensus()`
+- `maintain_peers` spammed new TCP connections to seed during active sync — triggered
+  Sybil-protection rejection every 10 s
+
+### Changed
+- `broadcast_block()` now sends only the block header (~200 B) instead of full block
+  (~2 MB) — O(peers × 200 B) instead of O(peers × 2 MB) per block
+- `network_id` propagated from node config — coinbase/treasury txs use
+  `self.network.network_id()` instead of hardcoded `0`
+- Header wait timeout increased from 10 s to 30 s
+- Block batch size reduced from 100 to 50; idle timeout increased from 30 s to 60 s
+- `handle_get_headers`: running cumulative-work sum instead of O(height) per-header
+  call (was causing 36M sled reads per 2000-header batch at height 18k)
+- `maintain_peers` skips new connection attempts while `syncing` flag is set
+
+---
+
+## [0.6.0-alpha] — 2026-04-05
+
+### Fixed
+- Block template nonce sequence — mempool assembler sorted by fee without enforcing
+  nonce ordering; blocks could be rejected with `InvalidNonce` at consensus
+- Permanent nonce desync on reorg — `reorg_to_block` did not call `increment_nonce()`
+- Faucet balance zero after sync — genesis premine applied in memory but not stored
+  in genesis block struct; `rebuild_account_state_up_to()` replayed an empty tx list
+- Sync stuck at block 1 — `MIN_DIFFICULTY` constant was above early testnet block
+  difficulties, causing every incoming block at those heights to be rejected
+
+---
+
+## [0.5.0-alpha] — 2026-03-28
+
+### Added
+- LWMA (Linearly Weighted Moving Average) difficulty algorithm — adjusts every block
+  on a 45-block sliding window (~22.5 min); replaces 2016-block Bitcoin-style intervals
+- `deep_reorg()` — multi-block chain reorganisation engine
+- Parallel Rayon signature verification with LRU cache (1800 ms → ~300 ms per block)
+- Bloom filter for O(1) mempool duplicate detection
+- Atomic orphan pool (`VecDeque` for O(1) pop-front)
+
+---
+
+## [0.3.0-alpha] — 2026-03-20 (Testnet V2)
+
+### Added
+- Testnet V2 genesis reset with realistic difficulty (6,972,889)
+- Bitcoin-style DoSMan weighted peer scoring (0–100) replacing flat 3-strike system
+- Block explorer API: address history, transaction lookup, latest blocks
+- Subnet Sybil protection (IPv4 /24, IPv6 /48)
+- Persistent IP ban list
+
+---
+
+## [0.2.0-alpha] — 2026-03-14
+
+### Added
+- Mnemonic-based faucet wallet system (10 reserve wallets, BIP-39 derived)
+- Block size increased to 2 MB for Falcon-512 transaction sizes
+- License changed to Apache 2.0
+
+### Fixed
+- Nonce atomicity race condition
+- Coinbase amount validation
+- MTP (Median Time Past) timestamp enforcement
+- Per-sender mempool cap
+- State root enforcement
+
+---
+
+[Unreleased]: https://github.com/quantachain/quanta/compare/v0.7.1-alpha...HEAD
+[0.7.1-alpha]: https://github.com/quantachain/quanta/compare/v0.7.0-alpha...v0.7.1-alpha
+[0.7.0-alpha]: https://github.com/quantachain/quanta/compare/v0.6.0-alpha...v0.7.0-alpha
+[0.6.0-alpha]: https://github.com/quantachain/quanta/compare/v0.5.0-alpha...v0.6.0-alpha
+[0.5.0-alpha]: https://github.com/quantachain/quanta/compare/v0.3.0-alpha...v0.5.0-alpha
+[0.3.0-alpha]: https://github.com/quantachain/quanta/compare/v0.2.0-alpha...v0.3.0-alpha
+[0.2.0-alpha]: https://github.com/quantachain/quanta/releases/tag/v0.2.0-alpha
