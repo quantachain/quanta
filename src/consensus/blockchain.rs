@@ -250,6 +250,11 @@ pub struct Blockchain {
     // multiple txs from the same sender, the same 897-byte key would be
     // deserialized repeatedly. Cache gives O(1) after the first hit.
     pubkey_cache: Arc<DashMap<String, Vec<u8>>>,
+
+    /// Persisted cumulative PoW (sum of all block difficulties at the current tip).
+    /// Stored in memory and in sled for O(1) access instead of O(height) scan.
+    /// Enables instant best-peer selection at any chain height.
+    cumulative_work: Arc<PLMutex<u128>>,
 }
 
 impl Blockchain {
@@ -436,6 +441,25 @@ impl Blockchain {
             tracing::warn!("Could not configure rayon thread pool: {} (using default config)", e);
         }
         
+        // Compute/load cumulative work — O(1) after first run (migration is one-time only).
+        let initial_cumulative_work = {
+            let stored = storage.get_cumulative_work();
+            if stored == 0 && height > 1 {
+                tracing::info!("[Migration] Computing cumulative work for {} blocks (one-time)…", height);
+                let mut work = 0u128;
+                for h in 0..height {
+                    if let Ok(b) = storage.load_block(h) {
+                        work = work.saturating_add(b.difficulty as u128);
+                    }
+                }
+                let _ = storage.set_cumulative_work(work);
+                tracing::info!("[Migration] Cumulative work = {}", work);
+                work
+            } else {
+                stored
+            }
+        };
+
         Ok(Self {
             chain: Arc::new(RwLock::new(chain)),
             pending_transactions: Arc::new(RwLock::new(Vec::new())),
@@ -447,6 +471,7 @@ impl Blockchain {
             signature_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(100_000).unwrap()))),
             mempool_bloom: Arc::new(PLMutex::new(Bloom::new_for_fp_rate(50_000, 0.0001))),
             pubkey_cache: Arc::new(DashMap::new()),
+            cumulative_work: Arc::new(PLMutex::new(initial_cumulative_work)),
         })
     }
 
@@ -1167,26 +1192,37 @@ impl Blockchain {
         Ok(())
     }
 
-    /// Add a block to the main chain during a reorg (uses permissive difficulty check).
+    /// `add_block_to_main_chain_reorg` — like `add_block_to_main_chain` but
+    /// called from `deep_reorg` where we are re-applying blocks after a rollback.
+    /// Does NOT flush storage (the caller flushes once at the end of the reorg)
+    /// and tracks cumulative_work incrementally.
     fn add_block_to_main_chain_reorg(&self, block: Block) -> Result<(), BlockchainError> {
         let latest = self.get_latest_block();
 
         if !self.validate_checkpoint(block.index, &block.hash) {
+            tracing::error!("Reorg: checkpoint violation at block {}", block.index);
             return Err(BlockchainError::InvalidBlock);
         }
+
         if !block.is_valid(Some(&latest)) {
+            tracing::warn!("Reorg: block {} failed is_valid", block.index);
             return Err(BlockchainError::InvalidBlock);
         }
-        // Use permissive difficulty check for reorg blocks
+
+        // Use the PERMISSIVE reorg validator: blocks from a peer's fork may have
+        // a difficulty that differs slightly from our LWMA (because our fork diverged
+        // at a prior block with a different timestamp).  The strict validator would
+        // reject them even though their PoW is genuine.
         self.validate_block_consensus_reorg(&block, &latest)?;
 
         let mut new_state = self.account_state.read().clone();
         new_state.unlock_mature_coinbase(block.index);
+
         for tx in &block.transactions {
             if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
                 let total = tx.amount.saturating_add(tx.fee);
                 if !new_state.debit_account(&tx.sender, total) {
-                    tracing::warn!("Reorg block {} has invalid tx: insufficient balance", block.index);
+                    tracing::warn!("Reorg: block {} has invalid tx (insufficient balance)", block.index);
                     return Err(BlockchainError::InvalidBlock);
                 }
                 new_state.increment_nonce(&tx.sender);
@@ -1194,13 +1230,28 @@ impl Blockchain {
             let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
             new_state.credit_account(tx, block.index, maturity);
         }
+
         self.storage.save_block(&block)?;
         self.storage.set_chain_height(block.index + 1)?;
         self.storage.save_account_state(&new_state)?;
+
+        // Update cumulative work incrementally.
+        let new_work = {
+            let mut cw = self.cumulative_work.lock();
+            *cw = cw.saturating_add(block.difficulty as u128);
+            *cw
+        };
+        let _ = self.storage.set_cumulative_work(new_work);
+
+        // Save checkpoint every 1000 blocks during reorg too.
+        const CHECKPOINT_INTERVAL: u64 = 1000;
+        if block.index % CHECKPOINT_INTERVAL == 0 && block.index > 0 {
+            let _ = self.storage.save_account_state_at_height(block.index, &new_state);
+        }
+
         *self.account_state.write() = new_state;
-        let mut pending = self.pending_transactions.write();
-        pending.retain(|tx| !block.transactions.iter().any(|btx| btx.hash() == tx.hash()));
-        drop(pending);
+
+        // Clear pending nonces for mined txs
         for tx in &block.transactions {
             if !tx.is_coinbase() {
                 self.pending_nonces.remove(&tx.sender);
@@ -1491,11 +1542,21 @@ impl Blockchain {
     }
 
     /// Compute cumulative PoW (sum of difficulty) for the chain up to `tip_height`.
-    /// Higher = more total work done = the chain every honest node should follow.
+    ///
+    /// PERF: O(1) fast-path when `tip_height` equals the current chain height —
+    /// reads the in-memory `cumulative_work` field that is updated after every
+    /// accepted block. Falls back to O(n) scan only for historical heights
+    /// (used during fork resolution, which is rare).
     pub fn cumulative_work_at(&self, tip_height: u64) -> u128 {
-        // Sum difficulties from block 1 (genesis has no PoW) up to tip (inclusive).
-        // We read from storage, so this is O(tip_height) — only called during fork
-        // resolution which is rare.
+        let current = self.get_height();
+        // Fast path: asking for the tip we actually have.
+        if tip_height == 0 {
+            return 0;
+        }
+        if tip_height >= current {
+            return *self.cumulative_work.lock();
+        }
+        // Slow path: arbitrary historical height (rare — only during deep fork).
         let mut total: u128 = 0;
         for h in 0..tip_height {
             if let Ok(b) = self.storage.load_block(h) {
@@ -1503,6 +1564,14 @@ impl Blockchain {
             }
         }
         total
+    }
+
+    /// Flush all pending sled writes to disk (explicit fsync).
+    /// Call this after mining a block or after a sync batch completes.
+    pub fn flush_storage(&self) {
+        if let Err(e) = self.storage.flush() {
+            tracing::warn!("Storage flush failed: {}", e);
+        }
     }
 
     /// Add a block received from the network (WITH FULL VALIDATION AND FORK RESOLUTION)
@@ -1707,6 +1776,7 @@ impl Blockchain {
         *self.account_state.write() = new_state;
 
         // Return old tip to orphan pool — it may still form a valid longer chain later.
+        let old_tip_difficulty = old_tip.difficulty; // save before move
         {
             let mut orphans = self.orphaned_blocks.write();
             if orphans.len() < MAX_ORPHAN_BLOCKS {
@@ -1725,6 +1795,14 @@ impl Blockchain {
             }
         }
 
+        // Update cumulative_work: subtract old tip's difficulty, add incoming tip's.
+        {
+            let mut cw = self.cumulative_work.lock();
+            *cw = cw.saturating_sub(old_tip_difficulty as u128)
+                     .saturating_add(incoming.difficulty as u128);
+            let _ = self.storage.set_cumulative_work(*cw);
+        }
+
         tracing::info!("Reorg complete: replaced tip at height {} with block {}",
             incoming.index, &incoming.hash[..8]);
         Ok(())
@@ -1732,19 +1810,65 @@ impl Blockchain {
 
     /// Rebuild account state by replaying all blocks from genesis up to (and including)
     /// `target_height` from storage. Used during reorg to get a clean state snapshot.
+    ///
+    /// SYNC FIX: Previously this replayed ALL blocks from genesis (O(height) = 
+    /// 18k sled disk reads!). Now it loads the nearest 1000-block checkpoint
+    /// and replays only the delta (max 1000 blocks).
     fn rebuild_account_state_up_to(&self, target_height: u64) -> crate::core::transaction::AccountState {
+        // 1. Find the nearest snapshot (checkpoint)
+        // Checkpoints are exactly at multiples of 1000: 0, 1000, 2000, ...
+        let start_height = (target_height / 1000) * 1000;
+        
+        // Try to load the snapshot. (Genesis height 0 won't have a snapshot file usually,
+        // but we'll try anyway just in case the node saved one).
+        let mut state = if start_height > 0 {
+            if let Ok(Some(snapshot)) = self.storage.load_account_state_at_height(start_height) {
+                tracing::info!("Loaded account state snapshot for height {}", start_height);
+                snapshot
+            } else {
+                tracing::warn!("Snapshot not found at height {}; rebuilding from genesis!", start_height);
+                // Fallback to genesis rebuild if snapshot is missing
+                self.rebuild_state_from_genesis_up_to(0)
+            }
+        } else {
+            self.rebuild_state_from_genesis_up_to(0)
+        };
+        
+        let replay_start = if start_height > 0 && state.get_accounts().len() > 0 {
+            start_height + 1
+        } else {
+            1 // Replay from 1 if we had to fall back to genesis
+        };
+
+        // 2. Replay the delta blocks
+        if replay_start <= target_height {
+            tracing::info!("Replaying blocks {} to {}", replay_start, target_height);
+            for h in replay_start..=target_height {
+                if let Ok(block) = self.storage.load_block(h) {
+                    state.unlock_mature_coinbase(block.index);
+                    for tx in &block.transactions {
+                        if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
+                            let total = tx.amount.saturating_add(tx.fee);
+                            state.debit_account(&tx.sender, total);
+                            state.increment_nonce(&tx.sender);
+                        }
+                        // GENESIS premine: maturity=0; COINBASE mining rewards: COINBASE_MATURITY
+                        let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
+                        state.credit_account(tx, block.index, maturity);
+                    }
+                }
+            }
+        }
+
+        tracing::info!("Rebuilt account state up to height {}", target_height);
+        state
+    }
+
+    /// Internal helper: returns a fresh state with only the genesis premine applied.
+    fn rebuild_state_from_genesis_up_to(&self, _dummy: u64) -> crate::core::transaction::AccountState {
         let mut state = crate::core::transaction::AccountState::new();
 
         // ---------- GENESIS PREMINE ----------
-        // The genesis block on disk has NO transactions stored inside it.
-        // Premine TXs are created in-memory in Blockchain::new() and credited there,
-        // but they are never attached to the Block struct itself.
-        // Therefore we CANNOT loop over genesis.transactions — it will always be empty.
-        //
-        // Instead we re-apply the same hardcoded premine list here.
-        // This MUST stay identical to the list in Blockchain::new() or balances will diverge.
-        //
-        // 1 Million QUA = 1_000_000_000_000 microunits per faucet wallet.
         let genesis_timestamp = self.storage.load_block(0)
             .map(|g| g.timestamp)
             .unwrap_or(0);
@@ -1760,11 +1884,19 @@ impl Blockchain {
             "0xe15a689775685ae324559ea9a492fc650354ca0b",  // Faucet 8
             "0x005dcff212d27b55e7a74bf745e1349ab44ca25d",  // Faucet 9
         ];
-        for addr in &testnet_faucets {
+        
+        let premine_amount = if self.network == crate::core::ChainNetwork::Testnet { 1_000_000_000_000 } else { 1_000_000_000 };
+        let recipients = if self.network == crate::core::ChainNetwork::Testnet {
+            testnet_faucets.iter().map(|s| s.to_string()).collect::<Vec<String>>()
+        } else {
+            vec!["0x0000000000000000000000000000000000000000".to_string()]
+        };
+
+        for addr in &recipients {
             let genesis_tx = crate::core::transaction::Transaction {
                 sender:    "GENESIS".to_string(),
                 recipient: addr.to_string(),
-                amount:    1_000_000_000_000, // 1 Million QUA in microunits
+                amount:    premine_amount,
                 timestamp: genesis_timestamp,
                 signature: vec![],
                 public_key: vec![],
@@ -1777,47 +1909,29 @@ impl Blockchain {
             };
             state.credit_account(&genesis_tx, 0, 0); // maturity=0 → immediately spendable
         }
-
-        // ---------- REPLAY BLOCKS 1..=target_height ----------
-        for h in 1..=target_height {
-            if let Ok(block) = self.storage.load_block(h) {
-                state.unlock_mature_coinbase(block.index);
-                for tx in &block.transactions {
-                    if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
-                        let total = tx.amount.saturating_add(tx.fee);
-                        state.debit_account(&tx.sender, total);
-                        state.increment_nonce(&tx.sender);
-                    }
-                    // GENESIS premine: maturity=0; COINBASE mining rewards: COINBASE_MATURITY
-                    let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
-                    state.credit_account(tx, block.index, maturity);
-                }
-            }
-        }
-
-        tracing::info!("Rebuilt account state up to height {} (genesis premine applied)", target_height);
+        
         state
     }
     
     /// Add block to main chain (internal helper)
     fn add_block_to_main_chain(&self, block: Block) -> Result<(), BlockchainError> {
         let latest = self.get_latest_block();
-        
+
         // CHECKPOINT VALIDATION: Prevent reorganization past checkpoints
         if !self.validate_checkpoint(block.index, &block.hash) {
             tracing::error!("Rejecting block {} due to checkpoint violation", block.index);
             return Err(BlockchainError::InvalidBlock);
         }
-        
+
         // Cryptographic validation
         if !block.is_valid(Some(&latest)) {
             return Err(BlockchainError::InvalidBlock);
         }
-        
+
         // Consensus rules validation
         self.validate_block_consensus(&block, &latest)?;
         let mut new_state = self.account_state.read().clone();
-        
+
         // Unlock any mature coinbase rewards
         new_state.unlock_mature_coinbase(block.index);
 
@@ -1838,22 +1952,38 @@ impl Blockchain {
         }
 
         // 6. OPTIMIZATION: Don't add to in-memory chain (saves RAM!)
-        // We used to do: self.chain.write().push(block.clone());
-        // Now we ONLY save to storage and load on-demand
-        
+
         // 7. COMMIT: Save to storage (primary storage, not memory!)
         self.storage.save_block(&block)?;
         self.storage.set_chain_height(block.index + 1)?;
         self.storage.save_account_state(&new_state)?;
-        
-        // 8. COMMIT: Update state
+
+        // Update cumulative work (O(1) — add this block's difficulty to running total).
+        let new_work = {
+            let mut cw = self.cumulative_work.lock();
+            *cw = cw.saturating_add(block.difficulty as u128);
+            *cw
+        };
+        let _ = self.storage.set_cumulative_work(new_work);
+
+        // Save account-state checkpoint every CHECKPOINT_INTERVAL blocks.
+        // Allows deep_reorg / rebuild_account_state_up_to to load the nearest
+        // checkpoint and replay only the delta instead of from genesis.
+        const CHECKPOINT_INTERVAL: u64 = 1000;
+        if block.index % CHECKPOINT_INTERVAL == 0 && block.index > 0 {
+            if let Err(e) = self.storage.save_account_state_at_height(block.index, &new_state) {
+                tracing::warn!("Failed to save account-state checkpoint at {}: {}", block.index, e);
+            }
+        }
+
+        // 8. COMMIT: Update in-memory state
         *self.account_state.write() = new_state;
 
         // 9. Remove mined transactions from pending
         let mut pending = self.pending_transactions.write();
         pending.retain(|tx| !block.transactions.iter().any(|btx| btx.hash() == tx.hash()));
         drop(pending);
-        
+
         // 10. Clear pending nonces for mined txs (DashMap - concurrent safe)
         for tx in &block.transactions {
             if !tx.is_coinbase() {
@@ -2190,6 +2320,26 @@ impl Blockchain {
         *self.account_state.write() = rebuilt_state;
         tracing::info!("Deep reorg: account state rebuilt up to height {}", rollback_to - 1);
 
+        // Reset cumulative_work to the value AT rollback_to (pre-rollback blocks).
+        // add_block_to_main_chain_reorg will ACCUMULATE from this base as new
+        // blocks are applied.  Without this reset, work is double-counted because
+        // the old-chain's work is still in the in-memory counter.
+        let base_work = {
+            let mut work = 0u128;
+            for h in 0..rollback_to {
+                if let Ok(b) = self.storage.load_block(h) {
+                    work = work.saturating_add(b.difficulty as u128);
+                }
+            }
+            work
+        };
+        {
+            let mut cw = self.cumulative_work.lock();
+            *cw = base_work;
+        }
+        let _ = self.storage.set_cumulative_work(base_work);
+        tracing::info!("Deep reorg: cumulative_work reset to {} at rollback height {}", base_work, rollback_to);
+
         // Clear the orphan pool — everything in it belongs to a now-stale fork.
         self.orphaned_blocks.write().clear();
 
@@ -2228,6 +2378,10 @@ impl Blockchain {
             }
             return Err(BlockchainError::InvalidBlock);
         }
+
+
+        // --- Single explicitly placed fsync at the very end to make storage durable ---
+        self.flush_storage();
 
         let final_height = self.get_height();
         tracing::warn!(

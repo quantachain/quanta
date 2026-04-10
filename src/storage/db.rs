@@ -127,15 +127,15 @@ impl BlockchainStorage {
             }
         }
         
-        // 5. Flush to disk
-        self.db.flush()?;
-        
-        // 6. Update cache
+        // 5. Update cache (flush is deferred to sled's background thread or explicit call).
+        //    Sled's WAL guarantees crash-safety without a per-block fsync.
+        //    Calling flush() after EVERY block was the primary cause of sync being
+        //    10-100x slower than necessary (one fsync syscall ≈ 5-50 ms per block).
         {
             let mut cache = self.block_cache.lock().unwrap();
             cache.put(block.index, block.clone());
         }
-        
+
         let elapsed = start.elapsed();
         tracing::debug!(
             "Block {} saved ({}ms, {} bytes compressed)",
@@ -143,7 +143,17 @@ impl BlockchainStorage {
             elapsed.as_millis(),
             data.len()
         );
-        
+
+        Ok(())
+    }
+
+    /// Explicitly flush all pending sled writes to disk (fsync).
+    /// Call this:
+    ///   • After mining a block (live path — must be durable immediately)
+    ///   • At the end of a sync batch (not after every block)
+    ///   • On graceful shutdown
+    pub fn flush(&self) -> Result<(), StorageError> {
+        self.db.flush()?;
         Ok(())
     }
 
@@ -250,9 +260,77 @@ impl BlockchainStorage {
         };
         
         self.db.insert(key, data.clone())?;
-        self.db.flush()?;
-        
+        // No db.flush() here — caller is responsible (see flush()).
+        // For every-block saves this was the second-largest sync bottleneck.
         tracing::debug!("Account state saved ({} bytes)", data.len());
+        Ok(())
+    }
+
+    /// Save a per-height account-state snapshot (checkpoint).
+    /// Called every CHECKPOINT_INTERVAL blocks so that deep_reorg can
+    /// load the nearest snapshot and replay only the delta, instead of
+    /// replaying from genesis (which is O(height) = catastrophic at 18k+).
+    pub fn save_account_state_at_height(
+        &self,
+        height: u64,
+        state: &AccountState,
+    ) -> Result<(), StorageError> {
+        let key = format!("account_state_cp:{}", height);
+        let serialized = bincode::serialize(state)
+            .map_err(|e| StorageError::Serialization(e.to_string()))?;
+        let data = if self.compression {
+            zstd::encode_all(serialized.as_slice(), 1) // level 1 = fast (snapshots are large)
+                .map_err(|e| StorageError::Compression(e.to_string()))?
+        } else {
+            serialized
+        };
+        self.db.insert(key.as_bytes(), data)?;
+        tracing::debug!("Account state checkpoint saved at height {}", height);
+        Ok(())
+    }
+
+    /// Load the account-state snapshot for `height`, if it exists.
+    pub fn load_account_state_at_height(
+        &self,
+        height: u64,
+    ) -> Result<Option<AccountState>, StorageError> {
+        let key = format!("account_state_cp:{}", height);
+        if let Some(compressed) = self.db.get(key.as_bytes())? {
+            let serialized = if self.compression {
+                zstd::decode_all(compressed.as_ref())
+                    .map_err(|e| StorageError::Compression(e.to_string()))?
+            } else {
+                compressed.to_vec()
+            };
+            let state: AccountState = bincode::deserialize(&serialized)
+                .map_err(|e| StorageError::Serialization(e.to_string()))?;
+            Ok(Some(state))
+        } else {
+            Ok(None)
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Cumulative work (persisted for O(1) best-peer selection)
+    // -----------------------------------------------------------------------
+
+    /// Retrieve the persisted cumulative-work value (sum of all block difficulties
+    /// at the current tip). Returns 0 if not yet set (triggers one-time migration).
+    pub fn get_cumulative_work(&self) -> u128 {
+        match self.db.get(b"cumulative_work") {
+            Ok(Some(val)) if val.len() == 16 => {
+                let mut bytes = [0u8; 16];
+                bytes.copy_from_slice(&val);
+                u128::from_be_bytes(bytes)
+            }
+            _ => 0,
+        }
+    }
+
+    /// Persist the cumulative-work value alongside chain_height.
+    /// Called after every block accepted to main chain.
+    pub fn set_cumulative_work(&self, work: u128) -> Result<(), StorageError> {
+        self.db.insert(b"cumulative_work", &work.to_be_bytes())?;
         Ok(())
     }
 

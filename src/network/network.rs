@@ -19,6 +19,10 @@ use std::num::NonZeroUsize;
 /// Maximum blocks requested per sync batch (HIGH-2 FIX: prevents height-forgery storm)
 const MAX_SYNC_BATCH: u64 = 500;
 
+/// Maximum headers served per GetHeaders response.
+/// 2000 = ~400 KB of compressed header data — safe for a single network message.
+const MAX_HEADERS_PER_RESPONSE: u64 = 2000;
+
 /// Network configuration
 #[derive(Clone, Debug)]
 pub struct NetworkConfig {
@@ -331,7 +335,7 @@ impl Network {
                 self.handle_new_block(block, peer).await?;
             }
             P2PMessage::GetBlocks { start_height, end_height } => {
-                self.handle_get_blocks(addr, start_height, end_height).await?;
+                self.handle_get_blocks(addr, start_height, end_height, peer.clone()).await?;
             }
             P2PMessage::GetHeaders { start_height } => {
                 self.handle_get_headers(addr, start_height, peer.clone()).await?;
@@ -501,42 +505,97 @@ impl Network {
         }
     }
 
-    /// Handle get blocks request — serve from storage, cap batch to 500 blocks
-    async fn handle_get_blocks(&self, addr: SocketAddr, start: u64, end: u64) -> Result<(), String> {
-        let blockchain = self.blockchain.read().await;
+    /// Handle get blocks request — serve from storage, cap batch to 500 blocks.
+    ///
+    /// SYNC FIX: Load blocks in small sub-batches and release the blockchain
+    /// read lock between each sub-batch. This prevents a single GetBlocks
+    /// handler from monopolising the RwLock for the entire download duration
+    /// (which would stall mining and other operations on the seed node and
+    /// could cause the send-side write half to queue up behind a Ping, making
+    /// the receiver think the connection went silent).
+    async fn handle_get_blocks(&self, addr: SocketAddr, start: u64, end: u64, peer: Option<Arc<Peer>>) -> Result<(), String> {
         // HIGH-2 FIX: Clamp batch to MAX_SYNC_BATCH regardless of what peer claims
-        let end = end.min(start + MAX_SYNC_BATCH - 1);
-        let blocks: Vec<Block> = (start..=end)
-            .filter_map(|i| blockchain.load_block_from_storage(i))
-            .collect();
-        drop(blockchain);
-        
-        info!("Serving {} blocks [{}-{}] to peer {}", blocks.len(), start, end, addr);
-        for block in blocks {
-            self.send_to_peer(addr, P2PMessage::Block(block)).await?;
+        let end = {
+            let blockchain = self.blockchain.read().await;
+            let chain_end = blockchain.get_height().saturating_sub(1);
+            end.min(start + MAX_SYNC_BATCH - 1).min(chain_end)
+        };
+
+        info!("Serving blocks [{}-{}] to peer {}", start, end, addr);
+
+        // Send blocks in sub-batches of 20 so that the read lock is held briefly
+        // and other tasks (mining, heartbeat, peer management) can proceed.
+        const SUB_BATCH: u64 = 20;
+        let mut cursor = start;
+        while cursor <= end {
+            let sub_end = (cursor + SUB_BATCH - 1).min(end);
+            let blocks: Vec<Block> = {
+                let blockchain = self.blockchain.read().await;
+                (cursor..=sub_end)
+                    .filter_map(|i| blockchain.load_block_from_storage(i))
+                    .collect()
+                // blockchain read lock released here
+            };
+            for block in blocks {
+                if let Some(ref p) = peer {
+                    let _ = p.send_message(P2PMessage::Block(block)).await;
+                } else {
+                    self.send_to_peer(addr, P2PMessage::Block(block)).await?;
+                }
+            }
+            cursor = sub_end + 1;
+            // Yield to the tokio scheduler between sub-batches so that
+            // heartbeat pings, incoming messages etc. can be serviced.
+            tokio::task::yield_now().await;
         }
-        
+
         Ok(())
     }
 
-    /// Handle get headers request
+    /// Handle get headers request.
+    ///
+    /// SYNC FIX: Cap to MAX_HEADERS_PER_RESPONSE and build the header list
+    /// without holding the blockchain read lock during the final network send.
+    /// Sending a single ~100 KB compressed message is fast and does not need
+    /// special sub-batching, but releasing the lock before the write keeps
+    /// other tasks (especially mining) responsive on busy seed nodes.
     async fn handle_get_headers(&self, addr: SocketAddr, start: u64, peer: Option<Arc<Peer>>) -> Result<(), String> {
-        let blockchain = self.blockchain.read().await;
-        let height = blockchain.get_height();
-        let end = height.min(start + 500); // 500 headers maximum per batch
-        
-        let mut headers = Vec::new();
-        // Allow sending up to 500 headers or less depending on what the storage holds
-        for i in start..=end {
-            if let Some(block) = blockchain.load_block_from_storage(i) {
-                let mut header: crate::network::protocol::BlockHeader = (&block).into();
-                header.cumulative_work = blockchain.cumulative_work_at(i);
-                headers.push(header);
+        let headers = {
+            let blockchain = self.blockchain.read().await;
+            let height = blockchain.get_height();
+            let end = height.min(start + MAX_HEADERS_PER_RESPONSE);
+
+            // PERF FIX: cumulative_work_at(i) is O(height) per call — calling it for
+            // every header in a 2000-header batch at height 18k = 36 million RocksDB
+            // reads while holding the blockchain read lock, causing the seed node to
+            // stall for tens of seconds and drop the connection with early EOF.
+            //
+            // Instead, seed once with cumulative_work_at(start) and then maintain a
+            // running sum by adding each block's difficulty. Total cost: O(start) once
+            // + O(batch_size) incremental reads — orders of magnitude faster.
+            let mut running_work = if start > 0 {
+                blockchain.cumulative_work_at(start)
+            } else {
+                0u128
+            };
+
+            let mut headers = Vec::new();
+            for i in start..=end {
+                if let Some(block) = blockchain.load_block_from_storage(i) {
+                    running_work = running_work.saturating_add(block.difficulty as u128);
+                    let mut header: crate::network::protocol::BlockHeader = (&block).into();
+                    header.cumulative_work = running_work;
+                    headers.push(header);
+                }
             }
-        }
-        drop(blockchain);
-        
-        info!("Serving {} headers [{}-{}] to peer {}", headers.len(), start, end, addr);
+            headers
+            // blockchain read lock released here
+        };
+
+        info!("Serving {} headers [{}-{}] to peer {}",
+            headers.len(), start,
+            headers.last().map(|h| h.index).unwrap_or(start), addr);
+
         if let Some(p) = peer {
             let _ = p.send_message(P2PMessage::Headers(headers)).await;
         } else {
@@ -703,12 +762,12 @@ impl Network {
         // to detect potential fork points. On subsequent iterations the chain is
         // already at the right tip and we only need a small anchor window.
         let mut first_iteration = true;
-        
+
         loop {
             // Always re-read the actual chain height — it changes after every reorg/apply.
             let current_sync_height = self.blockchain.read().await.get_height();
             if current_sync_height >= target_height { break; }
-            
+
             // Step 1: Request Headers.
             // On the first pass search back up to 500 blocks to find a possible fork point.
             // On subsequent passes we are already on the canonical tip, so a small
@@ -719,24 +778,26 @@ impl Network {
                 current_sync_height.saturating_sub(10)
             };
             first_iteration = false;
-            
+
             {
                 let mut hb = self.header_buffer.lock().await;
                 hb.clear();
             }
-            
+
             if let Err(e) = peer.send_message(P2PMessage::GetHeaders { start_height: search_start }).await {
                 warn!("Header request failed: {}", e);
                 break;
             }
-            
-            // Wait for headers
-            let mut wait = 0;
+
+            // Wait for headers — up to 30 s (60 × 500 ms).
+            // Previously 10 s was often insufficient when the seed node needed to load
+            // 2000 headers from RocksDB across a slow VPS link.
+            let mut wait = 0u32;
             loop {
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 wait += 1;
                 let sz = self.header_buffer.lock().await.len();
-                if sz > 0 || wait >= 20 { break; } // 10s timeout
+                if sz > 0 || wait >= 60 { break; } // 30 s timeout
             }
             
             let headers: Vec<crate::network::protocol::BlockHeader> = {
@@ -795,35 +856,41 @@ impl Network {
             }
             
             // Step 3: Request Full Blocks for the validated headers.
-            // CAP to 100 blocks per request — PQC blocks are ~2 MB each, so 500 at once
-            // is ~1 GB which reliably times out on normal VPS links. 100 blocks ≈ 200 MB
-            // which transfers comfortably within a 60-second window at ~30 Mbps.
-            const BLOCK_BATCH_CAP: u64 = 100;
+            // CAP to 50 blocks per request — PQC blocks are ~2 MB each.
+            // 50 blocks ≈ 100 MB which transfers within ~30s on a typical VPS link.
+            // Smaller batches mean the connection is idle for shorter periods, making
+            // it less likely to be closed by the seed node's liveness checker.
+            const BLOCK_BATCH_CAP: u64 = 50;
             let batch_end = request_end.min(request_start + BLOCK_BATCH_CAP - 1);
             info!("Headers validated. Requesting full blocks [{}-{}]", request_start, batch_end);
             {
                 let mut sb = self.sync_buffer.lock().await;
                 sb.clear();
             }
-            
+
             // Announce the requested range BEFORE sending GetBlocks so that
             // handle_new_block can buffer arriving blocks — including reorg blocks
             // whose index is BELOW the current chain tip.
             *self.sync_request_range.lock().await = Some((request_start, batch_end));
-            
+
             if let Err(e) = peer.send_message(P2PMessage::GetBlocks { start_height: request_start, end_height: batch_end }).await {
                 *self.sync_request_range.lock().await = None;
                 warn!("Block request failed: {}", e);
                 break;
             }
-            
+
             // Idle-based timeout: reset the idle counter each time a new block arrives.
             // This ensures a slow-but-progressing transfer is never cut off prematurely,
-            // while still stopping if the peer goes silent for 30 seconds.
+            // while still stopping if the peer goes silent.
+            // SYNC FIX: Send a keep-alive Ping every 15s to prevent the seed node from
+            // treating this connection as idle and closing it with EOF. The Pong will arrive
+            // in the message channel and be silently discarded, so it does not corrupt the
+            // sync_buffer or break the block-counting logic.
             let expected = (batch_end.saturating_sub(request_start) + 1) as usize;
-            let idle_timeout_iters = 60u32; // 60 × 500 ms = 30 s idle timeout
+            let idle_timeout_iters = 120u32; // 120 × 500 ms = 60 s idle timeout (doubled)
             let mut idle_count = 0u32;
             let mut last_seen_sz = 0usize;
+            let mut ping_tick = 0u32; // send a ping every 30 iters (15 s)
             loop {
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 let sz = self.sync_buffer.lock().await.len();
@@ -836,6 +903,14 @@ impl Network {
                     last_seen_sz = sz;
                 } else {
                     idle_count += 1;
+                    // SYNC FIX: Send keep-alive ping every 15s to hold the connection open
+                    ping_tick += 1;
+                    if ping_tick % 30 == 0 {
+                        let nonce: u64 = rand::random();
+                        let _ = peer.send_message(P2PMessage::Ping(nonce)).await;
+                        debug!("Sync keep-alive ping sent to {} ({}/{} blocks received)",
+                            peer.address().await, sz, expected);
+                    }
                     if idle_count >= idle_timeout_iters {
                         warn!("Block download idle timeout after {}s — received {}/{} blocks",
                             idle_timeout_iters / 2, sz, expected);
@@ -858,9 +933,21 @@ impl Network {
                 break;
             }
             
+            // SYNC FIX: If we timed out and only got a partial batch, DO NOT attempt a deep reorg.
+            // A deep reorg on a partial batch will almost always fail validation mid-way, and the
+            // node will waste massive I/O rolling back and restoring state for no reason.
+            if blocks.len() != expected {
+                let bc_height = self.blockchain.read().await.get_height();
+                if request_start < bc_height {
+                    warn!("Deep reorg aborted: received partial batch ({}/{}) which would corrupt state. Will retry.",
+                        blocks.len(), expected);
+                    break;
+                }
+            }
+            
             // Step 4: Apply Blocks
             let bc_height = self.blockchain.read().await.get_height();
-            if request_start <= bc_height {
+            if request_start < bc_height {
                 // This is a fork/reorg
                 let bc = self.blockchain.write().await;
                 match bc.deep_reorg(request_start, blocks.clone()) {
@@ -901,29 +988,35 @@ impl Network {
     async fn maintain_peers(self: Arc<Self>) {
         let mut ticker = interval(Duration::from_secs(10));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        
+
         loop {
             ticker.tick().await;
-            
+
             // Clean up dead peers
             self.peer_manager.cleanup_dead_peers().await;
-            
-            // Send ping to all peers
-            let peers = self.peer_manager.get_peers().await;
-            for peer in peers {
-                let nonce = rand::random();
-                let _ = peer.send_message(P2PMessage::Ping(nonce)).await;
+
+            // SYNC FIX: Skip new connection attempts while a sync is in progress.
+            // Spawning new TCP connections to the same seed node during sync causes
+            // two problems:
+            //   1. The seed's Sybil-protection limit (2 per /24 subnet) kicks in
+            //      and the new connections are rejected, generating noisy log spam.
+            //   2. Each failed connect attempt marks the peer as "failed" in the
+            //      discovery table, eventually preventing legitimate reconnects.
+            // We still run dead-peer cleanup so the peer list stays accurate, but
+            // we defer all new outbound connection attempts until sync finishes.
+            if self.syncing.load(Ordering::SeqCst) {
+                continue;
             }
-            
+
             // Try to maintain minimum peer count
             let peer_count = self.peer_manager.peer_count().await;
             if peer_count < self.config.max_peers {
                 let needed = self.config.max_peers.saturating_sub(peer_count);
                 // SECURITY FIX: Subnet bucketing strategy for outgoing connections
                 let mut target_peers = self.discovery.get_random_peers(needed).await;
-                
+
                 if target_peers.is_empty() && !self.config.bootstrap_nodes.is_empty() {
-                    target_peers.extend(self.config.bootstrap_nodes.iter().copied()); // Attempt bootstrap nodes if discovery empty
+                    target_peers.extend(self.config.bootstrap_nodes.iter().copied());
                 }
 
                 for addr in target_peers {
