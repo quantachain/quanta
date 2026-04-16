@@ -809,7 +809,7 @@ impl Blockchain {
     }
 
     /// Validate block against consensus rules (CRITICAL for network blocks)
-    fn validate_block_consensus(&self, block: &Block, previous: &Block) -> Result<(), BlockchainError> {
+    fn validate_block_consensus(&self, block: &Block, previous: &Block, base_state: &AccountState) -> Result<(), BlockchainError> {
         // 0. Block size limit (DoS protection)
         let block_size = bincode::serialize(block).map_err(|_| BlockchainError::InvalidBlock)?.len();
         if block_size > MAX_BLOCK_SIZE_BYTES {
@@ -928,7 +928,7 @@ impl Blockchain {
         
         // 5. All non-coinbase txs must have valid signatures and nonces
         // CRITICAL: Build temporary state to validate balances and nonces
-        let mut temp_state = self.account_state.read().clone();
+        let mut temp_state = base_state.clone();
         
         // OPT-1+3 (PQC): Parallel sig verification with signature cache + pubkey cache
         // Serial: 1200 tx × 1.5ms = 1800ms
@@ -1711,7 +1711,6 @@ impl Blockchain {
             tracing::warn!("Reorg aborted: incoming block failed cryptographic validation");
             return Err(BlockchainError::InvalidBlock);
         }
-        self.validate_block_consensus(&incoming, &prev_block)?;
 
         // Checkpoint guard — never reorg past a checkpoint.
         if !self.validate_checkpoint(incoming.index, &incoming.hash) {
@@ -1751,6 +1750,7 @@ impl Blockchain {
         // Simplified safe approach: rebuild account state by replaying from genesis
         // through prev_block (incoming.index - 1). This is correct always.
         let new_state = self.rebuild_account_state_up_to(incoming.index - 1);
+        self.validate_block_consensus(&incoming, &prev_block, &new_state)?;
         
         // Apply the incoming block's transactions on the rebuilt state.
         let mut new_state = new_state;
@@ -1929,8 +1929,8 @@ impl Blockchain {
         }
 
         // Consensus rules validation
-        self.validate_block_consensus(&block, &latest)?;
         let mut new_state = self.account_state.read().clone();
+        self.validate_block_consensus(&block, &latest, &new_state)?;
 
         // Unlock any mature coinbase rewards
         new_state.unlock_mature_coinbase(block.index);
