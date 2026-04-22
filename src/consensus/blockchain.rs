@@ -173,15 +173,18 @@ const TESTNET_GENESIS_HASH: &str = "00000012d3a2cbb7eb9579330ccdaa4f83ca9e6e016b
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)
-// Add checkpoints every ~1000 blocks for devnet, ~10000 for mainnet
+// Add checkpoints every ~10000 blocks.
 //
-// TESTNET checkpoints — fetched live from rpc.quantachain.org
+// TESTNET checkpoints — fetched live from rpc.quantachain.org on 2026-04-22
 // Never add a checkpoint you haven't independently verified.
 const TESTNET_CHECKPOINTS: &[(u64, &str)] = &[
     (0,      TESTNET_GENESIS_HASH),
     (10_000, "0000013b6f5f570de0605eac1e7c2fde87f8ce30ca26acc26a9a78d9c18374d5"),
-    // Add more as the chain grows:
-    // (20_000, "<block_20000_hash>"),
+    (20_000, "00000008ac637f1cf3f891de979b1ed7debb8862e0bbc9fdb64e90a19d773885"),
+    (30_000, "000001743b0b76fe64b28631afd7c923cf6eca06377dabe9fc8ebbbf8725ac6e"),
+    (40_000, "00000059783ae9efeb043ac6b1fa254fa338ccc5631dd1b7f96f6a498df07c86"),
+    (50_000, "0000010309330cd86087a9133848f80fc82b056f63adc0749e83894f0a4de956"),
+    // Next: add (60_000, ...) when chain reaches ~60k
 ];
 
 // MAINNET checkpoints — empty until mainnet launch
