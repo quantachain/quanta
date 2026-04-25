@@ -6,6 +6,7 @@ mod network;
 mod api;
 mod config;
 mod rpc;
+mod benchmark;
 
 
 
@@ -254,6 +255,34 @@ enum Commands {
         /// Database path
         #[arg(short, long, default_value = "./quanta_demo")]
         db: String,
+    },
+
+    /// Run the PQC performance benchmark suite
+    Benchmark {
+        /// Iterations per micro-benchmark (default: 500)
+        #[arg(short, long, default_value = "500")]
+        iterations: usize,
+
+        /// Output directory for JSON and Markdown reports
+        #[arg(short, long, default_value = "./benchmark_results")]
+        output_dir: String,
+
+        /// Run a full PoW difficulty solve (may take several minutes)
+        #[arg(long, default_value = "false")]
+        full_pow: bool,
+
+        /// URL of a running Quanta node for live HTTP stress testing
+        /// Example: http://localhost:3000
+        #[arg(long)]
+        live_node: Option<String>,
+
+        /// Number of transactions for live node stress test
+        #[arg(long, default_value = "100")]
+        live_txs: usize,
+
+        /// Quick mode: 100 iterations, no full-PoW
+        #[arg(long, default_value = "false")]
+        quick: bool,
     },
 }
 
@@ -960,6 +989,34 @@ async fn main() {
         Commands::Demo { db } => {
             println!("Running Production Demo...\n");
             run_demo(&db).await;
+        }
+
+        Commands::Benchmark { iterations, output_dir, full_pow, live_node, live_txs, quick } => {
+            let actual_iterations = if quick { 100 } else { iterations };
+            let actual_full_pow   = full_pow && !quick;
+
+            let (mut report, _sections) = benchmark::report::run_all_benchmarks(actual_iterations, actual_full_pow);
+
+            // Live node section (async)
+            let network_section = if let Some(ref url) = live_node {
+                let count = if quick { 20 } else { live_txs };
+                benchmark::network_bench::run(url, count).await
+            } else {
+                benchmark::network_bench::run_skipped()
+            };
+            report.sections.push(network_section);
+
+            // Write reports
+            println!("\n{}", "═".repeat(68));
+            match benchmark::report::write_json(&report, &output_dir) {
+                Ok(path) => println!(" ✅ JSON report:     {}", path),
+                Err(e)   => eprintln!(" ❌ JSON write failed: {}", e),
+            }
+            match benchmark::report::write_markdown(&report, &output_dir) {
+                Ok(path) => println!(" ✅ Markdown report: {}", path),
+                Err(e)   => eprintln!(" ❌ Markdown write failed: {}", e),
+            }
+            println!("\n Benchmark complete. Results saved to: {}\n", output_dir);
         }
     }
 }

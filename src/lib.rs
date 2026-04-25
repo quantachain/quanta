@@ -11,3 +11,4 @@ pub mod network;
 pub mod api;
 pub mod config;
 pub mod rpc;
+pub mod benchmark;

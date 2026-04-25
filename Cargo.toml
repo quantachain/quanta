@@ -29,6 +29,10 @@ path = "src/bin/gen_faucet_wallets.rs"
 name = "mine_genesis"
 path = "src/bin/mine_genesis.rs"
 
+[[bin]]
+name = "quanta-benchmark"
+path = "src/bin/benchmark.rs"
+
 
 [dependencies]
 # Post-Quantum Cryptography - Falcon signatures
@@ -115,6 +119,9 @@ bip39 = "2.0"
 hmac = "0.12"
 dashmap = "6.1.0"
 tower_governor = "0.8.0"
+
+# System info for benchmark reports
+sysinfo = "0.30"
 
 # For tests
 [dev-dependencies]
