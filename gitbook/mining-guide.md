@@ -1,208 +1,211 @@
 # Mining Guide
 
-Complete guide for mining Quanta (QUA) cryptocurrency.
+QUANTA uses Adaptive Proof-of-Work with SHA3-256 double-hashing. Mining is CPU-friendly — no specialized ASICs are required or advantaged.
 
-## Overview
+---
 
-Quanta uses CPU-based Proof-of-Work with SHA3-256 hashing. Mining rewards start at 100 QUA per block and decrease by 15% annually.
+## Mining Rewards (Year 1)
+
+| Parameter | Value |
+|-----------|-------|
+| Block reward | 100 QUA |
+| Miner immediate share (47.5%) | 47.5 QUA/block |
+| Miner locked share (47.5%) | 47.5 QUA/block — locked 6 months (~52,560 blocks) |
+| Treasury (5%) | 5 QUA/block → `ms69216b1d10425689704d5ae3b2a4aa17049f59b1` |
+| Fee share to miner | 10% of block fees |
+| Target block time | 30 seconds |
+| Daily blocks | ~2,880 |
+| Daily immediate emission | ~136,800 QUA |
+
+**Anti-Dump Vesting**: 47.5% of your mining rewards are locked for 6 months. This prevents sell cascades at launch and aligns miner incentives with network health.
+
+**Coinbase Maturity**: Rewards require 100 block confirmations before they can be spent.
+
+### Reward Schedule
+
+| Year | Block Reward | Notes |
+|------|-------------|-------|
+| 1 | 100 QUA | |
+| 2 | 85 QUA | 15% reduction |
+| 3 | 72 QUA | |
+| 5 | 52 QUA | |
+| 10 | 23 QUA | |
+| 20+ | 5 QUA | Perpetual floor |
+
+The reward never drops below **5 QUA**, ensuring a permanent security budget.
+
+---
 
 ## System Requirements
 
-- CPU: 4 cores at 2.0 GHz minimum (more cores = better)
-- RAM: 8 GB minimum
-- Storage: 1 TB SSD
-- Bandwidth: 50 Mbps down, 20 Mbps up
-- Stable internet connection
+| Parameter | Minimum | Recommended |
+|-----------|---------|-------------|
+| CPU | 4 cores @ 2 GHz | 8+ cores |
+| RAM | 8 GB | 16 GB |
+| Storage | 1 TB SSD | 2 TB NVMe |
+| Bandwidth | 50/20 Mbps | 100/50 Mbps |
 
-## Setup
+Multi-core CPUs significantly improve signature verification throughput during block validation. Mining itself is single-threaded per miner instance.
 
-### 1. Install and Build
+---
 
-```bash
-git clone https://github.com/quantachain/quanta.git
-cd quanta
-cargo build --release
-```
+## Start Mining — Docker
 
-### 2. Create Mining Wallet
+### 1. Start the Node
 
-```bash
-./target/release/quanta new_hd_wallet --file miner.qua
-```
-
-Save your mnemonic phrase securely.
-
-### 3. Get Your Address
+The node must be running and synced before you start mining.
 
 ```bash
-./target/release/quanta hd_wallet --file miner.qua
+docker run -d \
+  --name quanta-node \
+  --restart always \
+  -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
+  -v quanta-data:/home/quanta/quanta_data \
+  -v quanta-logs:/home/quanta/logs \
+  xd637/quanta-node:latest
 ```
 
-Note your wallet address for mining rewards.
+Wait for the node to sync:
+```bash
+docker exec -it quanta-node quanta print_height --rpc-port 7782
+```
 
-### 4. Start Node
+### 2. Create a Wallet
 
 ```bash
-./target/release/quanta start --detach
+docker exec -it quanta-node quanta new_hd_wallet --file hd_wallet.json
+docker exec -it quanta-node quanta wallet_address --file hd_wallet.json
 ```
 
-## Start Mining
+Note your address — it starts with `0x`.
 
-### Using CLI
+### 3. Start Mining
 
 ```bash
-./target/release/quanta start_mining YOUR_WALLET_ADDRESS
+# Runs in background inside the container
+docker exec -d quanta-node quanta start_mining YOUR_WALLET_ADDRESS --rpc-port 7782
 ```
 
-### Using JSON-RPC
+### 4. Monitor Mining
 
 ```bash
-curl -X POST http://localhost:7782 \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"start_mining","params":["YOUR_ADDRESS"],"id":1}'
+# Mining status — hashrate, last block mined, uptime
+docker exec -it quanta-node quanta mining_status --rpc-port 7782
+
+# Current chain height
+docker exec -it quanta-node quanta print_height --rpc-port 7782
+
+# Check your balance
+curl http://localhost:3000/accounts/YOUR_ADDRESS/balance
 ```
 
-## Monitor Mining
-
-### Check Mining Status
+### 5. Stop Mining
 
 ```bash
-./target/release/quanta mining_status
+docker exec -it quanta-node quanta stop_mining --rpc-port 7782
 ```
 
-### View Blockchain Height
+---
+
+## Start Mining — Source Build
 
 ```bash
-./target/release/quanta print_height
+# Start the node (daemon mode)
+./target/release/quanta start -c quanta.toml --detach
+
+# Start mining
+./target/release/quanta start_mining YOUR_ADDRESS --rpc-port 7782
+
+# Monitor
+./target/release/quanta mining_status --rpc-port 7782
 ```
 
-### Check Your Balance
+---
+
+## Mining on a VPS
+
+For 24/7 mining, a VPS is ideal. The node runs headlessly with Docker.
 
 ```bash
-curl -X POST http://localhost:3000/api/balance \
-  -H "Content-Type: application/json" \
-  -d '{"address": "YOUR_ADDRESS"}'
+# On Ubuntu VPS — install Docker
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER && newgrp docker
+
+# Open ports
+sudo ufw allow 8333/tcp
+sudo ufw allow 3000/tcp
+sudo ufw allow ssh
+sudo ufw --force enable
+
+# Run the node with host networking (for RPC nodes) or standard port mapping (for miners)
+docker run -d \
+  --name quanta-node \
+  --restart always \
+  -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
+  -v ~/quanta_data:/home/quanta/quanta_data \
+  xd637/quanta-node:latest
+
+# Start mining
+docker exec -d quanta-node quanta start_mining YOUR_ADDRESS --rpc-port 7782
 ```
 
-## Stop Mining
+Keep the mining process alive even after SSH disconnects — the node's `--restart always` flag handles this automatically.
 
-```bash
-./target/release/quanta stop_mining
-```
+---
 
-## Mining Rewards
+## Difficulty Adjustment
 
-### Year 1 Economics
+Difficulty adjusts every **2,016 blocks** (~16.8 hours at 30-second blocks) using the Median-Time-Past formula.
 
-- Base reward: 100 QUA per block
-- Block time: 30 seconds
-- Daily blocks: ~8,640
-- Daily emission: ~864,000 QUA
-- Plus 10% of transaction fees
+- Maximum increase per adjustment: **×1.15** (15% cap)
+- Maximum decrease per adjustment: **×0.85** (15% floor)
+- Minimum difficulty: 4
+- Prevents oscillation and hash-rate collapse death spirals
 
-### Reward Lock
+---
 
-50% of mining rewards are locked for 6 months (52,560 blocks) to prevent dumping and encourage long-term participation.
+## Fee Distribution
 
-## Profitability
-
-### Revenue Calculation
+When your mined block includes transactions, you receive a portion of fees:
 
 ```
-Block Reward: 100 QUA
-Block Time: 30 seconds
-Blocks per Day: 8,640
-Daily Potential: 864,000 QUA (network-wide)
-Your Share: (Your Hashrate / Network Hashrate) * Daily Potential
+Total block fees = sum of all tx.fee values
+
+Fee burn:      70%  → permanently destroyed (deflationary)
+Fee treasury:  20%  → treasury multisig
+Fee miner:     10%  → your address (added to coinbase)
 ```
 
-### Costs
+---
 
-- Electricity: Varies by location
-- Hardware: Initial investment + depreciation
-- Internet: Bandwidth costs
+## Optimization Tips
 
-## Optimization
+1. **More CPU cores = faster block validation** — use a machine with 4+ physical cores
+2. **Fast SSD reduces sync time** — NVMe preferred for archive nodes
+3. **Good bandwidth matters** — the node propagates compressed blocks (~500 KB each) to peers
+4. **Run on the same machine as the node** — the mining process communicates over RPC (port 7782)
+5. **Monitor Prometheus metrics** at `http://localhost:9090` for hashrate, block time, and peer count
 
-### CPU Optimization
-
-- Use high-performance CPUs with many cores
-- Enable CPU governor for maximum performance
-- Ensure adequate cooling
-
-### Network Optimization
-
-- Use wired ethernet connection
-- Minimize network latency
-- Connect to nearby peers
-
-### System Optimization
-
-- Disable unnecessary background processes
-- Use SSD for blockchain data
-- Allocate sufficient RAM
-
-## Testnet Mining
-
-### Start Testnet
-
-```bash
-docker-compose -f docker-compose.testnet.yml up --build -d
-```
-
-### Get Testnet Wallet Address
-
-```bash
-docker exec -e QUANTA_WALLET_PASSWORD=testnet_insecure_password \
-  quanta-testnet-node1 \
-  /usr/local/bin/quanta wallet_address --file wallet.qua
-```
-
-### Start Testnet Mining
-
-```bash
-docker exec quanta-testnet-node1 \
-  /usr/local/bin/quanta start_mining YOUR_ADDRESS --rpc-port 17782
-```
-
-### Monitor Testnet
-
-```bash
-curl -s http://localhost:13000/api/stats
-```
-
-### Stop Testnet Mining
-
-```bash
-docker exec quanta-testnet-node1 \
-  /usr/local/bin/quanta stop_mining --rpc-port 17782
-```
+---
 
 ## Troubleshooting
 
-### Mining Not Starting
+**Mining starts but I'm not finding blocks**
 
-Check node is fully synced:
+The testnet difficulty adjusts automatically. At low hashrate, blocks may take longer. Check your mining status:
+
 ```bash
-./target/release/quanta status
+docker exec -it quanta-node quanta mining_status --rpc-port 7782
 ```
 
-### Low Hashrate
+**RPC connection refused**
 
-- Check CPU usage is at 100%
-- Verify no thermal throttling
-- Close other applications
+Ensure port 7782 is mapped and the node is running:
+```bash
+docker ps
+docker logs quanta-node --tail 20
+```
 
-### No Rewards
+**Balance not showing rewards**
 
-- Verify mining address is correct
-- Check network hashrate vs your hashrate
-- Mining is probabilistic - rewards take time
-
-## Best Practices
-
-- Keep node software updated
-- Monitor system temperature
-- Backup wallet regularly
-- Join community for updates
-- Calculate profitability before investing in hardware
+Mining rewards require 100 block confirmations. Locked rewards (47.5%) appear after ~52,560 blocks (~6 months).

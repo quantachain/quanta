@@ -1,188 +1,272 @@
 # Node Operator Guide
 
-Complete guide for running and maintaining a Quanta node.
+This guide covers production-grade node deployment on a VPS, including Docker setup, firewall configuration, and exposing the API securely over HTTPS with NGINX.
 
-## System Requirements
+---
 
-### Full Node
-- CPU: 4 cores at 2.0 GHz or higher
-- RAM: 8 GB minimum, 16 GB recommended
-- Storage: 1 TB SSD (year 1), plan for 5 TB over 5 years
-- Bandwidth: 50 Mbps down, 20 Mbps up
-- OS: Linux (Ubuntu 20.04+), macOS (10.15+), Windows 10+
+## 1. VPS Setup
 
-### Pruned Node
-- CPU: 2 cores
-- RAM: 4 GB
-- Storage: 100 GB SSD
-- Bandwidth: 25 Mbps down, 10 Mbps up
+### Recommended Specs
 
-## Installation
+| Parameter | Minimum | Recommended |
+|-----------|---------|-------------|
+| CPU | 4 vCPUs | 8 vCPUs |
+| RAM | 8 GB | 16 GB |
+| Storage | 1 TB SSD | 2 TB NVMe |
+| OS | Ubuntu 22.04 LTS | Ubuntu 22.04 LTS |
+| Bandwidth | 50/20 Mbps | 100/50 Mbps |
 
-### Option 1: Docker (Recommended)
+Compatible cloud providers: Oracle Cloud (free tier available), AWS, Hetzner, DigitalOcean, Linode.
 
-Run a persistent node using Docker:
+---
 
-```bash
-docker run -d --name quanta-node \
-  -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
-  -v quanta_data:/home/quanta/quanta_data \
-  xd637/quanta-node:v0.1
-```
-
-### Option 2: Build from Source
-
-1. Install Rust 1.70+:
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-2. Clone and build:
-```bash
-git clone https://github.com/quantachain/quanta.git
-cd quanta
-cargo build --release
-```
-
-## Running a Node
-
-### Start Node in Daemon Mode
+## 2. Install Docker
 
 ```bash
-./target/release/quanta start --detach
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+newgrp docker
+docker --version
 ```
 
-### Check Node Status
+---
+
+## 3. Configure Firewall
+
+Open the required ports on your VPS:
 
 ```bash
-./target/release/quanta status
+sudo ufw allow ssh
+sudo ufw allow 8333/tcp    # P2P networking
+sudo ufw allow 3000/tcp    # REST API (close this if using NGINX proxy)
+sudo ufw allow 7782/tcp    # RPC (restrict to localhost in production)
+sudo ufw --force enable
 ```
 
-### View Logs
+**Important**: Also open these ports in your **cloud provider's dashboard** (e.g., Oracle VCN Security Lists, AWS Security Groups). UFW alone is not enough if the cloud has its own firewall layer.
 
-Logs are written to stdout. For daemon mode, redirect to a file:
+---
+
+## 4. Run the Node
+
+### Option A: Standard Port Mapping (most users)
 
 ```bash
-./target/release/quanta start --detach > node.log 2>&1
+docker run -d \
+  --name quanta-node \
+  --restart always \
+  -p 3000:3000 \
+  -p 8333:8333 \
+  -p 7782:7782 \
+  -p 9090:9090 \
+  -v ~/quanta_data:/home/quanta/quanta_data \
+  -v ~/quanta_logs:/home/quanta/logs \
+  xd637/quanta-node:latest
 ```
 
-## Network Configuration
+### Option B: Host Networking (for nodes behind an NGINX proxy)
 
-### Running Multiple Nodes
-
-Node 1 (Bootstrap):
-```bash
-./target/release/quanta start --detach \
-  --network-port 8333 \
-  --port 3000 \
-  --rpc-port 7782 \
-  --db ./node1_data
-```
-
-Node 2 (Connect to Node 1):
-```bash
-./target/release/quanta start --detach \
-  --network-port 8334 \
-  --port 3001 \
-  --rpc-port 7783 \
-  --db ./node2_data \
-  --bootstrap 127.0.0.1:8333
-```
-
-### Check Peer Connections
+Host networking binds the node directly to the VPS IP without port mapping. Use this when running an NGINX reverse proxy.
 
 ```bash
-./target/release/quanta peers
+docker run -d \
+  --name quanta-node \
+  --restart always \
+  --network host \
+  -v ~/quanta_data:/home/quanta/quanta_data \
+  -v ~/quanta_logs:/home/quanta/logs \
+  xd637/quanta-node:latest
 ```
 
-## Monitoring
+---
 
-### Prometheus Metrics
+## 5. Verify the Node
 
-Quanta exports metrics on port 9090. Configure Prometheus:
+```bash
+docker logs quanta-node --tail 30 -f
+docker exec -it quanta-node quanta status --rpc-port 7782
+docker exec -it quanta-node quanta print_height --rpc-port 7782
+```
+
+---
+
+## 6. Expose the API Over HTTPS (NGINX + Let's Encrypt)
+
+If you want to expose `rpc.quantachain.org` (or your own domain) for web wallets and explorers to connect:
+
+### Install NGINX and Certbot
+
+```bash
+sudo apt update
+sudo apt install -y nginx certbot python3-certbot-nginx
+```
+
+### Configure NGINX Reverse Proxy
+
+Create a config file:
+
+```bash
+sudo nano /etc/nginx/sites-available/rpc.yourdomain.org
+```
+
+Paste and adjust the domain name:
+
+```nginx
+server {
+    listen 80;
+    server_name rpc.yourdomain.org;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+
+        # Replace restrictive Rust CORS headers
+        proxy_hide_header Access-Control-Allow-Origin;
+        proxy_hide_header Access-Control-Allow-Methods;
+        proxy_hide_header Access-Control-Allow-Headers;
+
+        # Allow browser wallets to connect
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'Content-Type' always;
+
+        # Handle browser preflight requests
+        if ($request_method = 'OPTIONS') {
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS' always;
+            add_header 'Access-Control-Allow-Headers' 'Content-Type' always;
+            add_header 'Content-Length' 0;
+            return 204;
+        }
+    }
+}
+```
+
+### Enable the Site
+
+```bash
+sudo ln -s /etc/nginx/sites-available/rpc.yourdomain.org /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+### Generate SSL Certificate
+
+Ensure your domain's DNS A record points to your server IP first.
+
+```bash
+sudo certbot --nginx -d rpc.yourdomain.org
+```
+
+Your node API will be accessible at `https://rpc.yourdomain.org`.
+
+---
+
+## 7. Monitoring with Prometheus
+
+The node exports Prometheus-compatible metrics on port 9090.
 
 ```yaml
+# prometheus.yml
 scrape_configs:
   - job_name: 'quanta'
     static_configs:
       - targets: ['localhost:9090']
 ```
 
-Available metrics:
-- Blockchain height
-- Transaction throughput
-- Peer count
-- Mining hashrate
-- Mempool size
-- Block validation time
+Available metrics: blockchain height, TPS, peer count, mining hashrate, mempool size, block validation time, signature cache hit rate.
 
-### Health Checks
+---
+
+## 8. Upgrading the Node
 
 ```bash
-curl http://localhost:3000/health
+docker pull xd637/quanta-node:latest
+docker stop quanta-node && docker rm quanta-node
+
+# Re-run with the same volume mounts
+docker run -d \
+  --name quanta-node \
+  --restart always \
+  --network host \
+  -v ~/quanta_data:/home/quanta/quanta_data \
+  xd637/quanta-node:latest
 ```
 
-## Maintenance
+Your data directory persists across upgrades. Check the [release notes](release-notes.md) before upgrading to see if a testnet reset is required.
 
-### Validate Blockchain
+---
+
+## 9. Disk Space Management
 
 ```bash
-./target/release/quanta validate --db ./quanta_data
+# Remove stopped containers and dangling images
+docker system prune -f
+
+# Remove all unused images (frees most space)
+docker image prune -a -f
+
+# Check current disk usage
+df -h
+du -sh ~/quanta_data
 ```
 
-### Backup
+---
 
-Backup your blockchain data:
-```bash
-tar -czf quanta_backup.tar.gz quanta_data/
+## 10. Node Modes
+
+Configure in `quanta.toml`:
+
+```toml
+[node]
+# archive = keep all blocks (default)
+# pruned  = keep last N days only
+# light   = headers only (planned)
+mode = "archive"
+prune_days = 30    # only used when mode = "pruned"
 ```
 
-### Update Node
+| Mode | Storage | Use Case |
+|------|---------|---------|
+| `archive` | 1 TB+ | Full nodes, explorers, miners |
+| `pruned` | ~400 GB | Validators, light operators |
+| `light` | ~1 GB | SPV clients (planned) |
 
-1. Stop the node:
-```bash
-./target/release/quanta stop
-```
+---
 
-2. Pull latest changes:
-```bash
-git pull origin main
-cargo build --release
-```
+## 11. Security Best Practices
 
-3. Restart:
-```bash
-./target/release/quanta start --detach
-```
+- **Never expose port 7782** (RPC) to the internet — it is for localhost CLI use only
+- **Restrict SSH** to your IP if possible: `ufw allow from YOUR_IP to any port 22`
+- Use `--restart always` to recover from crashes automatically
+- Back up your `quanta_data` directory regularly (it contains the full chain state)
+- Keep your wallet files (`*.qua`, `*.json`) off the server — sign transactions locally
 
-## Security
-
-- Keep your node software updated
-- Use firewall rules to restrict access
-- Monitor logs for suspicious activity
-- Backup wallet files securely
-- Use strong passwords for RPC access
+---
 
 ## Troubleshooting
 
-### Node Won't Start
+**Node fails to connect to peers**
 
-Check if ports are already in use:
 ```bash
-netstat -an | grep 8333
+docker exec -it quanta-node quanta peers --rpc-port 7782
 ```
 
-### Sync Issues
+Ensure port 8333 is open in both UFW and your cloud provider's security group.
 
-Verify bootstrap nodes are reachable:
+**API returns 502 Bad Gateway**
+
+The node isn't running or isn't listening on port 3000. Check:
 ```bash
-telnet testnet-us-east.quanta.network 8333
+docker ps
+docker logs quanta-node --tail 30
 ```
 
-### High Memory Usage
+**Node keeps restarting**
 
-Reduce mempool size in `quanta.toml`:
-```toml
-[security]
-max_mempool_size = 2500
+```bash
+docker logs quanta-node --tail 50
 ```
+
+Look for panic messages or storage errors. If the data directory is corrupted, you may need to resync from genesis.

@@ -2,7 +2,7 @@
 
 **A Quantum-Resistant Blockchain Built for the Future**
 
-Version 2.0 | March 2026
+Version 2.1 | April 2026
 
 **Founder**: Kishore K — [admin@quantachain.org](mailto:admin@quantachain.org) — [quantachain.org](https://quantachain.org)  
 **Repository**: [github.com/quantachain/quanta](https://github.com/quantachain/quanta)
@@ -234,15 +234,16 @@ The `pqcrypto-falcon` dependency is pinned to `= 0.3.0` (exact version). The `.c
 
 **Ports**:
 - `8333` — P2P TCP (default; configurable via `--network-port`)
-- `7777` — REST API (default; configurable via `--port`)
+- `3000` — REST API (Docker default; source build default is `7777`)
 - `7782` — RPC TCP server (default; configurable via `--rpc-port`)
+- `9090` — Prometheus metrics
 
 **Connectivity**:
 - IPv4 or IPv6 support
 - Stable internet connection (residential broadband sufficient)
 - Port forwarding recommended for incoming P2P connections
 
-**Bootstrap Nodes (Testnet Q2 2026)**:
+**Bootstrap Nodes (Testnet — Live)**:
 - `testnet-us-east.quanta.network:8333`
 - `testnet-us-west.quanta.network:8333`
 - `testnet-eu-west.quanta.network:8333`
@@ -336,10 +337,13 @@ Block {
 }
 ```
 
-**Genesis Block Parameters (Mainnet — Consensus-Critical)**:
-- Timestamp: `1735689600` (2026-01-01 00:00:00 UTC)
-- Difficulty: `6`
-- Hash: `527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d`
+**Genesis Block Parameters**:
+
+| Parameter | Testnet | Mainnet |
+|---|---|---|
+| Timestamp | `1775001600` (2026-04-01 00:00:00 UTC) | `1735689600` (2026-01-01) |
+| Difficulty | `8,304,130` | `16,777,216` |
+| Hash | `00000012d3a2cbb7eb9579330ccdaa4f83ca9e6e016bfe6d2c8a38539cf3733b` | `1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0` |
 
 The genesis hash is hardcoded in `blockchain.rs`. Any mismatch immediately panics the node, preventing accidental cross-network contamination.
 
@@ -514,7 +518,7 @@ Fee miner:     fees × 10%  → Miner address (added to coinbase)
 
 ## 6. Network Architecture
 
-### 6.1 Peer-to-Peer Protocol
+### 6.1 Peer-to-Peer Protocol (v0.7.x)
 
 **Network Magic Bytes**:
 - Testnet: `QUAX` (0x51554158)
@@ -555,16 +559,19 @@ Falls back to hardcoded bootstrap addresses if DNS is unavailable. Supports both
 4. Peers rebroadcast to their connections
 5. Full network propagation target: **< 5 seconds**
 
-### 6.4 Blockchain Sync Protocol
+### 6.4 Blockchain Sync Protocol (Headers-First, v0.7.0+)
 
-On first start, a new node:
-1. Connects to bootstrap peers
-2. Requests chain height
-3. Downloads missing blocks sequentially (with parallel validation)
-4. Verifies every block including Merkle root, signatures, reward amounts
-5. Begins participating in block propagation and mempool relay
+On first start, a new node uses Bitcoin IBD-style headers-first sync:
+1. Connects to bootstrap peers via DNS seeds or hardcoded bootstrap addresses
+2. Exchanges `cumulative_work` and `height` in the handshake — selects the peer with highest cumulative PoW
+3. Downloads light block headers (`GetHeaders` / `Headers`) — validates PoW and chain linkage without downloading full blocks
+4. Finds the fork point, requests full blocks only for the missing range (`GetBlocks` / `Block`)
+5. Validates every block: Merkle root, parallel Falcon-512 signatures, reward amounts, treasury correctness
+6. Begins participating in block propagation and mempool relay
 
-Initial sync speed: limited by bandwidth (~500 KB/block compressed) and CPU (225 ms/block validation).
+**Cross-chain replay protection** (v0.7.0+): Each transaction includes `network_id: u32` (testnet = 0, mainnet = 1). Signatures are cryptographically bound to the network — a testnet transaction cannot be replayed on mainnet.
+
+Initial sync speed: limited by bandwidth (~500 KB/block compressed) and CPU (225 ms/block validation). Account state snapshots (every 1,000 blocks, v0.7.1+) make reorgs O(delta) instead of O(height).
 
 ### 6.5 Mempool Management
 

@@ -1,61 +1,59 @@
-# Quanta GitBook Documentation
+# QuantaChain Documentation
 
-This folder contains GitBook-ready documentation for the Quanta blockchain project.
+Welcome to the official Quanta Protocol documentation.
+
+Quanta is a post-quantum blockchain built for institutional settlement. Every transaction is signed with Falcon-512 — a NIST-standardized lattice-based signature scheme immune to Shor's algorithm.
+
+---
 
 ## Documentation Structure
 
-The documentation is organized into the following sections:
+| Section | Description |
+|---------|-------------|
+| [Installation](installation.md) | Run a node with Docker or build from source |
+| [Quick Start](quick-start.md) | Node, wallet, and mining in 10 minutes |
+| [Release Notes](release-notes.md) | Alpha v0.7.1 and v0.7.0 changes |
+| [Node Operator Guide](node-operator-guide.md) | VPS, NGINX, HTTPS, monitoring |
+| [Docker Deployment](docker-deployment.md) | Docker, custom images, upgrade workflow |
+| [Configuration](configuration.md) | quanta.toml reference |
+| [Mining Guide](mining-guide.md) | Rewards, commands, optimization |
+| [Wallet Operations](wallet-operations.md) | HD wallets, transfers, security |
+| [API Reference](api-reference.md) | REST endpoints (port 3000) |
+| [SDK Integration](sdk-integration.md) | Build with quanta-sdk (JS/TS) |
+| [Technical Specifications](technical-specs.md) | Consensus, block structure, network |
+| [Quantum Resistance](quantum-resistance.md) | Falcon-512, Kyber-1024, SHA3-256 |
+| [Security](security.md) | Threat model, attack mitigations |
+| [Contributing](contributing.md) | How to contribute |
 
-1. **installation.md** - Installation guide for building Quanta from source
-2. **quick-start.md** - Quick start guide for running a node
-3. **wallet-operations.md** - Wallet creation and management
-4. **api-reference.md** - REST API and JSON-RPC reference
-5. **configuration.md** - Node configuration guide
-6. **node-operator-guide.md** - Complete guide for node operators
-7. **mining-guide.md** - Mining setup and optimization
-8. **technical-specs.md** - Technical specifications and architecture
-9. **p2p-networking.md** - P2P networking and peer discovery
-10. **quantum-resistance.md** - Quantum resistance and cryptography
-11. **security.md** - Security best practices and threat model
-12. **contributing.md** - Contributing guidelines
+---
 
-## Importing to GitBook
+## Current Version
 
-### Option 1: Manual Import
+**Testnet Alpha v0.7.1** — no mainnet yet. Do not use real funds.
 
-1. Create a new GitBook space
-2. For each markdown file, create a new page in GitBook
-3. Copy the content from each .md file
-4. Organize pages according to the structure above
-
-### Option 2: GitHub Integration
-
-1. Push this folder to your GitHub repository
-2. In GitBook, go to Integrations > GitHub
-3. Connect your repository
-4. Select the `gitbook` folder as the documentation source
-5. GitBook will automatically sync changes
-
-## Suggested GitBook Structure
-
-```
-Documentation
- Getting Started
-    Installation
-    Quick Start
- User Guides
-    Wallet Operations
-    Configuration
- Node Operators
-    Node Operator Guide
-    Mining Guide
- Technical Reference
-    API Reference
-    Technical Specs
-    P2P Networking
-    Quantum Resistance
- Community
-     Security
-     Contributing
+```bash
+docker pull xd637/quanta-node:latest
 ```
 
+---
+
+## Quick Reference
+
+**Public RPC**: `https://rpc.quantachain.org`
+
+| Port | Purpose |
+|------|---------|
+| 3000 | REST API |
+| 8333 | P2P networking |
+| 7782 | RPC (CLI to node) |
+| 9090 | Prometheus metrics |
+
+---
+
+## Links
+
+- [Website](https://www.quantachain.org)
+- [GitHub](https://github.com/quantachain/quanta)
+- [Docker Hub](https://hub.docker.com/r/xd637/quanta-node)
+- [NPM: quanta-sdk](https://www.npmjs.com/package/quanta-sdk)
+- [NPM: quanta-wasm](https://www.npmjs.com/package/quanta-wasm)
