@@ -76,15 +76,22 @@ fn bench_verify(n: usize) -> BenchmarkStat {
     let signed = kp.sign_transaction_canonical(data);
     let hash = canonical_signing_hash(data);
 
+    // Falcon verify is ~1–2 µs — must measure in microseconds or it rounds to 0.000 ms
     let mut samples = Vec::with_capacity(n);
     for _ in 0..n {
         let t = Instant::now();
         let _ok = crate::crypto::signatures::verify_signature_strict(
             &hash, &signed, &kp.public_key,
         );
-        samples.push(t.elapsed().as_secs_f64() * 1000.0);
+        samples.push(t.elapsed().as_secs_f64() * 1_000_000.0); // µs
     }
-    stat("Falcon-512 Verify", "ms/op", &samples)
+    // Build stat manually so throughput is ops/sec derived from µs mean
+    let s = stat("Falcon-512 Verify", "µs/op", &samples);
+    let mean_us = s.mean_ms; // stored in mean_ms field but unit is µs
+    BenchmarkStat {
+        throughput: if mean_us > 0.0 { Some(1_000_000.0 / mean_us) } else { None },
+        ..s
+    }
 }
 
 // ─── SHA3-256 ────────────────────────────────────────────────────────────────

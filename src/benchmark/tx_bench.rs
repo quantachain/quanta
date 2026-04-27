@@ -89,18 +89,29 @@ pub fn run(iterations: usize) -> BenchmarkSection {
         };
         let sign_tps = batch as f64 / (sign_ms / 1000.0);
 
-        // Serial verify
-        let verify_t = Instant::now();
-        for tx in &signed_txs {
-            let _ = tx.verify();
-        }
-        let serial_verify_ms = verify_t.elapsed().as_secs_f64() * 1000.0;
+        // Serial verify — repeat 10 times and average to smooth OS jitter
+        let n_verify_runs = 10usize;
+        let serial_verify_ms = {
+            let mut total = 0.0f64;
+            for _ in 0..n_verify_runs {
+                let t = Instant::now();
+                for tx in &signed_txs { let _ = tx.verify(); }
+                total += t.elapsed().as_secs_f64() * 1000.0;
+            }
+            total / n_verify_runs as f64
+        };
         let serial_verify_tps = batch as f64 / (serial_verify_ms / 1000.0);
 
-        // Parallel verify (rayon)
-        let par_t = Instant::now();
-        let _all_valid = verify_transactions_parallel(&signed_txs);
-        let par_verify_ms = par_t.elapsed().as_secs_f64() * 1000.0;
+        // Parallel verify (rayon) — same: repeat 10 times and average
+        let par_verify_ms = {
+            let mut total = 0.0f64;
+            for _ in 0..n_verify_runs {
+                let t = Instant::now();
+                let _ = verify_transactions_parallel(&signed_txs);
+                total += t.elapsed().as_secs_f64() * 1000.0;
+            }
+            total / n_verify_runs as f64
+        };
         let par_verify_tps = batch as f64 / (par_verify_ms / 1000.0);
 
         let speedup = if par_verify_ms > 0.0 { serial_verify_ms / par_verify_ms } else { 1.0 };
@@ -153,9 +164,6 @@ pub fn run(iterations: usize) -> BenchmarkSection {
                 speedup, cores
             )),
         });
-
-        println!("        batch={:5}  sign={:.0} tps  verify_serial={:.0} tps  verify_parallel={:.0} tps  speedup={:.2}×",
-            batch, sign_tps, serial_verify_tps, par_verify_tps, speedup);
     }
 
     BenchmarkSection {

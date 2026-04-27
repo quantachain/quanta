@@ -182,28 +182,28 @@ pub fn run(iterations: usize, full_pow_solve: bool) -> BenchmarkSection {
             if block.has_valid_hash() { break; }
             block.nonce = block.nonce.wrapping_add(1);
         }
-        let elapsed_ms = t.elapsed().as_secs_f64() * 1000.0;
-        let hashrate = hash_count as f64 / (elapsed_ms / 1000.0);
+        let elapsed_s = t.elapsed().as_secs_f64();
+        let hashrate = hash_count as f64 / elapsed_s;
 
         stats.push(BenchmarkStat {
             name: "PoW Full Solve (actual difficulty)".to_string(),
-            unit: "seconds".to_string(),
-            iterations: hash_count as usize,
-            mean_ms: elapsed_ms,
+            unit: "s".to_string(),
+            iterations: 1, // single solve — not an iterated benchmark
+            mean_ms: elapsed_s,
             stddev_ms: 0.0,
-            min: elapsed_ms,
-            max: elapsed_ms,
-            p50: elapsed_ms,
-            p95: elapsed_ms,
-            p99: elapsed_ms,
+            min: elapsed_s,
+            max: elapsed_s,
+            p50: elapsed_s,
+            p95: elapsed_s,
+            p99: elapsed_s,
             throughput: Some(hashrate),
             note: Some(format!(
-                "Difficulty={} | Nonce={} | Hashes={} | Hash={:.16}...",
-                MIN_DIFFICULTY, block.nonce, hash_count, &block.hash[..16]
+                "Solved in {:.2}s | Difficulty={} | Nonce={} | Hashes={} | Hash={:.16}...",
+                elapsed_s, MIN_DIFFICULTY, block.nonce, hash_count, &block.hash[..16]
             )),
         });
         println!("        Solved in {:.2}s  nonce={}  hash={}...",
-            elapsed_ms / 1000.0, block.nonce, &block.hash[..16]);
+            elapsed_s, block.nonce, &block.hash[..16]);
     }
 
     BenchmarkSection {
