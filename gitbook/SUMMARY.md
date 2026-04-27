@@ -24,6 +24,8 @@
 
 ## Protocol
 * [Quantum Resistance](quantum-resistance.md)
+* [Performance Benchmarks](performance-benchmarks.md)
+* [Detailed Benchmarks](detailed-benchmarks.md)
 * [P2P Networking](p2p-networking.md)
 * [Security](security.md)
 
