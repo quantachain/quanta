@@ -90,9 +90,11 @@ pub fn run(iterations: usize) -> BenchmarkSection {
         };
         let sign_tps = batch as f64 / (sign_ms / 1000.0);
 
-        // Serial verify — repeat 10 times and average to smooth OS jitter
+        // Serial verify — warm instruction cache first, then repeat 10 times and average
         // black_box prevents LLVM from eliding verify results
         let n_verify_runs = 10usize;
+        // Warmup pass (not measured)
+        for tx in &signed_txs { let _ = black_box(tx.verify()); }
         let serial_verify_ms = {
             let mut total = 0.0f64;
             for _ in 0..n_verify_runs {
@@ -104,8 +106,10 @@ pub fn run(iterations: usize) -> BenchmarkSection {
         };
         let serial_verify_tps = batch as f64 / (serial_verify_ms / 1000.0);
 
-        // Parallel verify (rayon) — same: repeat 10 times and average
+        // Parallel verify (rayon) — warm the thread pool first, then repeat 10 times and average
+        // Without warmup, Rayon pool spin-up skews results on small batches
         // black_box prevents elision of the parallel batch result
+        let _ = black_box(verify_transactions_parallel(&signed_txs)); // warmup
         let par_verify_ms = {
             let mut total = 0.0f64;
             for _ in 0..n_verify_runs {
