@@ -9,6 +9,7 @@
 ///   - Transaction hash throughput (mempool dedup path)
 
 use std::time::Instant;
+use std::hint::black_box;
 use crate::core::block::Block;
 use crate::core::transaction::{Transaction, AccountState, AccountBalance, LockedBalance};
 use crate::core::ChainNetwork;
@@ -16,7 +17,7 @@ use crate::crypto::signatures::FalconKeypair;
 use crate::consensus::performance::verify_transactions_parallel;
 use crate::consensus::blockchain::MIN_DIFFICULTY;
 use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
-use crate::benchmark::crypto_bench::stat;
+use crate::benchmark::crypto_bench::{stat, stat_us};
 use crate::benchmark::tx_bench::make_signed_tx;
 use lru::LruCache;
 use std::num::NonZeroUsize;
@@ -61,21 +62,21 @@ pub fn run(iterations: usize) -> BenchmarkSection {
         stats.push(s);
     }
 
-    // ── Block is_valid() pipeline ─────────────────────────────────────────────
+    // ── Block is_valid() pipeline ─────────────────────────────────────────────────
     {
         let genesis = Block::genesis(ChainNetwork::Testnet);
-        // Build a simple valid child block (no txs, easy target for timing)
         let mut child = Block::new(1, vec![], genesis.hash.clone(), 1);
-        child.mine(); // mine with difficulty=1 (instant)
+        child.mine();
 
         let n_iters = iterations.min(200);
         let mut samples = Vec::with_capacity(n_iters);
         for _ in 0..n_iters {
             let t = Instant::now();
-            let _valid = child.is_valid(Some(&genesis));
+            let _valid = black_box(child.is_valid(Some(&genesis)));
             samples.push(t.elapsed().as_secs_f64() * 1_000_000.0); // µs
         }
-        let mut s = stat("Block Validation Pipeline (is_valid)", "µs/op", &samples);
+        // stat_us: throughput = 1_000_000 / mean_µs = ops/sec
+        let mut s = stat_us("Block Validation Pipeline (is_valid)", "µs/op", &samples);
         s.note = Some("Hash integrity + PoW + Merkle root + chain linkage (excludes tx sig verify)".to_string());
         stats.push(s);
     }
@@ -89,14 +90,14 @@ pub fn run(iterations: usize) -> BenchmarkSection {
             .map(|i| make_signed_tx(&wallets[i % wallets.len()], (i / wallets.len() + 1) as u64))
             .collect();
 
-        // Serial
+        // Serial — black_box prevents LLVM from eliding the verify calls
         let t_serial = Instant::now();
-        for tx in &txs { let _ = tx.verify(); }
+        for tx in &txs { let _ = black_box(tx.verify()); }
         let serial_ms = t_serial.elapsed().as_secs_f64() * 1000.0;
 
-        // Parallel
+        // Parallel — black_box prevents elision of the parallel result
         let t_par = Instant::now();
-        let _ = verify_transactions_parallel(&txs);
+        let _ = black_box(verify_transactions_parallel(&txs));
         let par_ms = t_par.elapsed().as_secs_f64() * 1000.0;
 
         let cores = num_cpus::get_physical().max(1);

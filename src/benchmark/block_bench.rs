@@ -10,13 +10,14 @@
 ///   - PoW full solve at current difficulty (optional, may take minutes)
 
 use std::time::{Instant, Duration};
+use std::hint::black_box;
 use crate::core::block::Block;
 use crate::core::transaction::Transaction;
 use crate::core::ChainNetwork;
 use crate::crypto::signatures::FalconKeypair;
 use crate::core::merkle::MerkleTree;
 use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
-use crate::benchmark::crypto_bench::stat;
+use crate::benchmark::crypto_bench::{stat, stat_us};
 use crate::benchmark::tx_bench::make_signed_tx;
 use crate::consensus::blockchain::MIN_DIFFICULTY;
 use chrono::Utc;
@@ -36,17 +37,18 @@ pub fn run(iterations: usize, full_pow_solve: bool) -> BenchmarkSection {
         .map(|i| make_signed_tx(&wallets[i % wallets.len()], (i / wallets.len() + 1) as u64))
         .collect();
 
-    // ── Block hash computation ────────────────────────────────────────────────
+    // ── Block hash computation ────────────────────────────────────────────────────────────
     {
         let genesis = Block::genesis(ChainNetwork::Testnet);
         let n = iterations;
         let mut samples = Vec::with_capacity(n);
         for _ in 0..n {
             let t = Instant::now();
-            let _h = genesis.calculate_hash();
+            let _h = black_box(genesis.calculate_hash());
             samples.push(t.elapsed().as_secs_f64() * 1_000_000.0); // µs
         }
-        let mut s = stat("Block Hash Computation (SHA3-256 double)", "µs/op", &samples);
+        // stat_us: throughput = 1_000_000 / mean_µs = ops/sec
+        let mut s = stat_us("Block Hash Computation (SHA3-256 double)", "µs/op", &samples);
         s.note = Some("SHA3-256(SHA3-256(header)) — used for PoW mining".to_string());
         stats.push(s);
     }

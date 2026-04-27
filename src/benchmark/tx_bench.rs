@@ -9,6 +9,7 @@
 ///   - Transaction wire size (serialized bincode, min/max/mean)
 
 use std::time::Instant;
+use std::hint::black_box;
 use crate::crypto::signatures::FalconKeypair;
 use crate::core::transaction::{Transaction, TransactionType, SignatureScheme};
 use crate::core::TESTNET_NETWORK_ID;
@@ -90,12 +91,13 @@ pub fn run(iterations: usize) -> BenchmarkSection {
         let sign_tps = batch as f64 / (sign_ms / 1000.0);
 
         // Serial verify — repeat 10 times and average to smooth OS jitter
+        // black_box prevents LLVM from eliding verify results
         let n_verify_runs = 10usize;
         let serial_verify_ms = {
             let mut total = 0.0f64;
             for _ in 0..n_verify_runs {
                 let t = Instant::now();
-                for tx in &signed_txs { let _ = tx.verify(); }
+                for tx in &signed_txs { let _ = black_box(tx.verify()); }
                 total += t.elapsed().as_secs_f64() * 1000.0;
             }
             total / n_verify_runs as f64
@@ -103,11 +105,12 @@ pub fn run(iterations: usize) -> BenchmarkSection {
         let serial_verify_tps = batch as f64 / (serial_verify_ms / 1000.0);
 
         // Parallel verify (rayon) — same: repeat 10 times and average
+        // black_box prevents elision of the parallel batch result
         let par_verify_ms = {
             let mut total = 0.0f64;
             for _ in 0..n_verify_runs {
                 let t = Instant::now();
-                let _ = verify_transactions_parallel(&signed_txs);
+                let _ = black_box(verify_transactions_parallel(&signed_txs));
                 total += t.elapsed().as_secs_f64() * 1000.0;
             }
             total / n_verify_runs as f64

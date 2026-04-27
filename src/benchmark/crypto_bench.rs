@@ -9,6 +9,7 @@
 /// All values reported as mean ± std-dev over N iterations.
 
 use std::time::Instant;
+use std::hint::black_box;
 use crate::crypto::signatures::{FalconKeypair, canonical_signing_hash, FALCON512_PUBKEY_BYTES};
 use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
 
@@ -76,22 +77,17 @@ fn bench_verify(n: usize) -> BenchmarkStat {
     let signed = kp.sign_transaction_canonical(data);
     let hash = canonical_signing_hash(data);
 
-    // Falcon verify is ~1–2 µs — must measure in microseconds or it rounds to 0.000 ms
+    // Falcon verify is ~1–2 µs — measure in µs, use black_box so LLVM can't elide the work
     let mut samples = Vec::with_capacity(n);
     for _ in 0..n {
         let t = Instant::now();
-        let _ok = crate::crypto::signatures::verify_signature_strict(
-            &hash, &signed, &kp.public_key,
-        );
+        let _ok = black_box(crate::crypto::signatures::verify_signature_strict(
+            black_box(&hash), black_box(&signed), black_box(&kp.public_key),
+        ));
         samples.push(t.elapsed().as_secs_f64() * 1_000_000.0); // µs
     }
-    // Build stat manually so throughput is ops/sec derived from µs mean
-    let s = stat("Falcon-512 Verify", "µs/op", &samples);
-    let mean_us = s.mean_ms; // stored in mean_ms field but unit is µs
-    BenchmarkStat {
-        throughput: if mean_us > 0.0 { Some(1_000_000.0 / mean_us) } else { None },
-        ..s
-    }
+    // stat_us: throughput = 1_000_000 / mean_µs = ops/sec (correct for µs samples)
+    stat_us("Falcon-512 Verify", "µs/op", &samples)
 }
 
 // ─── SHA3-256 ────────────────────────────────────────────────────────────────
@@ -101,14 +97,11 @@ fn bench_sha3(n: usize) -> BenchmarkStat {
     let mut samples = Vec::with_capacity(n);
     for _ in 0..n {
         let t = Instant::now();
-        let _h = canonical_signing_hash(data);
-        // Report in microseconds for SHA3 (it's very fast)
-        samples.push(t.elapsed().as_secs_f64() * 1_000_000.0);
+        let _h = black_box(canonical_signing_hash(black_box(data)));
+        samples.push(t.elapsed().as_secs_f64() * 1_000_000.0); // µs
     }
-    // Return in µs not ms
-    let s = stat("SHA3-256 Canonical Hash (domain prefix)", "µs/op", &samples);
-    // Already in µs — label is accurate
-    s
+    // stat_us: throughput = 1_000_000 / mean_µs = ops/sec (correct for µs samples)
+    stat_us("SHA3-256 Canonical Hash (domain prefix)", "µs/op", &samples)
 }
 
 // ─── Signature size distribution ─────────────────────────────────────────────
@@ -137,6 +130,8 @@ fn bench_sig_size(n: usize) -> BenchmarkStat {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/// Build a stat where samples are in **milliseconds**.
+/// Throughput = 1000 / mean_ms = ops/sec.
 pub(crate) fn stat(name: &str, unit: &str, samples: &[f64]) -> BenchmarkStat {
     let n = samples.len() as f64;
     let mean = samples.iter().sum::<f64>() / n;
@@ -164,4 +159,14 @@ pub(crate) fn stat(name: &str, unit: &str, samples: &[f64]) -> BenchmarkStat {
         throughput: if mean > 0.0 { Some(1000.0 / mean) } else { None },
         note: None,
     }
+}
+
+/// Build a stat where samples are in **microseconds**.
+/// Throughput = 1_000_000 / mean_µs = ops/sec.
+/// Use this for any bench that collects `elapsed.as_secs_f64() * 1_000_000.0`.
+pub(crate) fn stat_us(name: &str, unit: &str, samples: &[f64]) -> BenchmarkStat {
+    let mut s = stat(name, unit, samples);
+    // Override the 1000/mean throughput with the correct 1_000_000/mean for µs
+    s.throughput = if s.mean_ms > 0.0 { Some(1_000_000.0 / s.mean_ms) } else { None };
+    s
 }
