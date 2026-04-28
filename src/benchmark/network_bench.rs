@@ -81,11 +81,13 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
 
     for i in 0..sequential_count {
         let tx = build_test_tx(&kp, start_nonce + i as u64 + 1);
-        // Serialize Transaction struct directly — identical to wallet_cli.rs broadcast_tx().
-        // The API handler does Json<Transaction> deserialization:
-        //   - Vec<u8> fields (signature, public_key) must be JSON integer arrays, not hex strings.
-        //   - tx_type field is required (no serde default).
-        // Using .json(&tx) lets serde handle all fields correctly.
+
+        // Local sanity check: verify the tx before sending.
+        // If this fails → signing bug. If this passes but node rejects → rate limiter or nonce.
+        if !tx.verify() {
+            eprintln!("        ⚠️  build_test_tx local verify FAILED at nonce={} — signing issue!", start_nonce + i as u64 + 1);
+        }
+
         let url = format!("{}/api/transactions/submit", node_url);
         let t = Instant::now();
         let result = client.post(&url).json(&tx).send().await;
@@ -98,8 +100,13 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
                 if status.is_success() {
                     success_count += 1;
                 } else {
-                    let body = resp.text().await.unwrap_or_default();
-                    let key = extract_error_key(&body);
+                    // Detect 429 before reading body (body is empty for rate limit)
+                    let key = if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                        "rate_limited".to_string()
+                    } else {
+                        let body = resp.text().await.unwrap_or_default();
+                        extract_error_key(&body)
+                    };
                     *error_counts.entry(key).or_insert(0) += 1;
                 }
             }
@@ -110,6 +117,10 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
                 *error_counts.entry(key).or_insert(0) += 1;
             }
         }
+
+        // Stay within the node's 10 req/sec per-IP rate limit.
+        // 120 ms between requests = ~8 req/sec — leaves headroom for other API calls.
+        tokio::time::sleep(tokio::time::Duration::from_millis(120)).await;
     }
 
     let mut stats = Vec::new();
