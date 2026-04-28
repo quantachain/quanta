@@ -25,7 +25,9 @@
 ## Protocol
 * [Quantum Resistance](quantum-resistance.md)
 * [Performance Benchmarks](performance-benchmarks.md)
+* [Live Node Benchmarks](live-node-benchmarks.md)
 * [Detailed Benchmarks](detailed-benchmarks.md)
+* [Falcon Signing Internals](falcon-signing-internals.md)
 * [P2P Networking](p2p-networking.md)
 * [Security](security.md)
 
