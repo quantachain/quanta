@@ -46,10 +46,11 @@ pub async fn run(node_url: &str, tx_count: usize) -> BenchmarkSection {
 
     for i in 0..sequential_count {
         let tx = build_test_tx(&kp, i as u64 + 1);
-        // FIX: Serialize the Transaction struct directly (matches wallet_cli broadcast_tx).
-        // The API handler deserializes Json<Transaction>, which expects Vec<u8> as a JSON
-        // integer array and requires tx_type. Manual json!({}) with hex strings caused
-        // "Failed to deserialize the JSON body" errors on every submission.
+        // Serialize Transaction struct directly — identical to wallet_cli.rs broadcast_tx().
+        // The API handler does Json<Transaction> deserialization:
+        //   - Vec<u8> fields (signature, public_key) must be JSON integer arrays, not hex strings.
+        //   - tx_type field is required (no serde default).
+        // Using .json(&tx) lets serde handle all fields correctly.
         let url = format!("{}/api/transactions/submit", node_url);
         let t = Instant::now();
         let result = client.post(&url).json(&tx).send().await;
@@ -104,7 +105,7 @@ pub async fn run(node_url: &str, tx_count: usize) -> BenchmarkSection {
             let mut task_errors = 0usize;
             for i in 0..txs_per_task {
                 let tx = build_test_tx(&kp_clone, base_nonce + i as u64 + 1);
-                // FIX: Serialize Transaction struct directly — same fix as sequential path.
+                // Same fix as sequential path — serialize struct directly.
                 match client_clone.post(&url).json(&tx).send().await {
                     Ok(r) if r.status().is_success() => task_success += 1,
                     _ => task_errors += 1,
