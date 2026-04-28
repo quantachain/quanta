@@ -58,7 +58,7 @@ pub async fn run(node_url: &str, tx_count: usize) -> BenchmarkSection {
             "network_id": tx.network_id,
         });
 
-        let url = format!("{}/api/transaction", node_url);
+        let url = format!("{}/api/transactions/submit", node_url);
         let t = Instant::now();
         let result = client.post(&url).json(&payload).send().await;
         let elapsed_ms = t.elapsed().as_secs_f64() * 1000.0;
@@ -103,7 +103,7 @@ pub async fn run(node_url: &str, tx_count: usize) -> BenchmarkSection {
 
     for task_id in 0..CONCURRENT_TASKS {
         let kp_clone = FalconKeypair::generate(); // each task uses own wallet
-        let url = format!("{}/api/transaction", node_url);
+        let url = format!("{}/api/transactions/submit", node_url);
         let client_clone = client.clone();
         let base_nonce = (task_id * txs_per_task) as u64;
 
@@ -167,12 +167,12 @@ pub async fn run(node_url: &str, tx_count: usize) -> BenchmarkSection {
         concurrent_tps, total_success, total_errors);
 
     // ── Node health check ─────────────────────────────────────────────────────
-    let health_url = format!("{}/api/chain/info", node_url);
+    let health_url = format!("{}/api/stats", node_url);
     if let Ok(resp) = client.get(&health_url).send().await {
         if let Ok(json) = resp.json::<serde_json::Value>().await {
-            let height = json.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
-            let difficulty = json.get("difficulty").and_then(|v| v.as_u64()).unwrap_or(0);
-            let mempool = json.get("mempool_size").and_then(|v| v.as_u64()).unwrap_or(0);
+            let height = json.get("chain_length").and_then(|v| v.as_u64()).unwrap_or(0);
+            let difficulty = json.get("current_difficulty").and_then(|v| v.as_u64()).unwrap_or(0);
+            let mempool = json.get("pending_transactions").and_then(|v| v.as_u64()).unwrap_or(0);
             stats.push(BenchmarkStat {
                 name: "Node Live State Snapshot".to_string(),
                 unit: "info".to_string(),
