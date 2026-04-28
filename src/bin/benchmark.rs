@@ -11,6 +11,9 @@
 ///   --output-dir PATH     Directory for JSON/Markdown output (default: ./benchmark_results)
 ///   --full-pow            Include full PoW difficulty solve (may take minutes)
 ///   --live-node URL       Enable live HTTP stress test against a running node
+///   --wallet-file PATH    Path to a faucet wallet JSON file (faucet_accounts_export.json)
+///                         Keeps private keys out of git — file never committed
+///   --wallet-index N      Which wallet to use from the file (default: 1)
 ///   --json-only           Only write JSON, skip Markdown
 ///   --quick               Quick mode: 100 iterations, no full-PoW, no live node
 ///   --help                Print this help
@@ -77,13 +80,22 @@ async fn main() {
             .map(|w| w[1].clone())
     };
 
+    // Optional: path to faucet_accounts_export.json (keeps private keys OUT of git)
+    let wallet_file = args.windows(2)
+        .find(|w| w[0] == "--wallet-file")
+        .map(|w| w[1].clone());
+    let wallet_index: usize = args.windows(2)
+        .find(|w| w[0] == "--wallet-index")
+        .and_then(|w| w[1].parse().ok())
+        .unwrap_or(1); // default = Faucet 1 (Faucet 0 is the live faucet sender)
+
     // ── Run offline benchmarks ────────────────────────────────────────────────
     let (mut report, mut sections) = run_all_benchmarks(iterations, full_pow);
 
     // ── Live node section (async) ─────────────────────────────────────────────
     let network_section = if let Some(ref url) = live_node_url {
         let tx_count = if quick { 20 } else { parse_arg(&args, "--live-txs").unwrap_or(100) };
-        quanta::benchmark::network_bench::run(url, tx_count).await
+        quanta::benchmark::network_bench::run(url, tx_count, wallet_file.as_deref(), wallet_index).await
     } else {
         quanta::benchmark::network_bench::run_skipped()
     };
@@ -153,6 +165,10 @@ OPTIONS:
     --full-pow          Run full PoW solve at current difficulty (may take minutes)
     --live-node URL     Live HTTP stress test against a running node
                         Example: --live-node http://localhost:3000
+    --wallet-file PATH  Path to faucet_accounts_export.json (optional)
+                        Loads a pre-funded wallet so txs are accepted by the node.
+                        This file is NEVER committed to git — keep it local.
+    --wallet-index N    Which wallet index to use from the file (default: 1)
     --live-txs N        Number of txs for live test (default: 100)
     --json-only         Write JSON only (skip Markdown)
     --quick             100 iterations, no full-PoW, no live node

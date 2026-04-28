@@ -20,32 +20,67 @@ use chrono::Utc;
 /// Number of concurrent tasks used for flood test
 const CONCURRENT_TASKS: usize = 10;
 
-pub async fn run(node_url: &str, tx_count: usize) -> BenchmarkSection {
-    println!("  [6/6] Live Node Network Stress Test → {}", node_url);
-    println!("        Generating {} signed transactions...", tx_count);
+/// Load a FalconKeypair from a faucet wallet export JSON file.
+/// File format: array of objects with `public_key_hex` and `secret_key_hex` fields.
+/// Returns None if the file can't be read or the index is out of bounds.
+fn load_wallet_from_file(path: &str, index: usize) -> Option<FalconKeypair> {
+    let contents = std::fs::read_to_string(path).ok()?;
+    let wallets: serde_json::Value = serde_json::from_str(&contents).ok()?;
+    let entry = wallets.get(index)?;
+    let pk_hex = entry["public_key_hex"].as_str()?;
+    let sk_hex = entry["secret_key_hex"].as_str()?;
+    let pk = hex::decode(pk_hex).ok()?;
+    let sk = hex::decode(sk_hex).ok()?;
+    FalconKeypair::from_secret_key_bytes(&sk, &pk).ok()
+}
 
-    // Generate a fresh wallet with a known address for the test
-    // NOTE: This wallet must have balance. For testnet, use a faucet wallet.
-    // The benchmark will detect 0-balance rejections and report them separately.
-    let kp = FalconKeypair::generate();
+pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wallet_index: usize) -> BenchmarkSection {
+    println!("  [6/6] Live Node Network Stress Test → {}", node_url);
+
+    // Load wallet: from file if --wallet-file was given, else generate a throwaway key.
+    let kp = if let Some(path) = wallet_file {
+        match load_wallet_from_file(path, wallet_index) {
+            Some(k) => {
+                println!("        Loaded wallet index {} from {}", wallet_index, path);
+                k
+            }
+            None => {
+                println!("        ⚠️  Could not load wallet from {} (index {}), generating throwaway key", path, wallet_index);
+                FalconKeypair::generate()
+            }
+        }
+    } else {
+        println!("        No --wallet-file given. Generating throwaway wallet (txs will fail with insufficient_balance).");
+        println!("        Tip: use --wallet-file faucet_accounts_export.json to use a funded wallet.");
+        FalconKeypair::generate()
+    };
     let address = kp.get_address();
     println!("        Benchmark wallet: {}", address);
-    println!("        Note: For full throughput test, fund this address via faucet.");
 
-    // ── Latency test: sequential submissions ──────────────────────────────────
-    println!("        Sequential latency test ({} txs)...", tx_count.min(50));
-    let sequential_count = tx_count.min(50);
-    let mut latency_samples: Vec<f64> = Vec::new();
-    let mut success_count = 0usize;
-    let mut error_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-
+    // Fetch the current on-chain nonce so sequential nonces don’t collide.
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .unwrap_or_default();
+    let start_nonce = {
+        let url = format!("{}/api/balance/{}", node_url, address);
+        if let Ok(resp) = client.get(&url).send().await {
+            if let Ok(j) = resp.json::<serde_json::Value>().await {
+                j["nonce"].as_u64().unwrap_or(0)
+            } else { 0 }
+        } else { 0 }
+    };
+    println!("        On-chain nonce: {} — submitting from nonce {}", start_nonce, start_nonce + 1);
+
+    let sequential_count = tx_count.min(50);
+    println!("        Sequential latency test ({} txs)...", sequential_count);
+    let mut latency_samples: Vec<f64> = Vec::new();
+    let mut success_count = 0usize;
+    let mut error_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
 
     for i in 0..sequential_count {
-        let tx = build_test_tx(&kp, i as u64 + 1);
+        let tx = build_test_tx(&kp, start_nonce + i as u64 + 1);
         // Serialize Transaction struct directly — identical to wallet_cli.rs broadcast_tx().
         // The API handler does Json<Transaction> deserialization:
         //   - Vec<u8> fields (signature, public_key) must be JSON integer arrays, not hex strings.
@@ -95,10 +130,10 @@ pub async fn run(node_url: &str, tx_count: usize) -> BenchmarkSection {
     let mut handles = Vec::new();
 
     for task_id in 0..CONCURRENT_TASKS {
-        let kp_clone = FalconKeypair::generate(); // each task uses own wallet
+        let kp_clone = kp.clone();
+        let base_nonce = start_nonce + (sequential_count as u64) + (task_id * txs_per_task) as u64;
         let url = format!("{}/api/transactions/submit", node_url);
         let client_clone = client.clone();
-        let base_nonce = (task_id * txs_per_task) as u64;
 
         let handle = tokio::spawn(async move {
             let mut task_success = 0usize;
