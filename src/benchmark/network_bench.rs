@@ -46,21 +46,13 @@ pub async fn run(node_url: &str, tx_count: usize) -> BenchmarkSection {
 
     for i in 0..sequential_count {
         let tx = build_test_tx(&kp, i as u64 + 1);
-        let payload = serde_json::json!({
-            "sender": tx.sender,
-            "recipient": tx.recipient,
-            "amount": tx.amount,
-            "timestamp": tx.timestamp,
-            "signature": hex::encode(&tx.signature),
-            "public_key": hex::encode(&tx.public_key),
-            "fee": tx.fee,
-            "nonce": tx.nonce,
-            "network_id": tx.network_id,
-        });
-
+        // FIX: Serialize the Transaction struct directly (matches wallet_cli broadcast_tx).
+        // The API handler deserializes Json<Transaction>, which expects Vec<u8> as a JSON
+        // integer array and requires tx_type. Manual json!({}) with hex strings caused
+        // "Failed to deserialize the JSON body" errors on every submission.
         let url = format!("{}/api/transactions/submit", node_url);
         let t = Instant::now();
-        let result = client.post(&url).json(&payload).send().await;
+        let result = client.post(&url).json(&tx).send().await;
         let elapsed_ms = t.elapsed().as_secs_f64() * 1000.0;
         latency_samples.push(elapsed_ms);
 
@@ -112,18 +104,8 @@ pub async fn run(node_url: &str, tx_count: usize) -> BenchmarkSection {
             let mut task_errors = 0usize;
             for i in 0..txs_per_task {
                 let tx = build_test_tx(&kp_clone, base_nonce + i as u64 + 1);
-                let payload = serde_json::json!({
-                    "sender": tx.sender,
-                    "recipient": tx.recipient,
-                    "amount": tx.amount,
-                    "timestamp": tx.timestamp,
-                    "signature": hex::encode(&tx.signature),
-                    "public_key": hex::encode(&tx.public_key),
-                    "fee": tx.fee,
-                    "nonce": tx.nonce,
-                    "network_id": tx.network_id,
-                });
-                match client_clone.post(&url).json(&payload).send().await {
+                // FIX: Serialize Transaction struct directly — same fix as sequential path.
+                match client_clone.post(&url).json(&tx).send().await {
                     Ok(r) if r.status().is_success() => task_success += 1,
                     _ => task_errors += 1,
                 }
