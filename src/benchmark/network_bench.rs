@@ -72,20 +72,26 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
     };
     println!("        On-chain nonce: {} — submitting from nonce {}", start_nonce, start_nonce + 1);
 
-    let sequential_count = tx_count.min(50);
-    println!("        Sequential latency test ({} txs)...", sequential_count);
+    let sequential_count = tx_count.min(10); // 10 × 120ms = 1.2s, well within 10 req/sec
+    println!("        Sequential latency test ({} txs at 120ms spacing)...", sequential_count);
     let mut latency_samples: Vec<f64> = Vec::new();
     let mut success_count = 0usize;
     let mut error_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
 
 
     for i in 0..sequential_count {
+        // Sleep FIRST — ensures we stay under the 10 req/sec rate limit before each request.
+        // At 120ms spacing = ~8 req/sec, well within the node’s 10/sec per-IP limit.
+        if i > 0 {
+            tokio::time::sleep(tokio::time::Duration::from_millis(120)).await;
+        }
+
         let tx = build_test_tx(&kp, start_nonce + i as u64 + 1);
 
-        // Local sanity check: verify the tx before sending.
-        // If this fails → signing bug. If this passes but node rejects → rate limiter or nonce.
+        // Local sanity check: verify before sending.
+        // ⚠️ printed → signing bug.  Silent + node rejects → nonce or balance issue.
         if !tx.verify() {
-            eprintln!("        ⚠️  build_test_tx local verify FAILED at nonce={} — signing issue!", start_nonce + i as u64 + 1);
+            eprintln!("        ⚠️  local verify FAILED at nonce={} — signing issue!", start_nonce + i as u64 + 1);
         }
 
         let url = format!("{}/api/transactions/submit", node_url);
@@ -100,8 +106,8 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
                 if status.is_success() {
                     success_count += 1;
                 } else {
-                    // Detect 429 before reading body (body is empty for rate limit)
-                    let key = if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+                    // Check 429 by numeric code BEFORE reading body (body is empty for rate limit)
+                    let key = if status.as_u16() == 429 {
                         "rate_limited".to_string()
                     } else {
                         let body = resp.text().await.unwrap_or_default();
@@ -117,10 +123,6 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
                 *error_counts.entry(key).or_insert(0) += 1;
             }
         }
-
-        // Stay within the node's 10 req/sec per-IP rate limit.
-        // 120 ms between requests = ~8 req/sec — leaves headroom for other API calls.
-        tokio::time::sleep(tokio::time::Duration::from_millis(120)).await;
     }
 
     let mut stats = Vec::new();
