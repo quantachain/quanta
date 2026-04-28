@@ -41,6 +41,9 @@ docs/
 
 #Faucet
 
+# Benchmark output (never commit — contains run-specific data)
+benchmark_results/
+
 src/bin/distribute_faucet.rs
 
 VPS_BUILD_GUIDE.md
