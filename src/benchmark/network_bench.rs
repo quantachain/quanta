@@ -88,10 +88,25 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
 
         let tx = build_test_tx(&kp, start_nonce + i as u64 + 1);
 
-        // Local sanity check: verify before sending.
-        // ⚠️ printed → signing bug.  Silent + node rejects → nonce or balance issue.
+        // Check 1: local verify (signing correctness)
         if !tx.verify() {
-            eprintln!("        ⚠️  local verify FAILED at nonce={} — signing issue!", start_nonce + i as u64 + 1);
+            eprintln!("        ⚠️  [CHECK 1] local verify FAILED at nonce={} — signing bug!", start_nonce + i as u64 + 1);
+        }
+
+        // Check 2: JSON round-trip verify (serialization correctness)
+        // If this fails but Check 1 passes → serde_json Vec<u8> round-trip is corrupting bytes.
+        match serde_json::to_string(&tx) {
+            Ok(json_str) => {
+                match serde_json::from_str::<crate::core::transaction::Transaction>(&json_str) {
+                    Ok(tx_rt) => {
+                        if !tx_rt.verify() {
+                            eprintln!("        ⚠️  [CHECK 2] JSON round-trip verify FAILED at nonce={} — serde_json corruption!", start_nonce + i as u64 + 1);
+                        }
+                    }
+                    Err(e) => eprintln!("        ⚠️  [CHECK 2] JSON deserialize FAILED: {}", e),
+                }
+            }
+            Err(e) => eprintln!("        ⚠️  [CHECK 2] JSON serialize FAILED: {}", e),
         }
 
         let url = format!("{}/api/transactions/submit", node_url);
