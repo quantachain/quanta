@@ -12,49 +12,86 @@
 use std::time::Instant;
 use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
 use crate::benchmark::crypto_bench::stat;
-use crate::crypto::signatures::FalconKeypair;
 use crate::core::transaction::{Transaction, TransactionType, SignatureScheme};
 use crate::core::TESTNET_NETWORK_ID;
 use chrono::Utc;
+use falcon_rust::falcon512::{self as fr, SecretKey as FrSK};
+use sha3::{Sha3_256, Digest};
+
+/// Domain tag — must match SIGNING_DOMAIN in signatures.rs and quanta-wasm.
+const SIGNING_DOMAIN: &[u8] = b"QUANTA_TX_V1:";
+
+/// Sign with falcon-rust (NOT pqcrypto) — this is the format verify_signature_strict() expects.
+/// Output: sig.to_bytes() || hash  (last 32 bytes = the hash that was signed)
+fn sign_with_falcon_rust(sk_bytes: &[u8], signing_data: &[u8]) -> Vec<u8> {
+    // Step 1: domain-separated hash
+    let mut h = Sha3_256::new();
+    h.update(SIGNING_DOMAIN);
+    h.update(signing_data);
+    let mut hash = [0u8; 32];
+    hash.copy_from_slice(&h.finalize());
+
+    // Step 2: sign the hash with falcon-rust
+    let sk = FrSK::from_bytes(sk_bytes).expect("benchmark: invalid falcon-rust SK");
+    let sig = fr::sign(&hash, &sk);
+    let sig_bytes = sig.to_bytes();
+
+    // Step 3: blob = sig_bytes || hash  (verify_signature_strict splits last 32 B)
+    let mut blob = Vec::with_capacity(sig_bytes.len() + 32);
+    blob.extend_from_slice(&sig_bytes);
+    blob.extend_from_slice(&hash);
+    blob
+}
+
+/// Derive address from raw public key bytes (SHA3-256, first 20 bytes, 0x-prefixed).
+fn address_from_pubkey(pk: &[u8]) -> String {
+    let hash = Sha3_256::digest(pk);
+    format!("0x{}", hex::encode(&hash[..20]))
+}
 
 /// Number of concurrent tasks used for flood test
 const CONCURRENT_TASKS: usize = 10;
 
-/// Load a FalconKeypair from a faucet wallet export JSON file.
-/// File format: array of objects with `public_key_hex` and `secret_key_hex` fields.
+/// Load (pk_bytes, sk_bytes) from a faucet wallet export JSON file.
 /// Returns None if the file can't be read or the index is out of bounds.
-fn load_wallet_from_file(path: &str, index: usize) -> Option<FalconKeypair> {
+fn load_wallet_from_file(path: &str, index: usize) -> Option<(Vec<u8>, Vec<u8>)> {
     let contents = std::fs::read_to_string(path).ok()?;
     let wallets: serde_json::Value = serde_json::from_str(&contents).ok()?;
     let entry = wallets.get(index)?;
-    let pk_hex = entry["public_key_hex"].as_str()?;
-    let sk_hex = entry["secret_key_hex"].as_str()?;
-    let pk = hex::decode(pk_hex).ok()?;
-    let sk = hex::decode(sk_hex).ok()?;
-    FalconKeypair::from_secret_key_bytes(&sk, &pk).ok()
+    let pk = hex::decode(entry["public_key_hex"].as_str()?).ok()?;
+    let sk = hex::decode(entry["secret_key_hex"].as_str()?).ok()?;
+    // Verify falcon-rust can parse the SK before returning
+    FrSK::from_bytes(&sk).ok()?;
+    Some((pk, sk))
 }
 
 pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wallet_index: usize) -> BenchmarkSection {
     println!("  [6/6] Live Node Network Stress Test → {}", node_url);
 
-    // Load wallet: from file if --wallet-file was given, else generate a throwaway key.
-    let kp = if let Some(path) = wallet_file {
+    // Load wallet: (pk_bytes, sk_bytes) from file, or generate a throwaway key.
+    let (pk_bytes, sk_bytes) = if let Some(path) = wallet_file {
         match load_wallet_from_file(path, wallet_index) {
-            Some(k) => {
-                println!("        Loaded wallet index {} from {}", wallet_index, path);
-                k
+            Some(pair) => {
+                println!("        Loaded wallet index {} from {} (falcon-rust compatible)", wallet_index, path);
+                pair
             }
             None => {
                 println!("        ⚠️  Could not load wallet from {} (index {}), generating throwaway key", path, wallet_index);
-                FalconKeypair::generate()
+                let kp = crate::crypto::signatures::FalconKeypair::generate();
+                let pk = kp.public_key.clone();
+                let sk = kp.secret_key_bytes().to_vec();
+                (pk, sk)
             }
         }
     } else {
-        println!("        No --wallet-file given. Generating throwaway wallet (txs will fail with insufficient_balance).");
-        println!("        Tip: use --wallet-file faucet_accounts_export.json to use a funded wallet.");
-        FalconKeypair::generate()
+        println!("        No --wallet-file given. Generating throwaway wallet.");
+        println!("        Tip: use --wallet-file faucet_accounts_export.json for real txs.");
+        let kp = crate::crypto::signatures::FalconKeypair::generate();
+        let pk = kp.public_key.clone();
+        let sk = kp.secret_key_bytes().to_vec();
+        (pk, sk)
     };
-    let address = kp.get_address();
+    let address = address_from_pubkey(&pk_bytes);
     println!("        Benchmark wallet: {}", address);
 
     // Fetch the current on-chain nonce so sequential nonces don’t collide.
@@ -86,27 +123,11 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
             tokio::time::sleep(tokio::time::Duration::from_millis(120)).await;
         }
 
-        let tx = build_test_tx(&kp, start_nonce + i as u64 + 1);
+        let tx = build_test_tx(&pk_bytes, &sk_bytes, &address, start_nonce + i as u64 + 1);
 
-        // Check 1: local verify (signing correctness)
+        // Local sanity check: verify before sending.
         if !tx.verify() {
             eprintln!("        ⚠️  [CHECK 1] local verify FAILED at nonce={} — signing bug!", start_nonce + i as u64 + 1);
-        }
-
-        // Check 2: JSON round-trip verify (serialization correctness)
-        // If this fails but Check 1 passes → serde_json Vec<u8> round-trip is corrupting bytes.
-        match serde_json::to_string(&tx) {
-            Ok(json_str) => {
-                match serde_json::from_str::<crate::core::transaction::Transaction>(&json_str) {
-                    Ok(tx_rt) => {
-                        if !tx_rt.verify() {
-                            eprintln!("        ⚠️  [CHECK 2] JSON round-trip verify FAILED at nonce={} — serde_json corruption!", start_nonce + i as u64 + 1);
-                        }
-                    }
-                    Err(e) => eprintln!("        ⚠️  [CHECK 2] JSON deserialize FAILED: {}", e),
-                }
-            }
-            Err(e) => eprintln!("        ⚠️  [CHECK 2] JSON serialize FAILED: {}", e),
         }
 
         let url = format!("{}/api/transactions/submit", node_url);
@@ -158,7 +179,9 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
     let mut handles = Vec::new();
 
     for task_id in 0..CONCURRENT_TASKS {
-        let kp_clone = kp.clone();
+        let pk_clone = pk_bytes.clone();
+        let sk_clone = sk_bytes.clone();
+        let addr_clone = address.clone();
         let base_nonce = start_nonce + (sequential_count as u64) + (task_id * txs_per_task) as u64;
         let url = format!("{}/api/transactions/submit", node_url);
         let client_clone = client.clone();
@@ -167,8 +190,7 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
             let mut task_success = 0usize;
             let mut task_errors = 0usize;
             for i in 0..txs_per_task {
-                let tx = build_test_tx(&kp_clone, base_nonce + i as u64 + 1);
-                // Same fix as sequential path — serialize struct directly.
+                let tx = build_test_tx(&pk_clone, &sk_clone, &addr_clone, base_nonce + i as u64 + 1);
                 match client_clone.post(&url).json(&tx).send().await {
                     Ok(r) if r.status().is_success() => task_success += 1,
                     _ => task_errors += 1,
@@ -278,14 +300,14 @@ pub fn run_skipped() -> BenchmarkSection {
     }
 }
 
-fn build_test_tx(kp: &FalconKeypair, nonce: u64) -> Transaction {
+fn build_test_tx(pk_bytes: &[u8], sk_bytes: &[u8], sender: &str, nonce: u64) -> Transaction {
     let mut tx = Transaction {
-        sender: kp.get_address(),
-        recipient: "0xbenchmark000000000000000000000000000000".to_string(),
-        amount: 1_000,   // 0.001 QUA
+        sender: sender.to_string(),
+        recipient: "0xdead000000000000000000000000000000000000".to_string(),
+        amount: 1_000,
         timestamp: Utc::now().timestamp(),
         signature: vec![],
-        public_key: kp.public_key.clone(),
+        public_key: pk_bytes.to_vec(),
         fee: 1_000,
         nonce,
         lock_time: 0,
@@ -293,8 +315,8 @@ fn build_test_tx(kp: &FalconKeypair, nonce: u64) -> Transaction {
         sig_scheme: SignatureScheme::Falcon512,
         network_id: TESTNET_NETWORK_ID,
     };
-    let signing_bytes = tx.get_signing_bytes();
-    tx.signature = kp.sign_transaction_canonical(&signing_bytes);
+    // Sign with falcon-rust (NOT pqcrypto) to match verify_signature_strict()
+    tx.signature = sign_with_falcon_rust(sk_bytes, &tx.get_signing_bytes());
     tx
 }
 
