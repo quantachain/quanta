@@ -89,10 +89,18 @@ pub fn run(iterations: usize) -> BenchmarkSection {
             let t = Instant::now();
             let selected = pool.get_best_transactions(n);
             let elapsed_us = t.elapsed().as_secs_f64() * 1_000_000.0;
+            let actual = selected.len();
+            // Label includes both the requested limit and actual count so
+            // reviewers can tell when pool size < requested limit.
+            let label = if actual < n {
+                format!("Fee-Ordered Selection (top {} / got {})", n, actual)
+            } else {
+                format!("Fee-Ordered Selection (top {})", n)
+            };
             stats.push(BenchmarkStat {
-                name: format!("Fee-Ordered Selection (top {})", n),
+                name: label,
                 unit: "µs".to_string(),
-                iterations: selected.len(),
+                iterations: actual,
                 mean_ms: elapsed_us,
                 stddev_ms: 0.0,
                 min: elapsed_us,
@@ -101,7 +109,10 @@ pub fn run(iterations: usize) -> BenchmarkSection {
                 p95: elapsed_us,
                 p99: elapsed_us,
                 throughput: None,
-                note: Some(format!("Selected {} txs in {:.1} µs", selected.len(), elapsed_us)),
+                note: Some(format!(
+                    "Selected {} of {} requested txs in {:.1} µs (pool contained {} txs)",
+                    actual, n, elapsed_us, tx_count
+                )),
             });
         }
         println!("        fee-ordered selection: ✓");

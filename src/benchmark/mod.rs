@@ -9,6 +9,7 @@ pub mod mempool_bench;
 pub mod block_bench;
 pub mod chain_bench;
 pub mod network_bench;
+pub mod dos_bench;
 pub mod report;
 
 pub use report::{BenchmarkReport, BenchmarkSection, BenchmarkStat, run_all_benchmarks};

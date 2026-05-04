@@ -83,60 +83,55 @@ pub fn run(iterations: usize) -> BenchmarkSection {
 
     // ── Parallel vs serial verify on realistic block ──────────────────────────
     {
-        println!("        Building 1200-tx block for parallel verify benchmark (slow — signing)...");
+        println!("        Building 200-tx block for parallel verify benchmark (slow — signing)...");
         let wallets: Vec<FalconKeypair> = (0..30).map(|_| FalconKeypair::generate()).collect();
         let n_tx = 200; // 200 is representative without being too slow for keygen
         let txs: Vec<Transaction> = (0..n_tx)
             .map(|i| make_signed_tx(&wallets[i % wallets.len()], (i / wallets.len() + 1) as u64))
             .collect();
 
-        // Serial — black_box prevents LLVM from eliding the verify calls
-        let t_serial = Instant::now();
-        for tx in &txs { let _ = black_box(tx.verify()); }
-        let serial_ms = t_serial.elapsed().as_secs_f64() * 1000.0;
+        // Number of timing repetitions — same methodology as tx_bench.
+        // More reps = tighter confidence interval on the parallel path.
+        let n_reps = 9usize;
 
-        // Parallel — black_box prevents elision of the parallel result
-        let t_par = Instant::now();
+        // Warmup both paths so thread-pool spin-up is excluded from measurement.
+        for tx in &txs { let _ = black_box(tx.verify()); }
         let _ = black_box(verify_transactions_parallel(&txs));
-        let par_ms = t_par.elapsed().as_secs_f64() * 1000.0;
+
+        // Serial — collect per-run samples
+        let serial_samples: Vec<f64> = (0..n_reps).map(|_| {
+            let t = Instant::now();
+            for tx in &txs { let _ = black_box(tx.verify()); }
+            t.elapsed().as_secs_f64() * 1000.0
+        }).collect();
+
+        // Parallel — collect per-run samples
+        let par_samples: Vec<f64> = (0..n_reps).map(|_| {
+            let t = Instant::now();
+            let _ = black_box(verify_transactions_parallel(&txs));
+            t.elapsed().as_secs_f64() * 1000.0
+        }).collect();
 
         let cores = num_cpus::get_physical().max(1);
-        let speedup = if par_ms > 0.0 { serial_ms / par_ms } else { 1.0 };
-        let efficiency = speedup / cores as f64 * 100.0;
+        let serial_mean = serial_samples.iter().sum::<f64>() / n_reps as f64;
+        let par_mean    = par_samples.iter().sum::<f64>()    / n_reps as f64;
+        let speedup     = if par_mean > 0.0 { serial_mean / par_mean } else { 1.0 };
+        let efficiency  = speedup / cores as f64 * 100.0;
 
-        stats.push(BenchmarkStat {
-            name: format!("Block Verify Serial ({} txs)", n_tx),
-            unit: "ms".to_string(),
-            iterations: n_tx,
-            mean_ms: serial_ms,
-            stddev_ms: 0.0,
-            min: serial_ms,
-            max: serial_ms,
-            p50: serial_ms,
-            p95: serial_ms,
-            p99: serial_ms,
-            throughput: Some(n_tx as f64 / (serial_ms / 1000.0)),
-            note: None,
-        });
-        stats.push(BenchmarkStat {
-            name: format!("Block Verify Parallel/{} cores ({} txs)", cores, n_tx),
-            unit: "ms".to_string(),
-            iterations: n_tx,
-            mean_ms: par_ms,
-            stddev_ms: 0.0,
-            min: par_ms,
-            max: par_ms,
-            p50: par_ms,
-            p95: par_ms,
-            p99: par_ms,
-            throughput: Some(n_tx as f64 / (par_ms / 1000.0)),
-            note: Some(format!(
-                "Speedup: {:.2}×  Core efficiency: {:.1}%  (theoretical max: {}×)",
-                speedup, efficiency, cores
-            )),
-        });
-        println!("        verify({} txs): serial={:.1}ms  parallel={:.1}ms  speedup={:.2}×",
-            n_tx, serial_ms, par_ms, speedup);
+        let mut s_serial = stat(&format!("Block Verify Serial ({} txs)", n_tx), "ms", &serial_samples);
+        s_serial.throughput = Some(n_tx as f64 / (serial_mean / 1000.0));
+        stats.push(s_serial);
+
+        let mut s_par = stat(&format!("Block Verify Parallel/{} cores ({} txs)", cores, n_tx), "ms", &par_samples);
+        s_par.throughput = Some(n_tx as f64 / (par_mean / 1000.0));
+        s_par.note = Some(format!(
+            "Speedup: {:.2}×  Core efficiency: {:.1}%  (theoretical max: {}×)  [{} reps, post-warmup]",
+            speedup, efficiency, cores, n_reps
+        ));
+        stats.push(s_par);
+
+        println!("        verify({} txs): serial={:.3}ms  parallel={:.3}ms  speedup={:.2}×  ({} reps)",
+            n_tx, serial_mean, par_mean, speedup, n_reps);
     }
 
     // ── LRU cache hit-rate simulation ─────────────────────────────────────────

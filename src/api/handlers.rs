@@ -467,6 +467,117 @@ async fn mine_block(
     }
 }
 
+/// Request to get a block template
+#[derive(Deserialize)]
+pub struct TemplateQuery {
+    pub address: String,
+}
+
+/// GET /api/mine/template?address=...
+/// 
+/// Returns an unmined block template that a mining pool or external miner
+/// can use to search for a valid nonce.
+async fn get_block_template(
+    State(state): State<Arc<ApiState>>,
+    Query(params): Query<TemplateQuery>,
+) -> Result<Json<Block>, (StatusCode, Json<serde_json::Value>)> {
+    // Validate address format
+    fn valid_quanta_addr(addr: &str) -> bool {
+        if addr.starts_with("0x") {
+            addr.len() == 42 && addr[2..].chars().all(|c| c.is_ascii_hexdigit())
+        } else if addr.starts_with("ms") {
+            addr.len() >= 42 && addr[2..].chars().all(|c| c.is_ascii_hexdigit())
+        } else {
+            false
+        }
+    }
+    
+    if !valid_quanta_addr(&params.address) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Invalid address: must be 0x<40 hex> or ms<40+ hex>"
+            }))
+        ));
+    }
+
+    let blockchain = state.blockchain.read().await;
+    match blockchain.create_block_template(params.address.clone()) {
+        Ok(block) => Ok(Json(block)),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": format!("Failed to create template: {}", e)
+            }))
+        ))
+    }
+}
+
+// -----------------------------------------------------------------------
+// Pool block submission endpoint
+// -----------------------------------------------------------------------
+
+/// Response for POST /api/blocks/submit
+#[derive(Serialize)]
+pub struct BlockSubmitResponse {
+    pub success: bool,
+    pub block_height: Option<u64>,
+    pub block_hash: Option<String>,
+    pub error: Option<String>,
+}
+
+/// POST /api/blocks/submit
+///
+/// Accepts a fully-solved block from a mining pool (or external miner).
+/// The block must be complete: correct nonce, valid PoW hash, all transactions.
+/// Validation runs through the same `add_network_block()` consensus path as P2P blocks.
+///
+/// POOL INTEGRATION NOTE:
+/// - Pool calls `GET /api/stats` to get the latest block template data
+/// - Pool distributes work units (jobs) to miners with a LOWER pool difficulty
+/// - When a miner finds a nonce that meets the NETWORK difficulty, pool submits here
+/// - Shares (pool-difficulty solutions) are tracked pool-side only — never sent here
+async fn submit_pool_block(
+    State(state): State<Arc<ApiState>>,
+    Json(block): Json<Block>,
+) -> (StatusCode, Json<BlockSubmitResponse>) {
+    let height = block.index;
+    let hash = block.hash.clone();
+
+    let blockchain = state.blockchain.read().await;
+    match blockchain.add_network_block(block.clone()) {
+        Ok(_) => {
+            drop(blockchain);
+            // Broadcast to P2P network immediately
+            if let Some(ref network) = state.network {
+                network.broadcast_block(block).await;
+            }
+            tracing::info!("Pool block submission accepted: height={}, hash={}…", height, &hash[..12]);
+            (
+                StatusCode::OK,
+                Json(BlockSubmitResponse {
+                    success: true,
+                    block_height: Some(height),
+                    block_hash: Some(hash),
+                    error: None,
+                }),
+            )
+        }
+        Err(e) => {
+            tracing::warn!("Pool block submission rejected: height={}, error={}", height, e);
+            (
+                StatusCode::BAD_REQUEST,
+                Json(BlockSubmitResponse {
+                    success: false,
+                    block_height: None,
+                    block_hash: None,
+                    error: Some(format!("Block rejected: {}", e)),
+                }),
+            )
+        }
+    }
+}
+
 
 /// Start continuous mining
 async fn start_continuous_mining(
@@ -858,10 +969,15 @@ pub fn create_router(
         .route("/api/address/:address",     get(get_address_info))
         .route("/api/address/:address/txs", get(get_address_transactions))
         // ── Mining ──────────────────────────────────────────────────────
-        .route("/api/mine",         post(mine_block))
-        .route("/api/mine/start",   post(start_continuous_mining))
-        .route("/api/mine/stop",    post(stop_continuous_mining))
-        .route("/api/mine/status",  get(get_mining_status))
+        .route("/api/mine",            post(mine_block))
+        .route("/api/mine/template",   get(get_block_template))
+        .route("/api/mine/start",      post(start_continuous_mining))
+        .route("/api/mine/stop",       post(stop_continuous_mining))
+        .route("/api/mine/status",     get(get_mining_status))
+        // ── Pool Integration ────────────────────────────────────────────
+        // Accepts fully-solved blocks from mining pools.
+        // Shares are tracked pool-side; only network-difficulty solutions arrive here.
+        .route("/api/blocks/submit",   post(submit_pool_block))
         .layer(
             ServiceBuilder::new()
                 .layer(middleware::from_fn(rate_limiter))
@@ -901,6 +1017,8 @@ pub async fn start_server(
     tracing::info!("   GET  /api/address/:address/txs      - Address transaction history");
     tracing::info!("   GET  /api/mempool                   - Pending transactions");
     tracing::info!("   POST /api/transactions/submit       - Submit pre-signed transaction");
+    tracing::info!("   GET  /api/mine/template?address=..  - Get block template for mining");
+    tracing::info!("   POST /api/blocks/submit             - Submit solved block (pool use)");
     tracing::info!("   GET  /api/validate                  - Validate blockchain");
     tracing::info!("   GET  /api/peers                     - Connected peers");
     tracing::info!("   GET  /api/metrics                   - Prometheus metrics");

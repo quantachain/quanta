@@ -17,20 +17,23 @@ use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
 pub fn run(iterations: usize) -> BenchmarkSection {
     println!("  [1/6] Cryptographic Performance (Falcon-512)...");
 
-    let keygen_stat   = bench_keygen(iterations);
-    let sign_stat     = bench_sign(iterations);
-    let verify_stat   = bench_verify(iterations);
-    let hash_stat     = bench_sha3(iterations * 10);  // faster, so more iterations
-    let sig_size_stat = bench_sig_size(iterations);
+    let keygen_stat     = bench_keygen(iterations);
+    let sign_stat       = bench_sign(iterations);
+    let verify_warm     = bench_verify_warm(iterations);
+    let verify_cold     = bench_verify_cold((iterations / 10).max(20)); // cold-path is slower
+    let hash_stat       = bench_sha3(iterations * 10);  // faster, so more iterations
+    let sig_size_stat   = bench_sig_size(iterations);
 
-    println!("        keygen  {:.3} ms | sign {:.3} ms | verify {:.3} ms",
-        keygen_stat.mean_ms, sign_stat.mean_ms, verify_stat.mean_ms);
+    println!("        keygen  {:.3} ms | sign {:.3} ms | verify-warm {:.3} µs | verify-cold {:.3} µs",
+        keygen_stat.mean_ms, sign_stat.mean_ms, verify_warm.mean_ms, verify_cold.mean_ms);
 
     BenchmarkSection {
         name: "Cryptographic Performance (Falcon-512)".to_string(),
         description: format!(
             "Falcon-512 (NIST PQC Round 3) performance over {} iterations.\n\
              Public key: {} bytes (fixed). Signature: variable-length compressed lattice.\n\
+             verify-warm = same key/sig reused (L1-cache hot path, represents in-pipeline LRU hits).\n\
+             verify-cold = fresh heap allocation each iteration (cache-cold, represents first-seen key on network).\n\
              Comparison baselines (NIST FIPS 186-5 / PQCrypto literature):\n\
              • ECDSA-P256 sign: ~0.05 ms | verify: ~0.12 ms | key: 64 B | sig: 64 B\n\
              • RSA-2048 sign:   ~1.80 ms | verify: ~0.05 ms | key: 256 B | sig: 256 B\n\
@@ -39,7 +42,7 @@ pub fn run(iterations: usize) -> BenchmarkSection {
             iterations,
             FALCON512_PUBKEY_BYTES,
         ),
-        stats: vec![keygen_stat, sign_stat, verify_stat, hash_stat, sig_size_stat],
+        stats: vec![keygen_stat, sign_stat, verify_warm, verify_cold, hash_stat, sig_size_stat],
     }
 }
 
@@ -69,15 +72,16 @@ fn bench_sign(n: usize) -> BenchmarkStat {
     stat("Falcon-512 Sign", "ms/op", &samples)
 }
 
-// ─── Verify ──────────────────────────────────────────────────────────────────
+// ── Verify (warm — L1-cache hot) ───────────────────────────────────────────
 
-fn bench_verify(n: usize) -> BenchmarkStat {
+fn bench_verify_warm(n: usize) -> BenchmarkStat {
     let kp = FalconKeypair::generate();
     let data = b"quanta-benchmark-verify-payload-v1";
     let signed = kp.sign_transaction_canonical(data);
     let hash = canonical_signing_hash(data);
 
-    // Falcon verify is ~1–2 µs — measure in µs, use black_box so LLVM can't elide the work
+    // Same buffers reused every iteration — all in L1 cache after first call.
+    // Represents the in-pipeline LRU-hit pathway (repeated tx seen in mempool).
     let mut samples = Vec::with_capacity(n);
     for _ in 0..n {
         let t = Instant::now();
@@ -86,8 +90,39 @@ fn bench_verify(n: usize) -> BenchmarkStat {
         ));
         samples.push(t.elapsed().as_secs_f64() * 1_000_000.0); // µs
     }
-    // stat_us: throughput = 1_000_000 / mean_µs = ops/sec (correct for µs samples)
-    stat_us("Falcon-512 Verify", "µs/op", &samples)
+    let mut s = stat_us("Falcon-512 Verify (warm/LRU-hit)", "µs/op", &samples);
+    s.note = Some("Cache-warm path: same 1.6 KB key+sig reused. Represents in-pipeline LRU cache hits.".to_string());
+    s
+}
+
+// ── Verify (cold — fresh heap allocation each call) ─────────────────────
+
+fn bench_verify_cold(n: usize) -> BenchmarkStat {
+    let kp = FalconKeypair::generate();
+    let data = b"quanta-benchmark-verify-cold-payload-v1";
+    let signed = kp.sign_transaction_canonical(data);
+    let hash = canonical_signing_hash(data);
+
+    // Allocate fresh Vec copies each iteration so the CPU sees a new pointer
+    // (heap allocation flushes the data from L1 cache on most allocators).
+    // This approximates first-seen-transaction latency on the network path.
+    let mut samples = Vec::with_capacity(n);
+    for _ in 0..n {
+        // Fresh heap copies — defeats L1/L2 data cache for key + sig bytes
+        let pk_cold  = kp.public_key.clone();
+        let sig_cold = signed.clone();
+        let t = Instant::now();
+        let _ok = black_box(crate::crypto::signatures::verify_signature_strict(
+            black_box(&hash), black_box(&sig_cold), black_box(&pk_cold),
+        ));
+        samples.push(t.elapsed().as_secs_f64() * 1_000_000.0); // µs
+    }
+    let mut s = stat_us("Falcon-512 Verify (cold/fresh-key)", "µs/op", &samples);
+    s.note = Some(
+        "Cache-cold path: fresh Vec allocated each iter. Approximates first-seen-key network latency."
+        .to_string()
+    );
+    s
 }
 
 // ─── SHA3-256 ────────────────────────────────────────────────────────────────
