@@ -301,9 +301,16 @@ pub fn run_skipped() -> BenchmarkSection {
 }
 
 fn build_test_tx(pk_bytes: &[u8], sk_bytes: &[u8], sender: &str, nonce: u64) -> Transaction {
+    // Use faucet index 1 as recipient — guaranteed to exist on chain.
+    // The 0xdead burn address has no account state entry and some nodes reject it.
+    let recipient = if sender == "0x1683be267318d2ddd8cee8df4a4548dcffb1e088" {
+        "0xd528c18ce7a8844e4a4dcd841975b20ae599b020" // faucet 1
+    } else {
+        "0x1683be267318d2ddd8cee8df4a4548dcffb1e088" // faucet 0
+    };
     let mut tx = Transaction {
         sender: sender.to_string(),
-        recipient: "0xdead000000000000000000000000000000000000".to_string(),
+        recipient: recipient.to_string(),
         amount: 1_000,
         timestamp: Utc::now().timestamp(),
         signature: vec![],
