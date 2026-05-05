@@ -11,6 +11,36 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.7.2-alpha] — 2026-05-05
+
+> **CONSENSUS-CRITICAL patch. No testnet reset required.**
+> All nodes must upgrade. Nodes on v0.7.1 will diverge from upgraded nodes at any block
+> containing a TimeLock credit to the miner's address above height 85,000.
+> Existing `quanta_data/` directories are fully compatible — drop-in upgrade.
+
+### Fixed
+- **State root determinism (`calculate_state_root`)** — `locked_balances` is a `Vec`
+  whose insertion order differs between `create_block_template` (coinbase credited first)
+  and `validate_block_consensus` (user txs applied first, coinbase in a second pass).
+  This caused a deterministic hash mismatch whenever a block contained a `TimeLockTransfer`
+  credit to the same address as the miner's coinbase — the `locked_balances` vec was
+  identical in content but different in order, producing a different SHA3-256 state root.
+  **Fix:** `calculate_state_root` now sorts `locked_balances` by `(unlock_height, amount)`
+  before hashing — result is order-independent on every node regardless of apply order.
+
+### Added
+- **`STATE_ROOT_SORT_FIX_HEIGHT = 85_000`** — blocks below this height skip state root
+  validation (they are secured by hardcoded checkpoints). This avoids re-validating the
+  ~80k already-committed blocks under the new sort rule, which would fail for the small
+  number of historically mismatched roots.
+- **Checkpoints extended to block 80,000** — three new testnet checkpoints verified live
+  from `scan.quantachain.org` on 2026-05-05:
+  - `(60_000, "0000010ce22920660ba1e42423ea46e76dc7582963d6f9f220e3930031bd9bc9")`
+  - `(70_000, "000001fcb0637b06601b4f111b22070e856c8cabf2eaa545c41b938b4478d186")`
+  - `(80_000, "0000002d80e66bce37596616a9c9c3c1988da6e65811ad132926162c7e000a0e")`
+
+---
+
 ## [0.7.1-alpha] — 2026-04-10
 
 > **No testnet reset. Drop-in upgrade from v0.7.0.**
@@ -141,7 +171,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
-[Unreleased]: https://github.com/quantachain/quanta/compare/v0.7.1-alpha...HEAD
+[Unreleased]: https://github.com/quantachain/quanta/compare/v0.7.2-alpha...HEAD
+[0.7.2-alpha]: https://github.com/quantachain/quanta/compare/v0.7.1-alpha...v0.7.2-alpha
 [0.7.1-alpha]: https://github.com/quantachain/quanta/compare/v0.7.0-alpha...v0.7.1-alpha
 [0.7.0-alpha]: https://github.com/quantachain/quanta/compare/v0.6.0-alpha...v0.7.0-alpha
 [0.6.0-alpha]: https://github.com/quantachain/quanta/compare/v0.5.0-alpha...v0.6.0-alpha

@@ -346,7 +346,13 @@ impl AccountState {
         Self { accounts: HashMap::new() }
     }
 
-    /// Calculate deterministic state root hash of all accounts
+    /// Calculate deterministic state root hash of all accounts.
+    ///
+    /// CONSENSUS FIX: locked_balances is a Vec whose insertion order differs
+    /// between create_block_template (coinbase credited first) and
+    /// validate_block_consensus (user txs applied first, coinbase in a second
+    /// pass).  Sorting by (unlock_height, amount) before hashing makes the
+    /// state root independent of insertion order.
     pub fn calculate_state_root(&self) -> String {
         use sha3::{Digest, Sha3_256};
         let mut hasher = Sha3_256::new();
@@ -359,7 +365,12 @@ impl AccountState {
                 hasher.update(acc.address.as_bytes());
                 hasher.update(&acc.balance.to_le_bytes());
                 hasher.update(&acc.nonce.to_le_bytes());
-                for locked in &acc.locked_balances {
+                // Sort locked balances deterministically so insertion order
+                // (which differs between mining and validation paths) does not
+                // affect the hash.
+                let mut sorted_locks: Vec<&LockedBalance> = acc.locked_balances.iter().collect();
+                sorted_locks.sort_by_key(|l| (l.unlock_height, l.amount));
+                for locked in sorted_locks {
                     hasher.update(&locked.amount.to_le_bytes());
                     hasher.update(&locked.unlock_height.to_le_bytes());
                 }

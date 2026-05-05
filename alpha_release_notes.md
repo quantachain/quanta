@@ -1,10 +1,11 @@
-# QuantaChain Testnet — Alpha v0.7.1
+# QuantaChain Testnet — Alpha v0.7.2
 
 Post-quantum secure blockchain using Falcon-512 signatures and SHA3-256 Proof of Work.
 
-> **v0.7.1 — No testnet reset required.**
-> Drop-in upgrade from v0.7.0. All node operators can upgrade by pulling the new image and restarting.
-> Existing `quanta_data/` directories are fully compatible.
+> **v0.7.2 — CONSENSUS-CRITICAL patch. No testnet reset required.**
+> All nodes MUST upgrade. v0.7.1 nodes will diverge from upgraded nodes on any block
+> containing a TimeLock credit to the miner's address at height > 85,000.
+> Existing `quanta_data/` directories are fully compatible — drop-in upgrade.
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
@@ -85,14 +86,14 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 
 ### Option 2: Docker CLI
 ```bash
-docker pull xd637/quanta-node:v0.7.1-alpha
+docker pull xd637/quanta-node:v0.7.2-alpha
 
 docker run -d \
   --name quanta-node \
   -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
   -v quanta-data:/home/quanta/quanta_data \
   -v quanta-logs:/home/quanta/logs \
-  xd637/quanta-node:v0.7.1-alpha
+  xd637/quanta-node:v0.7.2-alpha
 ```
 
 ### Option 3: Docker Compose (Recommended)
@@ -123,7 +124,7 @@ sudo ufw allow ssh
 sudo ufw --force enable
 ```
 
-**3. Upgrade to v0.7.1 (no data wipe required):**
+**3. Upgrade to v0.7.2 (no data wipe required):**
 ```bash
 docker pull xd637/quanta-node:latest
 docker stop quanta-node && docker rm quanta-node
@@ -147,7 +148,7 @@ docker logs quanta-node --tail 30 -f
 ```bash
 git clone https://github.com/quantachain/quanta
 cd quanta
-git checkout v0.7.1-alpha
+git checkout v0.7.2-alpha
 cargo build --release
 
 ./target/release/quanta start -c quanta.toml
@@ -203,6 +204,61 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 | `8333` | P2P Network |
 | `7782` | RPC |
 | `9090` | Prometheus Metrics |
+
+---
+
+## What Changed in Alpha v0.7.2
+
+**No testnet reset. No wire format change. Consensus-critical patch — all nodes must upgrade.**
+
+### Fix — State root determinism (`calculate_state_root`)
+
+The `locked_balances` field on each account is a `Vec<LockedBalance>`. When a block
+contains a `TimeLockTransfer` credit to the miner's own address *alongside* a coinbase
+credit, two `LockedBalance` entries are pushed to that address's vec — but in different
+orders depending on which code path runs:
+
+- **Mining path** (`create_block_template`): coinbase tx processed first → coinbase lock
+  pushed first, TimeLock lock pushed second.
+- **Validation path** (`validate_block_consensus`): user txs applied first → TimeLock
+  lock pushed first, coinbase lock pushed second.
+
+Both vecs contain the same two entries, but SHA3-256 is order-sensitive — the resulting
+state root hashes differed between the mining node and every syncing peer, causing:
+
+```
+[ERROR] Invalid state root at block N: expected <mining_hash>, got <validation_hash>
+```
+
+This manifested sporadically (only when a miner received a `TimeLockTransfer` to their
+own wallet in the same block they mined) and was the root cause of the "nodes fail at
+varying heights" sync bug reported across the testnet.
+
+**Fix:** `calculate_state_root` now sorts `locked_balances` by `(unlock_height, amount)`
+before iterating. The sort is stable, deterministic on all platforms, and
+order-independent — both code paths now produce an identical SHA3-256 digest.
+
+### Guard — `STATE_ROOT_SORT_FIX_HEIGHT = 85_000`
+
+Blocks below height 85,000 skip state root validation — they are already secured by
+hardcoded checkpoints and were committed under the old (buggy) ordering rule. Applying
+the new sort rule retroactively would fail for any historical block that happened to
+have the mismatch, turning a sync fix into a sync break.
+
+From height 85,000 onward, the new deterministic state root is enforced on all nodes.
+
+### New Checkpoints (through block 80,000)
+
+Three testnet checkpoints verified live from `scan.quantachain.org` on 2026-05-05:
+
+| Height | Hash |
+|--------|------|
+| 60,000 | `0000010ce22920660ba1e42423ea46e76dc7582963d6f9f220e3930031bd9bc9` |
+| 70,000 | `000001fcb0637b06601b4f111b22070e856c8cabf2eaa545c41b938b4478d186` |
+| 80,000 | `0000002d80e66bce37596616a9c9c3c1988da6e65811ad132926162c7e000a0e` |
+
+These protect the chain from deep reorgs below 80k even on nodes that have not yet
+reached that height.
 
 ---
 

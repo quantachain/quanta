@@ -1000,7 +1000,7 @@ async fn main() {
             // Live node section (async)
             let network_section = if let Some(ref url) = live_node {
                 let count = if quick { 20 } else { live_txs };
-                benchmark::network_bench::run(url, count).await
+                benchmark::network_bench::run(url, count, None, 0).await
             } else {
                 benchmark::network_bench::run_skipped()
             };

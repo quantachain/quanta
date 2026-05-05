@@ -16,7 +16,6 @@ use crate::core::TESTNET_NETWORK_ID;
 use crate::consensus::performance::verify_transactions_parallel;
 use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
 use crate::benchmark::crypto_bench::stat;
-use rayon::prelude::*;
 use chrono::Utc;
 
 /// Batch sizes to test — mirrors realistic network conditions.

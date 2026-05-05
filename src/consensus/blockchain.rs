@@ -164,6 +164,18 @@ const MAX_FUTURE_BLOCK_TIME: i64 = 7200; // 2 hours maximum future timestamp
 /// LOW-1 FIX: Bound address string length to prevent unbounded HashMap key allocations.
 const MAX_ADDRESS_LEN: usize = 128;
 
+/// STATE ROOT SORT FIX (v0.7.2): Prior to this height, state_root was computed
+/// with locked_balances in insertion order, which differs between the mining
+/// path (coinbase first) and the validation path (user txs first, coinbase
+/// second). This caused a deterministic mismatch on syncing nodes whenever a
+/// block contained a TimeLock credit to the miner's address alongside a coinbase.
+///
+/// From this height onward, calculate_state_root sorts locked_balances by
+/// (unlock_height, amount) before hashing, making the result order-independent.
+/// Blocks BELOW this height skip state_root validation — they are already
+/// secured by hardcoded checkpoints.
+const STATE_ROOT_SORT_FIX_HEIGHT: u64 = 85_000;
+
 /// CONSENSUS-CRITICAL: Genesis block hashes (prevent chain-split attacks)
 /// Mainnet genesis — pending final mining before mainnet launch.
 const GENESIS_HASH: &str = "1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0";
@@ -184,7 +196,11 @@ const TESTNET_CHECKPOINTS: &[(u64, &str)] = &[
     (30_000, "000001743b0b76fe64b28631afd7c923cf6eca06377dabe9fc8ebbbf8725ac6e"),
     (40_000, "00000059783ae9efeb043ac6b1fa254fa338ccc5631dd1b7f96f6a498df07c86"),
     (50_000, "0000010309330cd86087a9133848f80fc82b056f63adc0749e83894f0a4de956"),
-    // Next: add (60_000, ...) when chain reaches ~60k
+    // Verified live from scan.quantachain.org on 2026-05-05
+    (60_000, "0000010ce22920660ba1e42423ea46e76dc7582963d6f9f220e3930031bd9bc9"),
+    (70_000, "000001fcb0637b06601b4f111b22070e856c8cabf2eaa545c41b938b4478d186"),
+    (80_000, "0000002d80e66bce37596616a9c9c3c1988da6e65811ad132926162c7e000a0e"),
+    // Next: add (90_000, ...) when chain reaches ~90k
 ];
 
 // MAINNET checkpoints — empty until mainnet launch
@@ -1052,8 +1068,18 @@ impl Blockchain {
         // this feature. This is safe because the Merkle root already commits to
         // all transaction data; state_root adds an extra account-state binding
         // for nodes that compute it.
+        //
+        // STATE_ROOT_SORT_FIX_HEIGHT exemption: blocks mined before the sort fix
+        // stored a state_root computed with unsorted locked_balances.  Re-validating
+        // them with the now-sorted calculate_state_root would always produce a
+        // different hash and reject them.  Those blocks are already secured by
+        // hardcoded checkpoints, so we skip state_root validation for them.
         let computed_state_root = temp_state.calculate_state_root();
-        if block.index > 0 && !block.state_root.is_empty() && block.state_root != computed_state_root {
+        if block.index > 0
+            && block.index >= STATE_ROOT_SORT_FIX_HEIGHT
+            && !block.state_root.is_empty()
+            && block.state_root != computed_state_root
+        {
             tracing::warn!(
                 "Invalid state root at block {}: computed={}, block={}",
                 block.index, computed_state_root, block.state_root
