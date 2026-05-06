@@ -13,20 +13,40 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [0.7.4-alpha] — 2026-05-06
 
-> **Chain-sync compatibility patch. No testnet reset required.**
-> Nodes on v0.7.3 doing a clean start could not sync past block 84,812 due to a nonce
-> inconsistency caused by an earlier reorg that ran under the v0.7.2 snapshot-fallback bug.
+> **Chain-sync compatibility + sync-stuck patch. No testnet reset required.**
+> Fixes block 84,812 nonce incompatibility, state root corruption zone, and a sync
+> loop where nodes reported "Already on heaviest chain" while 20+ blocks behind.
 
 ### Fixed
-- **Pre-checkpoint nonce override during sequential sync** — block 84,812 on the canonical
-  chain contains a TX from `0xf23f...` with nonce=1, but a clean-sync node expects nonce=5
-  (4 earlier TXs from that address exist in pre-reorg history that is still in the chain).
-  Root cause: the reorg that produced block 84,812 ran under the v0.7.2 snapshot-fallback
-  bug, so the main node rebuilt state without the miner’s early transactions and wrongly
-  accepted nonce=1. Fix: for blocks below the highest hardcoded checkpoint height (85,000),
-  nonce mismatches are resolved by overriding `temp_state` to the block’s claimed nonce
-  instead of rejecting. Full nonce enforcement still applies at and above the checkpoint.
-  Added `AccountState::set_nonce()` to support this path.
+- **Pre-checkpoint nonce override (block 84,812 compat)** — block 84,812 contains
+  a TX with nonce=1 from `0xf23f...` but a clean-sync node expects nonce=5. Root cause:
+  the reorg that produced this block ran under the v0.7.2 snapshot-fallback bug and
+  rebuilt state without the sender's earlier 4 transactions. Fix: for blocks below the
+  highest hardcoded checkpoint, nonce mismatches override `temp_state` to the block's
+  claimed nonce instead of rejecting. Full enforcement still applies at/above checkpoint.
+  Added `AccountState::set_nonce()`.
+- **State root skip height raised 85,000 → 90,000** — blocks 85,000–89,999 were mined
+  while the main node had corrupted account state (from the v0.7.2 reorg bug). Sequential-
+  sync nodes can never reproduce those state roots. Raising `STATE_ROOT_SORT_FIX_HEIGHT`
+  to 90,000 skips state root validation for the entire damage zone. A new checkpoint at
+  90,000 will be added once the main node restarts on v0.7.4 and reaches that height.
+- **`cumulative_work_at` off-by-one in slow path** — `for h in 0..tip_height` excluded
+  the block AT `tip_height`, making every deep-reorg reset cumulative_work ~8.3M too low.
+  Over repeated reorgs this drift caused the sync peer-selection to see local work ≥ peer
+  work even when 20 blocks behind. Fixed to `0..=tip_height` (inclusive).
+- **Sync stuck: "Already on heaviest chain" when 20 blocks behind** — the peer selection
+  in `sync_blockchain` compared cumulative_work only. When local work drifted above the
+  peer's (due to the off-by-one above), no peer was selected and sync silently stopped.
+  Fix: if any peer is >5 blocks ahead by height, always select it for sync regardless of
+  cumulative_work comparison (`far_ahead` safety-net path).
+- **Mempool cleanup by `(sender, nonce)` in addition to tx hash** — confirmed transactions
+  were staying in the mempool when the tx hash comparison failed due to `public_key`
+  serialization differences between the mempool submission path and P2P block path.
+  `pending_transactions.retain` now also evicts when `(sender, nonce)` matches any mined tx.
+- **Faucet duplicate-nonce race condition** — rapid concurrent faucet claims both read
+  the same confirmed nonce and submitted identical nonce values; the second was silently
+  rejected by the node. Added a module-level async mutex and in-memory pending-nonce
+  tracker to serialise claim submissions in `quanta-web/app/api/faucet/route.ts`.
 
 ---
 

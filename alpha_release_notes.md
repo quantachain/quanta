@@ -2,10 +2,10 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and SHA3-256 Proof of Work.
 
-> **v0.7.4 — Sync stability patch. No testnet reset required.**
-> All nodes SHOULD upgrade. v0.7.2 nodes may get stuck during reorg at high block heights
-> due to a timeout-inducing O(n) Sled scan and incorrect LWMA bounds check during replay.
-> Existing `quanta_data/` directories are fully compatible — drop-in upgrade.
+> **v0.7.4 — Chain-sync compatibility + sync-stuck patch. No testnet reset required.**
+> All nodes MUST upgrade. Clean-start nodes were stuck at block 84,812 (nonce mismatch),
+> nodes with mining could silently stop syncing ("Already on heaviest chain" loop), and
+> confirmed TXs were lingering in the mempool. Drop-in upgrade — no data wipe needed.
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
@@ -310,50 +310,78 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 
 ## What Changed in Alpha v0.7.4
 
-**No testnet reset. No wire format change. Sync stability patch — all nodes should upgrade.**
+**No testnet reset. No wire format change. All nodes must upgrade.**
+
+### Fix — Block 84,812 nonce incompatibility (clean-start nodes stuck)
+
+A previous reorg ran under the v0.7.2 snapshot-fallback bug, causing the main node to
+rebuild account state without the faucet wallet's 4 earlier transactions. It accepted
+block 84,812 with nonce=1 (should be 5). Clean-start nodes expecting nonce=5 rejected
+the block permanently. Fix: for blocks below the highest checkpoint (85,000), nonce
+mismatches override `temp_state` to the block's claimed nonce instead of rejecting.
+
+### Fix — State root skip height raised 85,000 → 90,000
+
+Blocks 85,000–89,999 were mined with corrupted account state (from the v0.7.2 reorg
+bug). No clean-sync node can reproduce those state roots. `STATE_ROOT_SORT_FIX_HEIGHT`
+raised to 90,000. A new checkpoint at 90,000 will be added once the main node reaches
+that height on v0.7.4.
+
+### Fix — `cumulative_work_at` off-by-one (deep-reorg path)
+
+`for h in 0..tip_height` excluded the block AT `tip_height`, making every deep-reorg
+reset cumulative_work ~8.3M too low. Drift from repeated reorgs caused sync to
+incorrectly believe local work ≥ peer work. Fixed to `0..=tip_height`.
+
+### Fix — Sync loop: "Already on heaviest chain" when 20+ blocks behind
+
+Peer selection in `sync_blockchain` compared cumulative_work only. When local work
+drifted above the peer's, no peer was selected and sync silently stopped. Added a
+`far_ahead` safety net: if a peer is >5 blocks ahead by height, always sync.
+
+### Fix — Mempool retained confirmed TXs (hash comparison mismatch)
+
+`public_key` byte differences between mempool and P2P block paths caused `tx.hash()`
+comparison to fail, leaving confirmed TXs in the mempool. Added `(sender, nonce)`
+matching as a fallback eviction path.
+
+### Fix — Faucet duplicate-nonce race condition (`quanta-web`)
+
+Concurrent faucet claims submitted identical nonces. Added an async mutex and
+in-memory pending-nonce tracker to serialise claim submissions.
+
+---
+
+## What Changed in Alpha v0.7.3
+
+**No testnet reset. No wire format change. Sync stability patch.**
 
 ### Fix — O(n) Sled scan on every reorg (`deep_reorg`)
 
-When performing even a tiny 2–5 block reorg, `deep_reorg` was recalculating `base_work`
-by reading **every block from 0 to rollback_to** out of Sled. At height 85k this was
-85,000 sequential reads while holding the blockchain write lock, taking 30–60 seconds.
-During this time the syncing peer would time out, drop the connection, and the sync loop
-logged `"Reorg failed: Invalid block"` then retried — hitting the same scan again.
-
-Fix: replaced with `cumulative_work_at(rollback_to)` which is O(1) — it reads the
-in-memory `cumulative_work` value that is updated incrementally after every block.
+`deep_reorg` recalculated `base_work` by reading every block from 0 to `rollback_to`
+from Sled — 85,000 reads at height 85k, taking 30–60s. Fixed with O(1)
+`cumulative_work_at(rollback_to)`.
 
 ### Fix — Wrong LWMA bounds check during reorg replay
 
-`validate_block_consensus_reorg()` called `calculate_next_difficulty()` to obtain an
-LWMA estimate, then rejected any peer block whose difficulty was outside ±50% of that
-estimate. During a deep reorg the chain is partially rebuilt — the LWMA window is
-incomplete (wrong timestamps, missing blocks) — so the estimate was meaningless and
-valid peer blocks were rejected as "outside LWMA bounds".
+`validate_block_consensus_reorg()` rejected valid peer blocks as "outside LWMA bounds"
+because the LWMA window was incomplete mid-reorg. Removed the bounds check from the
+reorg path.
 
-Fix: removed the LWMA bounds check from the reorg validation path. The `has_valid_hash()`
-PoW check already proves real work was done. `MIN_DIFFICULTY` still guards against trivial
-blocks.
+### Fix — Snapshot fallback replayed wrong block range
 
-### Fix — Snapshot fallback replayed wrong block range (`rebuild_account_state_up_to`)
-
-When a 1000-block snapshot was missing (new nodes have none), the code fell back to
-genesis-only state (10 faucet accounts) then set `replay_start = snapshot_height + 1`,
-skipping all blocks 1…snapshot_height. The rebuilt state had genesis balances only, so
-every subsequent reorg block failed with "Insufficient balance / wrong nonce → Invalid block".
-
-Fix: when no snapshot is loaded, `replay_start` is always set to `1`.
+`replay_start` was set to `snapshot_height + 1` even when no snapshot was loaded,
+skipping all blocks 1…snapshot_height. Fixed to always use `replay_start = 1`.
 
 ### Added — Checkpoint at block 85,000
-
-Verified live from `scan.quantachain.org` on 2026-05-06. This anchors the
-`STATE_ROOT_SORT_FIX_HEIGHT` boundary and prevents deep reorgs into pre-sort-fix territory.
 
 | Height | Hash |
 |--------|------|
 | 85,000 | `0000007305d4ceeaf72a4f3c58001295a335d588e16a05f037d21dfb21ac06ca` |
 
 ---
+
+
 
 ## What Changed in Alpha v0.7.2
 
