@@ -11,6 +11,37 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.7.3-alpha] — 2026-05-06
+
+> **Sync stability patch. No testnet reset required.**
+> Nodes on v0.7.2 may get stuck during reorg due to an O(n) Sled scan per reorg cycle
+> and an incorrect LWMA bounds check during replay. Drop-in upgrade — no data wipe.
+
+### Fixed
+- **O(n) Sled scan in `deep_reorg` (CRITICAL)** — `base_work` was recalculated by
+  reading every block from 0 to `rollback_to` from Sled. At height 85k with a 5-block
+  rollback this was 85,000 sequential reads while holding the write lock, causing 30–60s
+  stalls and peer timeouts that logged as `"Reorg failed: Invalid block"` then retried
+  infinitely. **Fix:** replaced with `cumulative_work_at(rollback_to)` — O(1) in-memory read.
+- **Wrong LWMA bounds check during reorg replay** — `validate_block_consensus_reorg`
+  called `calculate_next_difficulty()` on a partially-rebuilt chain (incomplete LWMA window),
+  producing a wrong estimate that rejected valid peer blocks as „outside ±50% LWMA bounds“.
+  **Fix:** removed the LWMA bounds check from the reorg path; `has_valid_hash()` PoW
+  already proves real work, `MIN_DIFFICULTY` still guards the floor.
+- **Snapshot fallback skipped all blocks in `rebuild_account_state_up_to`** — when a
+  1000-block snapshot was missing, the code fell back to genesis-only state but then set
+  `replay_start = snapshot_height + 1`, silently skipping all blocks 1…snapshot_height.
+  Every reorg block subsequently failed with insufficient balance / wrong nonce.
+  **Fix:** when no snapshot is loaded `replay_start` is always `1`.
+
+### Added
+- **Checkpoint at block 85,000** — verified live from `scan.quantachain.org` on 2026-05-06:
+  `(85_000, "0000007305d4ceeaf72a4f3c58001295a335d588e16a05f037d21dfb21ac06ca")`
+  Anchors the `STATE_ROOT_SORT_FIX_HEIGHT` boundary; prevents deep reorgs into
+  pre-sort-fix territory.
+
+---
+
 ## [0.7.2-alpha] — 2026-05-05
 
 > **CONSENSUS-CRITICAL patch. No testnet reset required.**
@@ -171,7 +202,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
-[Unreleased]: https://github.com/quantachain/quanta/compare/v0.7.2-alpha...HEAD
+[Unreleased]: https://github.com/quantachain/quanta/compare/v0.7.3-alpha...HEAD
+[0.7.3-alpha]: https://github.com/quantachain/quanta/compare/v0.7.2-alpha...v0.7.3-alpha
 [0.7.2-alpha]: https://github.com/quantachain/quanta/compare/v0.7.1-alpha...v0.7.2-alpha
 [0.7.1-alpha]: https://github.com/quantachain/quanta/compare/v0.7.0-alpha...v0.7.1-alpha
 [0.7.0-alpha]: https://github.com/quantachain/quanta/compare/v0.6.0-alpha...v0.7.0-alpha

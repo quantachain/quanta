@@ -1,10 +1,10 @@
-# QuantaChain Testnet — Alpha v0.7.2
+# QuantaChain Testnet — Alpha v0.7.3
 
 Post-quantum secure blockchain using Falcon-512 signatures and SHA3-256 Proof of Work.
 
-> **v0.7.2 — CONSENSUS-CRITICAL patch. No testnet reset required.**
-> All nodes MUST upgrade. v0.7.1 nodes will diverge from upgraded nodes on any block
-> containing a TimeLock credit to the miner's address at height > 85,000.
+> **v0.7.3 — Sync stability patch. No testnet reset required.**
+> All nodes SHOULD upgrade. v0.7.2 nodes may get stuck during reorg at high block heights
+> due to a timeout-inducing O(n) Sled scan and incorrect LWMA bounds check during replay.
 > Existing `quanta_data/` directories are fully compatible — drop-in upgrade.
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
@@ -86,14 +86,14 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 
 ### Option 2: Docker CLI
 ```bash
-docker pull xd637/quanta-node:v0.7.2-alpha
+docker pull xd637/quanta-node:v0.7.3-alpha
 
 docker run -d \
   --name quanta-node \
   -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
   -v quanta-data:/home/quanta/quanta_data \
   -v quanta-logs:/home/quanta/logs \
-  xd637/quanta-node:v0.7.2-alpha
+  xd637/quanta-node:v0.7.3-alpha
 ```
 
 ### Option 3: Docker Compose (Recommended)
@@ -124,7 +124,7 @@ sudo ufw allow ssh
 sudo ufw --force enable
 ```
 
-**3. Upgrade to v0.7.2 (no data wipe required):**
+**3. Upgrade to v0.7.3 (no data wipe required):**
 ```bash
 docker pull xd637/quanta-node:latest
 docker stop quanta-node && docker rm quanta-node
@@ -148,7 +148,7 @@ docker logs quanta-node --tail 30 -f
 ```bash
 git clone https://github.com/quantachain/quanta
 cd quanta
-git checkout v0.7.2-alpha
+git checkout v0.7.3-alpha
 cargo build --release
 
 ./target/release/quanta start -c quanta.toml
@@ -204,6 +204,53 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 | `8333` | P2P Network |
 | `7782` | RPC |
 | `9090` | Prometheus Metrics |
+
+---
+
+## What Changed in Alpha v0.7.3
+
+**No testnet reset. No wire format change. Sync stability patch — all nodes should upgrade.**
+
+### Fix — O(n) Sled scan on every reorg (`deep_reorg`)
+
+When performing even a tiny 2–5 block reorg, `deep_reorg` was recalculating `base_work`
+by reading **every block from 0 to rollback_to** out of Sled. At height 85k this was
+85,000 sequential reads while holding the blockchain write lock, taking 30–60 seconds.
+During this time the syncing peer would time out, drop the connection, and the sync loop
+logged `"Reorg failed: Invalid block"` then retried — hitting the same scan again.
+
+Fix: replaced with `cumulative_work_at(rollback_to)` which is O(1) — it reads the
+in-memory `cumulative_work` value that is updated incrementally after every block.
+
+### Fix — Wrong LWMA bounds check during reorg replay
+
+`validate_block_consensus_reorg()` called `calculate_next_difficulty()` to obtain an
+LWMA estimate, then rejected any peer block whose difficulty was outside ±50% of that
+estimate. During a deep reorg the chain is partially rebuilt — the LWMA window is
+incomplete (wrong timestamps, missing blocks) — so the estimate was meaningless and
+valid peer blocks were rejected as "outside LWMA bounds".
+
+Fix: removed the LWMA bounds check from the reorg validation path. The `has_valid_hash()`
+PoW check already proves real work was done. `MIN_DIFFICULTY` still guards against trivial
+blocks.
+
+### Fix — Snapshot fallback replayed wrong block range (`rebuild_account_state_up_to`)
+
+When a 1000-block snapshot was missing (new nodes have none), the code fell back to
+genesis-only state (10 faucet accounts) then set `replay_start = snapshot_height + 1`,
+skipping all blocks 1…snapshot_height. The rebuilt state had genesis balances only, so
+every subsequent reorg block failed with "Insufficient balance / wrong nonce → Invalid block".
+
+Fix: when no snapshot is loaded, `replay_start` is always set to `1`.
+
+### Added — Checkpoint at block 85,000
+
+Verified live from `scan.quantachain.org` on 2026-05-06. This anchors the
+`STATE_ROOT_SORT_FIX_HEIGHT` boundary and prevents deep reorgs into pre-sort-fix territory.
+
+| Height | Hash |
+|--------|------|
+| 85,000 | `0000007305d4ceeaf72a4f3c58001295a335d588e16a05f037d21dfb21ac06ca` |
 
 ---
 
