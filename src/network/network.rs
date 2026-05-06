@@ -725,19 +725,30 @@ impl Network {
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
         
-        // Find best peer based on cumulative_work
-        let mut max_work = {
+        // Find best peer based on cumulative_work, with a height-gap safety net.
+        // The safety net handles cases where cumulative_work tracking drifts
+        // slightly after repeated shallow reorgs — without it the node loops
+        // forever as "Already on heaviest chain" while actually being N blocks behind.
+        let (local_work, our_height) = {
             let bc = self.blockchain.read().await;
-            bc.cumulative_work_at(bc.get_height())
+            let h = bc.get_height();
+            (bc.cumulative_work_at(h), h)
         };
+        let mut max_work = local_work;
         let mut best_peer: Option<Arc<Peer>> = None;
         let mut target_height = 0;
         
         for peer in &peers {
             let info = peer.get_info().await;
-            if info.cumulative_work > max_work || (info.cumulative_work == max_work && info.height > target_height) {
-                max_work = info.cumulative_work;
-                target_height = info.height;
+            let height_gap = info.height.saturating_sub(our_height);
+            // Select peer if it has: more cumulative work, OR same work with
+            // more height, OR is significantly ahead by block count (> 5 blocks).
+            let better_work   = info.cumulative_work > max_work;
+            let tiebreak      = info.cumulative_work == max_work && info.height > target_height;
+            let far_ahead     = height_gap > 5;
+            if better_work || tiebreak || far_ahead {
+                if info.cumulative_work > max_work { max_work = info.cumulative_work; }
+                if info.height > target_height      { target_height = info.height; }
                 best_peer = Some(Arc::clone(peer));
             }
         }

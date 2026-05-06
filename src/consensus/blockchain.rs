@@ -1611,7 +1611,7 @@ impl Blockchain {
         }
         // Slow path: arbitrary historical height (rare — only during deep fork).
         let mut total: u128 = 0;
-        for h in 0..tip_height {
+        for h in 0..=tip_height {   // inclusive: block AT tip_height contributes its difficulty
             if let Ok(b) = self.storage.load_block(h) {
                 total = total.saturating_add(b.difficulty as u128);
             }
