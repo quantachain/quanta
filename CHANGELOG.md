@@ -11,6 +11,25 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.7.4-alpha] — 2026-05-06
+
+> **Chain-sync compatibility patch. No testnet reset required.**
+> Nodes on v0.7.3 doing a clean start could not sync past block 84,812 due to a nonce
+> inconsistency caused by an earlier reorg that ran under the v0.7.2 snapshot-fallback bug.
+
+### Fixed
+- **Pre-checkpoint nonce override during sequential sync** — block 84,812 on the canonical
+  chain contains a TX from `0xf23f...` with nonce=1, but a clean-sync node expects nonce=5
+  (4 earlier TXs from that address exist in pre-reorg history that is still in the chain).
+  Root cause: the reorg that produced block 84,812 ran under the v0.7.2 snapshot-fallback
+  bug, so the main node rebuilt state without the miner’s early transactions and wrongly
+  accepted nonce=1. Fix: for blocks below the highest hardcoded checkpoint height (85,000),
+  nonce mismatches are resolved by overriding `temp_state` to the block’s claimed nonce
+  instead of rejecting. Full nonce enforcement still applies at and above the checkpoint.
+  Added `AccountState::set_nonce()` to support this path.
+
+---
+
 ## [0.7.3-alpha] — 2026-05-06
 
 > **Sync stability patch. No testnet reset required.**

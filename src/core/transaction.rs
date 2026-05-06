@@ -491,6 +491,22 @@ impl AccountState {
         }
     }
 
+    /// Override nonce for an address — used only during pre-checkpoint sync
+    /// to faithfully replay a post-reorg chain whose nonce sequence differs
+    /// from a clean sequential replay.
+    pub fn set_nonce(&mut self, address: &str, nonce: u64) {
+        if let Some(acc) = self.accounts.get_mut(address) {
+            acc.nonce = nonce;
+        } else {
+            self.accounts.insert(address.to_string(), AccountBalance {
+                address: address.to_string(),
+                balance: 0,
+                nonce,
+                locked_balances: Vec::new(),
+            });
+        }
+    }
+
     /// Returns `true` if the transaction nonce is the next expected value.
     pub fn verify_nonce(&self, address: &str, tx_nonce: u64) -> bool {
         let account_nonce = self.get_nonce(address);

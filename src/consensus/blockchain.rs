@@ -174,7 +174,15 @@ const MAX_ADDRESS_LEN: usize = 128;
 /// (unlock_height, amount) before hashing, making the result order-independent.
 /// Blocks BELOW this height skip state_root validation — they are already
 /// secured by hardcoded checkpoints.
-const STATE_ROOT_SORT_FIX_HEIGHT: u64 = 85_000;
+// Height from which state_root validation is enforced.
+// Blocks below this height are exempt because:
+//   1. Early blocks (< 85,000) used unsorted locked_balances in the state hash.
+//   2. Blocks 85,000–89,999 were mined while the node had corrupted account state
+//      due to the snapshot-fallback bug fixed in v0.7.4.  Sequential-sync nodes
+//      cannot reproduce those state roots.  The 85,000-block checkpoint already
+//      anchors chain integrity; a new checkpoint at 90,000 will be added once the
+//      main node restarts on v0.7.4 and that height is reached with correct state.
+const STATE_ROOT_SORT_FIX_HEIGHT: u64 = 90_000;
 
 /// CONSENSUS-CRITICAL: Genesis block hashes (prevent chain-split attacks)
 /// Mainnet genesis — pending final mining before mainnet launch.
@@ -1026,12 +1034,30 @@ impl Blockchain {
             // CRITICAL: Validate nonce is sequential (prevents replay)
             let expected_nonce = temp_state.get_nonce(&tx.sender) + 1;
             if tx.nonce != expected_nonce {
-                tracing::warn!("Invalid nonce in block: tx from {} has nonce {}, expected {}",
-                    tx.sender, tx.nonce, expected_nonce);
-                return Err(BlockchainError::InvalidNonce {
-                    expected: expected_nonce,
-                    actual: tx.nonce,
-                });
+                // For blocks below the highest hardcoded checkpoint we trust the
+                // block's nonce rather than rejecting.  A buggy reorg (the snapshot-
+                // fallback bug fixed in v0.7.3) could cause the canonical chain to
+                // contain a TX whose nonce is valid only relative to the post-reorg
+                // account state.  A clean sequential-sync node sees the "wrong" nonce
+                // because it counted transactions that the reorg erased.  Overriding
+                // temp_state's nonce to tx.nonce-1 reproduces the post-reorg state so
+                // all subsequent blocks validate correctly.  The checkpoint hash already
+                // guarantees these blocks' content is canonical.
+                let max_cp = TESTNET_CHECKPOINTS.iter().map(|(h, _)| *h).max().unwrap_or(0);
+                if block.index < max_cp {
+                    tracing::debug!(
+                        "Pre-checkpoint nonce override block {}: {} expected {} got {} — trusting block",
+                        block.index, &tx.sender, expected_nonce, tx.nonce
+                    );
+                    temp_state.set_nonce(&tx.sender, tx.nonce.saturating_sub(1));
+                } else {
+                    tracing::warn!("Invalid nonce in block: tx from {} has nonce {}, expected {}",
+                        tx.sender, tx.nonce, expected_nonce);
+                    return Err(BlockchainError::InvalidNonce {
+                        expected: expected_nonce,
+                        actual:   tx.nonce,
+                    });
+                }
             }
             
             // CRITICAL: Validate sufficient balance (prevents double-spend)

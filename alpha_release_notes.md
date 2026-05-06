@@ -1,8 +1,8 @@
-# QuantaChain Testnet — Alpha v0.7.3
+# QuantaChain Testnet — Alpha v0.7.4
 
 Post-quantum secure blockchain using Falcon-512 signatures and SHA3-256 Proof of Work.
 
-> **v0.7.3 — Sync stability patch. No testnet reset required.**
+> **v0.7.4 — Sync stability patch. No testnet reset required.**
 > All nodes SHOULD upgrade. v0.7.2 nodes may get stuck during reorg at high block heights
 > due to a timeout-inducing O(n) Sled scan and incorrect LWMA bounds check during replay.
 > Existing `quanta_data/` directories are fully compatible — drop-in upgrade.
@@ -86,14 +86,14 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 
 ### Option 2: Docker CLI
 ```bash
-docker pull xd637/quanta-node:v0.7.3-alpha
+docker pull xd637/quanta-node:v0.7.4-alpha
 
 docker run -d \
   --name quanta-node \
   -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
   -v quanta-data:/home/quanta/quanta_data \
   -v quanta-logs:/home/quanta/logs \
-  xd637/quanta-node:v0.7.3-alpha
+  xd637/quanta-node:v0.7.4-alpha
 ```
 
 ### Option 3: Docker Compose (Recommended)
@@ -124,7 +124,7 @@ sudo ufw allow ssh
 sudo ufw --force enable
 ```
 
-**3. Upgrade to v0.7.3 (no data wipe required):**
+**3. Upgrade to v0.7.4 (no data wipe required):**
 ```bash
 docker pull xd637/quanta-node:latest
 docker stop quanta-node && docker rm quanta-node
@@ -249,7 +249,7 @@ Or check live at [scan.quantachain.org](https://scan.quantachain.org)
 ```bash
 git clone https://github.com/quantachain/quanta
 cd quanta
-git checkout v0.7.3-alpha
+git checkout v0.7.4-alpha
 cargo build --release
 
 ./target/release/quanta start -c quanta.toml
@@ -308,7 +308,7 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 
 ---
 
-## What Changed in Alpha v0.7.3
+## What Changed in Alpha v0.7.4
 
 **No testnet reset. No wire format change. Sync stability patch — all nodes should upgrade.**
 
