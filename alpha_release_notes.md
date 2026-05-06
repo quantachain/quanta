@@ -143,6 +143,107 @@ docker logs quanta-node --tail 30 -f
 
 ---
 
+## 🔄 Clean Start Guide (Wipe Data & Resync from Genesis)
+
+> **When should I do a clean start?**
+> - Node stuck at same block height for > 30 minutes
+> - Logs show repeated `"Invalid block"` or `"Reorg failed"` errors
+> - Running a version older than v0.7.0 (wire format changed)
+> - Support advises it
+
+> ⚠️ **Will I lose my mining rewards?**
+> Your **wallet file** is separate from the node database. Mining rewards live on-chain —
+> your balance is safe as long as your address exists on the canonical chain.
+> Wipe only the **data directory**, never your wallet file.
+
+---
+
+### Docker — named volume (most common)
+
+```bash
+# 1. Stop and remove the container
+docker stop quanta-node
+docker rm quanta-node
+
+# 2. Delete the chain data volume
+docker volume rm quanta-data
+
+# 3. Pull latest image and start fresh
+docker pull xd637/quanta-node:latest
+docker run -d \
+  --name quanta-node \
+  --restart always \
+  --network host \
+  -v quanta-data:/home/quanta/quanta_data \
+  -v quanta-logs:/home/quanta/logs \
+  xd637/quanta-node:latest
+
+# 4. Watch sync progress
+docker logs quanta-node --tail 50 -f
+```
+
+---
+
+### Docker — host path mount (`~/quanta_data`)
+
+```bash
+docker stop quanta-node && docker rm quanta-node
+rm -rf ~/quanta_data && mkdir -p ~/quanta_data
+
+docker pull xd637/quanta-node:latest
+docker run -d \
+  --name quanta-node \
+  --restart always \
+  --network host \
+  -v ~/quanta_data:/home/quanta/quanta_data \
+  xd637/quanta-node:latest
+
+docker logs quanta-node --tail 50 -f
+```
+
+---
+
+### Bare Metal (no Docker)
+
+```bash
+pkill -f "quanta start"    # stop the node
+rm -rf ./quanta_data       # wipe chain data (adjust path if changed in quanta.toml)
+./target/release/quanta start -c quanta.toml
+```
+
+---
+
+### Windows — Docker Desktop
+
+1. **Docker Desktop → Volumes** → delete `quanta-data`
+2. Open a terminal:
+```bash
+docker stop quanta-node && docker rm quanta-node
+docker pull xd637/quanta-node:latest
+docker run -d --name quanta-node ^
+  -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 ^
+  -v quanta-data:/home/quanta/quanta_data ^
+  xd637/quanta-node:latest
+```
+
+---
+
+### How long does resync take?
+
+| Chain Height | Approx. Time |
+|---|---|
+| 0 → 50,000 | ~15–25 min |
+| 0 → 85,000+ | ~25–40 min |
+
+```bash
+# Watch sync in real time
+docker logs quanta-node -f | grep -i "accepted\|height\|sync"
+```
+
+Or check live at [scan.quantachain.org](https://scan.quantachain.org)
+
+---
+
 ## Manual Build from Source
 
 ```bash

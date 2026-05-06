@@ -1814,7 +1814,16 @@ impl Blockchain {
         // Remove any pending transactions that are now confirmed in the new tip.
         {
             let mut pending = self.pending_transactions.write();
-            pending.retain(|tx| !incoming.transactions.iter().any(|btx| btx.hash() == tx.hash()));
+            // Evict by hash OR by (sender, nonce) — the latter is robust against
+            // any public_key serialization differences that could cause hash mismatch.
+            pending.retain(|tx| {
+                !incoming.transactions.iter().any(|btx| {
+                    btx.hash() == tx.hash()
+                        || (!btx.is_coinbase()
+                            && btx.sender == tx.sender
+                            && btx.nonce == tx.nonce)
+                })
+            });
         }
         for tx in &incoming.transactions {
             if !tx.is_coinbase() {
@@ -2018,7 +2027,16 @@ impl Blockchain {
 
         // 9. Remove mined transactions from pending
         let mut pending = self.pending_transactions.write();
-        pending.retain(|tx| !block.transactions.iter().any(|btx| btx.hash() == tx.hash()));
+        // Evict by hash OR by (sender, nonce) — the latter is robust against
+        // any public_key serialization differences that could cause hash mismatch.
+        pending.retain(|tx| {
+            !block.transactions.iter().any(|btx| {
+                btx.hash() == tx.hash()
+                    || (!btx.is_coinbase()
+                        && btx.sender == tx.sender
+                        && btx.nonce == tx.nonce)
+            })
+        });
         drop(pending);
 
         // 10. Clear pending nonces for mined txs (DashMap - concurrent safe)
