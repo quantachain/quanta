@@ -1,9 +1,9 @@
 # ============================================================
 # Dockerfile — QUANTA Blockchain Node
 # ============================================================
-# Alpha — Release for testnet testing (v0.7.4)
+# Alpha — Release for testnet testing (v0.7.5)
 #
-# Image : xd637/quanta-node:v0.7.4-alpha
+# Image : xd637/quanta-node:v0.7.5-alpha
 # Repo  : https://hub.docker.com/r/xd637/quanta-node
 #
 # Quick start (single node):
@@ -20,8 +20,8 @@ FROM rust:latest AS builder
 
 # Image metadata (OCI standard)
 LABEL org.opencontainers.image.title="quanta-node" \
-      org.opencontainers.image.description="QuantaChain node — post-quantum PoW, Falcon-512 signatures. v0.7.4: pre-checkpoint nonce override (block 84812 compat), state root skip raised to 90k, faucet nonce lock." \
-      org.opencontainers.image.version="0.7.4" \
+      org.opencontainers.image.description="QuantaChain node — post-quantum PoW, Falcon-512 signatures. v0.7.5: state root fix (unlock_mature_coinbase alignment), stale-mining abort-on-new-block, reorg nonce clear, 90k checkpoint, Falcon signing unified under falcon-rust." \
+      org.opencontainers.image.version="0.7.5" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="Apache-2.0"

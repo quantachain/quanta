@@ -1,11 +1,11 @@
-# QuantaChain Testnet — Alpha v0.7.4
+# QuantaChain Testnet — Alpha v0.7.5
 
 Post-quantum secure blockchain using Falcon-512 signatures and SHA3-256 Proof of Work.
 
-> **v0.7.4 — Chain-sync compatibility + sync-stuck patch. No testnet reset required.**
-> All nodes MUST upgrade. Clean-start nodes were stuck at block 84,812 (nonce mismatch),
-> nodes with mining could silently stop syncing ("Already on heaviest chain" loop), and
-> confirmed TXs were lingering in the mempool. Drop-in upgrade — no data wipe needed.
+> **v0.7.5 — Consensus-critical: state root fix + stale mining fix + 90k checkpoint.**
+> All nodes MUST upgrade. Nodes stuck at block 91,096 ("Invalid state root") and all
+> nodes experiencing stale mined blocks or nonce errors after reorg are fixed.
+> **No testnet reset. No data wipe required.**
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
@@ -86,7 +86,7 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 
 ### Option 2: Docker CLI
 ```bash
-docker pull xd637/quanta-node:v0.7.4-alpha
+docker pull xd637/quanta-node:v0.7.5-alpha
 
 docker run -d \
   --name quanta-node \
@@ -249,7 +249,7 @@ Or check live at [scan.quantachain.org](https://scan.quantachain.org)
 ```bash
 git clone https://github.com/quantachain/quanta
 cd quanta
-git checkout v0.7.4-alpha
+git checkout v0.7.5-alpha
 cargo build --release
 
 ./target/release/quanta start -c quanta.toml
@@ -305,6 +305,77 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 | `8333` | P2P Network |
 | `7782` | RPC |
 | `9090` | Prometheus Metrics |
+
+---
+
+## What Changed in Alpha v0.7.5
+
+**No testnet reset. No wire format change. All nodes must upgrade.**
+
+> Nodes stuck at block 91,096 with repeated "Invalid state root" errors will be fixed
+> by this release. The 90,000 checkpoint means syncing nodes can pass this height cleanly.
+
+### Fix — State root mismatch at block 91,096 (root cause)
+
+`create_block_template` (miner) and `validate_block_consensus` (receiver) both computed
+the state root hash from a cloned account state **without** first calling
+`unlock_mature_coinbase(index)`. At block 91,096 — exactly 100 blocks (`COINBASE_MATURITY`)
+after the bootstrap node's heavy mining burst around block 90,996 — locked coinbase
+entries matured. The two sides hashed structurally different account states:
+
+```
+WARN Invalid state root at block 91096:
+  computed=c372afa7b...  block=5de69d916...
+```
+
+Fix: both paths now call `unlock_mature_coinbase(block.index)` **before** applying
+transactions and computing the state root hash. This is the same step that
+`add_block_to_main_chain` already performed when committing — now all three code paths
+are consistent.
+
+### Fix — Invalid nonce after every reorg ("expected 5, got 1")
+
+The `pending_nonces` DashMap tracked the highest mempool nonce per sender. After any
+reorg, transactions from the abandoned fork were discarded — but `pending_nonces` still
+held those stale nonces. The next canonical-chain block (nonce=1 from a clean state)
+was rejected with "expected 5, got 1".
+
+Fix: all three reorg paths (`reorg_to_block`, `add_block_to_main_chain_reorg`,
+`add_block_to_main_chain`) now clear or sweep `pending_nonces` after every chain switch.
+
+### Fix — All mined blocks stale (abort-on-new-block)
+
+`block.mine()` was an **uninterruptible PoW loop** — it could not stop mid-computation
+even when a peer block arrived. Miners wasted up to 30 s finishing dead work.
+
+Fix:
+- New `Block::mine_with_cancel(&AtomicBool)` — polls a cancel flag every 10,000 hashes
+  (~10 ms at typical hashrate) and returns `false` immediately when cancelled.
+- New `Blockchain::subscribe_new_blocks()` — returns a `watch::Receiver<u64>` that
+  fires every time any block is accepted (normal, reorg, or shallow swap).
+- Mining loop rewritten with `tokio::select!` — when the watch channel fires, the
+  `AtomicBool` is set and the PoW thread exits within ~10 ms. A fresh template is
+  started on the next loop iteration.
+
+### Added — Checkpoint at block 90,000
+
+| Height | Hash |
+|--------|------|
+| 90,000 | `000000dc0e178a5140a5c68481234a9541373ac349b1ae3cbc3f0f3f1fc58d5e` |
+
+Verified live from `scan.quantachain.org` on 2026-05-08. Anchors the
+`STATE_ROOT_SORT_FIX_HEIGHT` boundary. Nodes must be on v0.7.5+ to sync past this.
+
+### Changed — Falcon-512 signing unified under `falcon-rust`
+
+All signing paths (CLI wallet, `wallet_cli`, faucet distributor, benchmarks, unit tests)
+now use `falcon_rust::sign` instead of `pqcrypto_falcon::sign`. This guarantees
+byte-identical output with the browser WASM wallet on every path — eliminating a
+latent cross-library format ambiguity where native-signed transactions could have
+produced a different byte blob than WASM-signed ones.
+
+`pqcrypto-falcon` is still present (key generation), `pqcrypto-kyber` is still present
+(Kyber-1024 wallet encryption). Nothing is removed from `Cargo.toml`.
 
 ---
 

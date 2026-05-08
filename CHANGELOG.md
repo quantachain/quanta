@@ -11,6 +11,60 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.7.5-alpha] — 2026-05-08
+
+> **CONSENSUS-CRITICAL. All nodes must upgrade. No testnet reset required.**
+> Fixes the persistent "Invalid state root" errors at block 91,096, stale mining,
+> and nonce corruption after every reorg. Adds the block 90,000 checkpoint.
+
+### Fixed
+- **State root mismatch at block 91,096 (root cause fix)** — `create_block_template`
+  and `validate_block_consensus` both computed the state root without first calling
+  `unlock_mature_coinbase(index)`. At block 91,096 (exactly `COINBASE_MATURITY=100`
+  blocks after heavy bootstrap mining at ~90,996) locked coinbase entries matured,
+  causing the two sides to hash structurally different account states. Both paths now
+  call `unlock_mature_coinbase` before applying transactions and computing the hash.
+- **Invalid nonce after every reorg ("expected 5, got 1")** — the `pending_nonces`
+  DashMap was not cleared on reorg. After a fork discarded txs from the abandoned branch,
+  the map still held nonce=4 from those erased txs, causing the next canonical-chain
+  block (nonce=1) to be rejected as "expected 5". All three reorg paths now call
+  `pending_nonces.clear()` or a stale-nonce sweep after every chain switch.
+- **All mined blocks stale (abort-on-new-block)** — `block.mine()` ran an
+  uninterruptible PoW loop. Miners could not stop even when a peer block arrived,
+  wasting an entire 30 s block interval. Added `Block::mine_with_cancel(&AtomicBool)`
+  which polls a cancel flag every 10,000 hashes (~10 ms). The mining loop now subscribes
+  to a `watch::Sender<u64>` that fires on every accepted block and aborts within ~10 ms.
+- **Stale-nonce sweep in normal block accept** — after any non-reorg block accept,
+  `pending_nonces` now evicts all entries where the cached nonce ≤ the confirmed
+  chain nonce, preventing accumulation of stale entries over time.
+- **Unicode escape compile error in server.rs** — `\u2014` (JavaScript syntax)
+  replaced with `--` (Rust requires `\u{2014}` brace syntax).
+
+### Added
+- **Checkpoint at block 90,000** — verified live from `scan.quantachain.org` on 2026-05-08:
+  `(90_000, "000000dc0e178a5140a5c68481234a9541373ac349b1ae3cbc3f0f3f1fc58d5e")`
+  Anchors the `STATE_ROOT_SORT_FIX_HEIGHT` boundary; all nodes must be on v0.7.5+ to
+  sync past this height.
+- **New-block notification channel** (`watch::Sender<u64>`) — `Blockchain` now exposes
+  `subscribe_new_blocks()`. Any subsystem (mining, future getblocktemplate RPC) can
+  subscribe and be notified within one async tick when the chain moves.
+- **`Block::mine_with_cancel()`** — cancellable PoW variant; returns `true` (found
+  nonce) or `false` (cancelled). Used by the mining loop to abort instantly.
+
+### Changed
+- **Falcon-512 signing unified under `falcon-rust`** — `FalconKeypair::sign_raw` now
+  uses `falcon_rust::sign` instead of `pqcrypto_falcon::sign`. All native signing paths
+  (CLI wallet, faucet, benchmarks, tests) now produce byte-identical output to the
+  browser WASM wallet, eliminating the cross-library format ambiguity documented in
+  `FALCON_SIGNING_INTERNALS.md`. Key generation still uses `pqcrypto-falcon` (the
+  authoritative NIST reference C implementation). Public keys are cross-compatible.
+  `pqcrypto-falcon` and `pqcrypto-traits` remain in `Cargo.toml` (still needed for
+  key generation and Kyber-1024 wallet encryption).
+- **Mining loop delay reduced** from 100 ms to 10 ms between attempts — the watch
+  channel now drives restarts, so a fixed delay is no longer needed for responsiveness.
+
+---
+
 ## [0.7.4-alpha] — 2026-05-06
 
 > **Chain-sync compatibility + sync-stuck patch. No testnet reset required.**
@@ -241,7 +295,9 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
-[Unreleased]: https://github.com/quantachain/quanta/compare/v0.7.3-alpha...HEAD
+[Unreleased]: https://github.com/quantachain/quanta/compare/v0.7.5-alpha...HEAD
+[0.7.5-alpha]: https://github.com/quantachain/quanta/compare/v0.7.4-alpha...v0.7.5-alpha
+[0.7.4-alpha]: https://github.com/quantachain/quanta/compare/v0.7.3-alpha...v0.7.4-alpha
 [0.7.3-alpha]: https://github.com/quantachain/quanta/compare/v0.7.2-alpha...v0.7.3-alpha
 [0.7.2-alpha]: https://github.com/quantachain/quanta/compare/v0.7.1-alpha...v0.7.2-alpha
 [0.7.1-alpha]: https://github.com/quantachain/quanta/compare/v0.7.0-alpha...v0.7.1-alpha

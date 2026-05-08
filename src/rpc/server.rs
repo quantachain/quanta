@@ -208,89 +208,104 @@ async fn handle_start_mining(state: &AppState, params: &serde_json::Value) -> Js
     
     tokio::spawn(async move {
         tracing::info!("Mining task started for address: {}", mining_address);
-        
+
+        // Subscribe to new-block notifications ONCE at task start.
+        // Every time a block is accepted by the network layer, blockchain
+        // fires this channel — we use it to abort stale PoW immediately.
+        let mut new_block_rx = blockchain.read().await.subscribe_new_blocks();
+        // Mark the current value as seen so the first `changed()` only fires
+        // when a genuinely NEW block arrives (not the tip at startup).
+        new_block_rx.borrow_and_update();
+
         let mut consecutive_failures = 0;
         const MAX_CONSECUTIVE_FAILURES: u32 = 10;
-        
+
         loop {
             // Check if mining should stop
             if cancel_token.is_cancelled() {
                 tracing::info!("Mining task stopped by cancellation");
                 break;
             }
-            
-            // Mine a block
-            // 1. Create template (Lock held briefly)
+
+            // 1. Create template (brief read lock)
             let template_result = blockchain.read().await.create_block_template(mining_address.clone());
-            
+
             match template_result {
-                Ok(mut block) => {
-                    // 2. Mine (NO LOCK held on blockchain)
-                    // Run CPU-intensive mining in a blocking task to avoid starving async runtime
-                    
-                    // Snapshot the chain tip at template creation time.
-                    // If the chain advances while we mine, our result is stale.
-                    let template_prev_hash = block.previous_hash.clone();
-                    let template_index = block.index;
+                Ok(block) => {
+                    // 2. Mine with cancellation support.
+                    //    AtomicBool cancel flag shared between the async watcher
+                    //    (which sets it when new_block_rx fires) and the blocking
+                    //    PoW thread (which reads it every 10k hashes, ~10 ms).
+                    let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                    let cancel_flag_clone = cancel_flag.clone();
+                    let cancel_token_inner = cancel_token.clone();
 
-                    let mined_block_res = tokio::task::spawn_blocking(move || {
-                        block.mine();
-                        block
-                    }).await;
-                    
-                    if let Ok(mined_block) = mined_block_res {
-                        // Check cancellation again before submitting
-                        if cancel_token.is_cancelled() {
-                            break;
-                        }
+                    // Spawn blocking PoW on a dedicated thread (does NOT hold any lock).
+                    let pow_handle = tokio::task::spawn_blocking(move || {
+                        let mut b = block;
+                        let found = b.mine_with_cancel(&cancel_flag_clone);
+                        (b, found)
+                    });
 
-                        // FORK FIX: Check if the chain moved under us while we were mining.
-                        // If another block arrived at the same height (from the network or a
-                        // previous mining round), our template is now stale. Submitting it
-                        // would always produce a competing-block situation and either orphan
-                        // us or trigger an unnecessary reorg. Instead, just discard and
-                        // restart with a fresh template built on the real current tip.
-                        let chain_tip_now = blockchain.read().await.get_latest_block();
-                        if chain_tip_now.hash != template_prev_hash {
-                            tracing::info!(
-                                "Mining result for block {} is stale (chain moved to height {} \
-                                 with hash {}…); discarding and restarting",
-                                template_index,
-                                chain_tip_now.index,
-                                &chain_tip_now.hash[..8]
-                            );
-                            // Don't count as failure — this is expected and healthy behaviour.
-                            // Fall through to the next loop iteration immediately.
-                        } else {
-                            // 3. Submit (Lock held briefly to commit)
-                            // add_network_block handles validation and saving
-                            match blockchain.read().await.add_network_block(mined_block.clone()) {
-                                Ok(_) => {
-                                    consecutive_failures = 0; // Reset on success
-                                    let mut count = blocks_mined.write().await;
-                                    *count += 1;
-                                    tracing::info!("Successfully mined block #{}", *count);
-                                    
-                                    // Broadcast block to network
-                                    if let Some(ref net) = network {
-                                        net.broadcast_block(mined_block).await;
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!("Failed to add mined block: {}", e);
-                                    consecutive_failures += 1;
+                    // Wait for EITHER: PoW completes  OR  a new block arrives.
+                    let (mined_block, found_nonce) = tokio::select! {
+                        // PoW finished (found nonce or was already cancelled)
+                        res = pow_handle => {
+                            match res {
+                                Ok(pair) => pair,
+                                Err(_) => {
+                                    tracing::error!("Mining thread panicked");
+                                    break;
                                 }
                             }
                         }
-                    } else {
-                        tracing::error!("Mining task panicked");
-                        break;
+                        // A new block arrived from the network — abort current PoW
+                        _ = new_block_rx.changed() => {
+                            cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            tracing::info!(
+                                "New network block detected -- aborting stale PoW, restarting with fresh template"
+                            );
+                            // The spawn_blocking thread will exit within ~10 ms;
+                            // we don't await it to avoid blocking the async loop.
+                            continue;
+                        }
+                        // Global stop requested
+                        _ = cancel_token_inner.cancelled() => {
+                            cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                            tracing::info!("Mining task stopped by cancellation (during PoW)");
+                            break;
+                        }
+                    };
+
+                    if !found_nonce {
+                        // mine_with_cancel returned false = cancelled mid-work
+                        continue;
+                    }
+
+                    // 3. Submit the solved block (brief read lock — all mutation
+                    //    is done inside Blockchain via its internal Arc locks)
+                    match blockchain.read().await.add_network_block(mined_block.clone()) {
+                        Ok(_) => {
+                            consecutive_failures = 0;
+                            let mut count = blocks_mined.write().await;
+                            *count += 1;
+                            tracing::info!("Successfully mined block #{}", *count);
+
+                            // Broadcast to peers
+                            if let Some(ref net) = network {
+                                net.broadcast_block(mined_block).await;
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to add mined block: {}", e);
+                            consecutive_failures += 1;
+                        }
                     }
                 }
                 Err(e) => {
                     consecutive_failures += 1;
                     tracing::warn!("Failed to create block template ({}): {}", consecutive_failures, e);
-                    
+
                     if consecutive_failures >= MAX_CONSECUTIVE_FAILURES {
                         tracing::error!(
                             "Mining failed {} times consecutively, stopping task",
@@ -298,16 +313,15 @@ async fn handle_start_mining(state: &AppState, params: &serde_json::Value) -> Js
                         );
                         break;
                     }
-                    
-                    // Exponential backoff on failures
+
                     let backoff_ms = std::cmp::min(1000 * consecutive_failures as u64, 30000);
                     tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
                     continue;
                 }
             }
-            
-            // Small delay between mining attempts
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+            // Tiny yield to let the async runtime breathe between attempts
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
     });
 

@@ -8,6 +8,8 @@ use std::sync::Arc;
 use std::collections::VecDeque;
 use thiserror::Error;
 use dashmap::DashMap;
+use tokio::sync::watch; // New-block notification channel (abort-on-stale mining)
+
 
 // PERFORMANCE OPTIMIZATIONS FOR POST-QUANTUM CRYPTO
 use rayon::prelude::*;  // Parallel signature verification (6x faster)
@@ -210,7 +212,10 @@ const TESTNET_CHECKPOINTS: &[(u64, &str)] = &[
     (80_000, "0000002d80e66bce37596616a9c9c3c1988da6e65811ad132926162c7e000a0e"),
     // Verified live from scan.quantachain.org on 2026-05-06
     (85_000, "0000007305d4ceeaf72a4f3c58001295a335d588e16a05f037d21dfb21ac06ca"),
-    // Next: add (90_000, ...) when chain reaches ~90k
+    // Verified live from scan.quantachain.org on 2026-05-08 — anchors the
+    // STATE_ROOT_SORT_FIX_HEIGHT boundary; all nodes must be on v0.7.5+ past here.
+    (90_000, "000000dc0e178a5140a5c68481234a9541373ac349b1ae3cbc3f0f3f1fc58d5e"),
+    // Next: add (95_000, ...) or (100_000, ...) once chain reaches that height.
 ];
 
 // MAINNET checkpoints — empty until mainnet launch
@@ -284,6 +289,17 @@ pub struct Blockchain {
     /// Stored in memory and in sled for O(1) access instead of O(height) scan.
     /// Enables instant best-peer selection at any chain height.
     cumulative_work: Arc<PLMutex<u128>>,
+
+    /// NEW-BLOCK NOTIFICATION CHANNEL
+    ///
+    /// Fires the current chain height every time a block is accepted (normal or reorg).
+    /// The mining loop subscribes via `subscribe_new_blocks()` and uses tokio::select!
+    /// to abort the current PoW the instant the chain moves — eliminating the
+    /// 5–30 s window where miners compute against a stale template.
+    ///
+    /// Using `watch` (not `broadcast`) because we only need the LATEST height;
+    /// miners that are slow to wake up just see the most-recent value and restart.
+    new_block_tx: Arc<watch::Sender<u64>>,
 }
 
 impl Blockchain {
@@ -489,6 +505,10 @@ impl Blockchain {
             }
         };
 
+        // New-block notification channel — initial value = current height (subscribers
+        // start with the tip, not 0, so they don't fire spuriously on startup).
+        let (new_block_tx, _) = watch::channel(height);
+
         Ok(Self {
             chain: Arc::new(RwLock::new(chain)),
             pending_transactions: Arc::new(RwLock::new(Vec::new())),
@@ -501,7 +521,30 @@ impl Blockchain {
             mempool_bloom: Arc::new(PLMutex::new(Bloom::new_for_fp_rate(50_000, 0.0001))),
             pubkey_cache: Arc::new(DashMap::new()),
             cumulative_work: Arc::new(PLMutex::new(initial_cumulative_work)),
+            new_block_tx: Arc::new(new_block_tx),
         })
+    }
+
+    /// Subscribe to new-block notifications.
+    ///
+    /// Returns a `watch::Receiver<u64>` that yields the new chain height each
+    /// time a block is accepted. Use with `tokio::select!` in the mining loop
+    /// to abort the current PoW immediately when the chain moves:
+    ///
+    /// ```ignore
+    /// let mut new_block_rx = blockchain.read().await.subscribe_new_blocks();
+    /// loop {
+    ///     let mut block = create_template();
+    ///     tokio::select! {
+    ///         _ = new_block_rx.changed() => { /* chain moved, restart */ }
+    ///         result = spawn_blocking(move || { block.mine_with_cancel(&cancel); block }) => {
+    ///             submit(result);
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    pub fn subscribe_new_blocks(&self) -> watch::Receiver<u64> {
+        self.new_block_tx.subscribe()
     }
 
     /// Validate block against checkpoints (prevents deep reorgs)
@@ -767,8 +810,15 @@ impl Blockchain {
 
         let index = self.get_height();
 
-        // Calculate state_root by simulating transaction execution
+        // Calculate state_root by simulating transaction execution.
+        // CRITICAL STATE-ROOT FIX: We must call unlock_mature_coinbase(index)
+        // BEFORE applying this block's transactions — exactly mirroring what
+        // validate_block_consensus does.  Without this, any block mined while
+        // a miner has pending mature coinbase locks produces a state_root that
+        // the validator rejects (their state has the locked entries still present,
+        // the miner's hash already moved them to spendable, or vice-versa).
         let mut temp_state = self.account_state.read().clone();
+        temp_state.unlock_mature_coinbase(index);
         for tx in &all_transactions {
             if !tx.is_coinbase() && tx.sender != "TREASURY" {
                 let required = tx.amount.saturating_add(tx.fee);
@@ -956,8 +1006,14 @@ impl Blockchain {
         }
         
         // 5. All non-coinbase txs must have valid signatures and nonces
-        // CRITICAL: Build temporary state to validate balances and nonces
+        // CRITICAL: Build temporary state to validate balances and nonces.
+        // STATE-ROOT FIX: unlock_mature_coinbase must be called here BEFORE
+        // applying transactions — matching create_block_template which also
+        // calls unlock before computing the state_root it embeds in the block.
+        // Without this, the two sides compute a different state hash whenever
+        // any miner address has coinbase locks that mature at this block height.
         let mut temp_state = base_state.clone();
+        temp_state.unlock_mature_coinbase(block.index);
         
         // OPT-1+3 (PQC): Parallel sig verification with signature cache + pubkey cache
         // Serial: 1200 tx × 1.5ms = 1800ms
@@ -1304,12 +1360,14 @@ impl Blockchain {
 
         *self.account_state.write() = new_state;
 
-        // Clear pending nonces for mined txs
-        for tx in &block.transactions {
-            if !tx.is_coinbase() {
-                self.pending_nonces.remove(&tx.sender);
-            }
-        }
+        // Clear ALL pending nonces after a reorg — the DashMap entries from the
+        // abandoned fork are now stale (wrong base nonce) and would cause every
+        // subsequent mempool submission to fail with "Invalid nonce: expected N, got 1".
+        self.pending_nonces.clear();
+
+        // Notify miners: chain moved during reorg, abort stale PoW.
+        let _ = self.new_block_tx.send(block.index + 1);
+
         tracing::info!("Reorg: network block {} accepted (permissive diff check)", block.index);
         Ok(())
     }
@@ -1851,11 +1909,12 @@ impl Blockchain {
                 })
             });
         }
-        for tx in &incoming.transactions {
-            if !tx.is_coinbase() {
-                self.pending_nonces.remove(&tx.sender);
-            }
-        }
+        // REORG-NONCE FIX: clear ALL pending_nonces after a shallow reorg —
+        // the old tip's sender nonces are now wrong because the fork erased those txs.
+        self.pending_nonces.clear();
+
+        // Notify miners that the tip changed so they abort stale PoW immediately.
+        let _ = self.new_block_tx.send(incoming.index + 1);
 
         // Update cumulative_work: subtract old tip's difficulty, add incoming tip's.
         {
@@ -2065,12 +2124,27 @@ impl Blockchain {
         });
         drop(pending);
 
-        // 10. Clear pending nonces for mined txs (DashMap - concurrent safe)
+        // 10. Clear pending nonces for mined senders.
+        // REORG-NONCE FIX: clear ALL entries whose chain nonce now matches or
+        // exceeds our cached pending nonce, rather than only clearing entries for
+        // senders in *this* block.  After any reorg the chain nonces may have
+        // jumped relative to the DashMap entries from the abandoned fork, causing
+        // the next mempool submission to see "expected N, got 1" errors.
         for tx in &block.transactions {
             if !tx.is_coinbase() {
                 self.pending_nonces.remove(&tx.sender);
             }
         }
+        // Stale-nonce sweep: remove any entry where our cached pending nonce is
+        // now <= the confirmed chain nonce (the tx was confirmed or reorg erased it).
+        let confirmed_state = self.account_state.read();
+        self.pending_nonces.retain(|addr, cached_nonce| {
+            *cached_nonce > confirmed_state.get_nonce(addr)
+        });
+        drop(confirmed_state);
+
+        // 11. Notify miners that the chain has moved — they should abort stale PoW.
+        let _ = self.new_block_tx.send(block.index + 1);
 
         tracing::info!("Network block {} accepted at height {}", block.index, block.index);
         Ok(())

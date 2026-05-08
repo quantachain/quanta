@@ -157,6 +157,67 @@ impl Block {
         }
     }
 
+    /// Mine the block — but abort immediately if `cancel` is set to `true`.
+    ///
+    /// Returns `true` if a valid nonce was found, `false` if cancelled.
+    ///
+    /// STALE-BLOCK FIX: The normal `mine()` runs until it finds a nonce, which
+    /// can take up to 30 s. If a peer announces a new block during that window,
+    /// the result is stale. This variant polls `cancel` every 10,000 hashes
+    /// (~10 ms at typical hashrate) so the mining loop can abort promptly.
+    ///
+    /// Usage in the RPC server:
+    /// ```ignore
+    /// let cancel = Arc::new(AtomicBool::new(false));
+    /// let cancel_clone = cancel.clone();
+    /// tokio::select! {
+    ///     _ = new_block_rx.changed() => { cancel.store(true, Ordering::Relaxed); }
+    ///     result = spawn_blocking(move || block.mine_with_cancel(&cancel_clone)) => { ... }
+    /// }
+    /// ```
+    pub fn mine_with_cancel(&mut self, cancel: &std::sync::atomic::AtomicBool) -> bool {
+        use std::sync::atomic::Ordering;
+        tracing::info!(
+            "Mining block {} with difficulty {} (cancellable)...",
+            self.index, self.difficulty
+        );
+
+        let start = std::time::Instant::now();
+        let mut hash_count = 0u64;
+
+        loop {
+            self.hash = self.calculate_hash();
+            hash_count += 1;
+
+            if self.has_valid_hash() {
+                let elapsed = start.elapsed().as_secs_f64();
+                let hashrate = if elapsed > 0.0 { hash_count as f64 / elapsed } else { f64::INFINITY };
+                tracing::info!(
+                    "Block mined! Nonce: {}, Hashes: {}, Time: {:.2}s, Hashrate: {:.0} H/s",
+                    self.nonce, hash_count, elapsed, hashrate
+                );
+                return true;
+            }
+
+            self.nonce += 1;
+
+            // Check cancel flag every 10,000 hashes (~10 ms) — low overhead,
+            // fast enough to catch a new-block notification before next hash batch.
+            if hash_count % 10_000 == 0 {
+                if cancel.load(Ordering::Relaxed) {
+                    tracing::info!(
+                        "Mining cancelled at {} hashes (block {} — chain moved)",
+                        hash_count, self.index
+                    );
+                    return false;
+                }
+                if hash_count % 100_000 == 0 {
+                    tracing::debug!("Mining progress: {}k hashes (block {})", hash_count / 1000, self.index);
+                }
+            }
+        }
+    }
+
     /// Validate block structure and PoW.
     ///
     /// Checks: hash integrity, proof-of-work, Merkle root, and previous-block

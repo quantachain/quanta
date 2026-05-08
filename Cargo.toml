@@ -1,6 +1,6 @@
 [package]
 name = "quanta"
-version = "0.7.4"
+version = "0.7.5"
 edition = "2021"
 description = "QUANTA - Quantum-resistant blockchain with Falcon signatures"
 
@@ -36,13 +36,15 @@ path = "src/bin/benchmark.rs"
 
 [dependencies]
 # Post-Quantum Cryptography - Falcon signatures
-# PINNED: Exact version required for consensus determinism across all nodes.
-# Changing this version requires a coordinated network-wide upgrade.
+# pqcrypto-falcon: used ONLY for key generation (keypair()). Signing and
+# verification now use falcon-rust exclusively so all paths produce the
+# canonical blob format [raw_sig || hash] that verify_signature_strict expects.
+# PINNED: Exact version required for deterministic key generation across nodes.
 pqcrypto-falcon = "=0.3.0"
 pqcrypto-traits = "0.3"
-# falcon-rust: pure-Rust Falcon-512 used by the WASM browser wallet.
-# verify_signature_strict uses this for raw-sig verification so the browser
-# wallet (wasm32-unknown-unknown, no C FFI allowed) can interoperate.
+# falcon-rust: pure-Rust Falcon-512 — signing, verification, and WASM wallet.
+# All signing paths now use this library to guarantee byte-identical output
+# with the browser WASM wallet. Cross-library public keys are compatible.
 falcon-rust = "0.1"
 
 # SHA3 hashing (quantum-resistant)
