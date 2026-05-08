@@ -124,7 +124,7 @@ sudo ufw allow ssh
 sudo ufw --force enable
 ```
 
-**3. Upgrade to v0.7.4 (no data wipe required):**
+**3. Upgrade to v0.7.5 (no data wipe required):**
 ```bash
 docker pull xd637/quanta-node:latest
 docker stop quanta-node && docker rm quanta-node
