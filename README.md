@@ -235,7 +235,7 @@ MultiSigTransfer { signers_required } — Institutional M-of-N multisig
 |-----------|-------|
 | Block reward | 100 QUA |
 | Miner immediate (47.5%) | 47.5 QUA/block |
-| Miner locked 6 months (47.5%) | 47.5 QUA/block |
+| Miner locked ~54.75 days (47.5%) | 47.5 QUA/block |
 | Treasury (5%) | 5 QUA/block |
 | Fee burn | 70% of all fees |
 | Daily blocks | ~2,880 |
@@ -255,12 +255,13 @@ MultiSigTransfer { signers_required } — Institutional M-of-N multisig
 - Checkpoint system with hardcoded hashes
 - Docker image + monitoring setup
 
-### 🔄 Phase 2: Public Testnet (Q2 2026)
+### 🔄 Phase 2: Public Testnet (Q2 2026) — **ACTIVE** (chain at 91,000+ blocks)
 
-- Public testnet with 6+ geographic bootstrap nodes
-- Real-world stress testing (30+ days, 10,000+ transactions)
-- External security audits + bug bounty program
-- Developer SDK and tooling
+- ✅ Public testnet live — chain at 91,000+ blocks, 2 active miners, 276 kH/s network hashrate
+- ✅ Block explorer live at [scan.quantachain.org](https://scan.quantachain.org)
+- ✅ Docker image: `xd637/quanta-node:latest`
+- 🔄 External security audits + bug bounty program
+- 🔄 Developer SDK and tooling
 
 ### Phase 3: Security Hardening (Q3 2026)
 

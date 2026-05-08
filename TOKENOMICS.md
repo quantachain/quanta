@@ -33,7 +33,7 @@ The QUANTA economic model achieves:
 1. **Long-term Sustainability**: Mining rewards remain attractive for decades, never reaching zero
 2. **Fair Distribution**: No pre-mine, no ICO, no team allocation — 100% through proof-of-work mining
 3. **Deflationary Pressure**: Fee burning creates permanent supply reduction
-4. **Anti-Dump Protection**: 50% of mining rewards locked for 6 months — prevents launch-day sell cascades
+4. **Anti-Dump Protection**: 50% of mining rewards locked for ~54.75 days — prevents launch-day sell cascades
 5. **Development Funding**: Two transparent treasury streams (block reward allocation + fee share) for ongoing development
 
 ### 1.2 Key Parameters (Source: `src/consensus/blockchain.rs`)
@@ -50,8 +50,8 @@ The QUANTA economic model achieves:
 | Fee to Treasury | **20%** | `FEE_TREASURY_PERCENT = 20` |
 | Fee to Miner | **10%** | `FEE_VALIDATOR_PERCENT = 10` |
 | Block Reward to Treasury | **5%** | `TREASURY_ALLOCATION_PERCENT = 5` |
-| Mining Reward Lock | **50% for 6 months** | `MINING_REWARD_LOCK_PERCENT = 50` |
-| Lock Duration | 52,560 blocks | `MINING_REWARD_LOCK_BLOCKS = 52_560` |
+| Mining Reward Lock | **50% for ~54.75 days** | `MINING_REWARD_LOCK_PERCENT = 50` |
+| Lock Duration | 157,680 blocks | `MINING_REWARD_LOCK_BLOCKS = 157_680` |
 | Coinbase Maturity | 100 blocks | `COINBASE_MATURITY = 100` |
 | Min Transaction Fee | 100 microunits (0.0001 QUA) | `MIN_TRANSACTION_FEE = 100` |
 | Mempool Limit | 5,000 transactions | `MAX_MEMPOOL_SIZE = 5000` |
@@ -150,13 +150,13 @@ Treasury Allocation:  R × 5%            → sent to treasury address
 Miner Base Reward:    R × 95%           → available to miner
 
   Of Miner Base Reward:
-    Immediate:        (R × 95%) × 50%   → credited to miner immediately
-    Locked:           (R × 95%) × 50%   → locked until height + 52,560
+    Immediate:        (R × 95%) × 50%   → credited to miner immediately (after 100-block coinbase maturity)
+    Locked:           (R × 95%) × 50%   → locked until height + 157,680 (~54.75 days)
 
 Example at R = 100 QUA:
   Treasury:       5.0 QUA  (hardcoded address)
-  Miner gets now: 47.5 QUA (immediately spendable)
-  Miner locked:   47.5 QUA (vests after ~6 months)
+  Miner gets now: 47.5 QUA (spendable after 100-block maturity)
+  Miner locked:   47.5 QUA (vests after ~54.75 days / 157,680 blocks)
 ```
 
 > ⚠️ **Note**: Earlier documentation described a 50%/50% miner split as if the full 100 QUA were split. The correct formula first subtracts the 5% treasury allocation, then applies 50%/50% to the remaining 95%. This yields 47.5% immediate / 47.5% locked of the total block reward — matching the production `blockchain.rs` implementation exactly.
@@ -261,7 +261,7 @@ Treasury receives 20% of all transaction fees, creating a sustainable independen
 **Parameters**:
 ```
 MINING_REWARD_LOCK_PERCENT  = 50  (% of miner's share that is locked)
-MINING_REWARD_LOCK_BLOCKS   = 52,560  (≈ 6 months at 30-second blocks)
+MINING_REWARD_LOCK_BLOCKS   = 157,680  (≈54.75 days at 30-second blocks)
 ```
 
 **Mechanism** (as implemented in `blockchain.rs`):
@@ -269,14 +269,14 @@ MINING_REWARD_LOCK_BLOCKS   = 52,560  (≈ 6 months at 30-second blocks)
 ```rust
 // Of the 95% miner reward:
 let immediate_reward = (miner_reward * (100 - MINING_REWARD_LOCK_PERCENT)) / 100;
-// = 95% × 50% = 47.5% of total block reward → credited immediately
+// = 95% × 50% = 47.5% of total block reward → credited after 100-block coinbase maturity
 
 let locked_reward    = miner_reward - immediate_reward;
 // = 95% × 50% = 47.5% of total block reward → locked balance
 
 // Locked balance is stored in account_state as LockedBalance {
 //     amount: locked_reward,
-//     unlock_height: current_height + MINING_REWARD_LOCK_BLOCKS
+//     unlock_height: current_height + 157_680  // ~54.75 days
 // }
 ```
 
@@ -285,7 +285,7 @@ let locked_reward    = miner_reward - immediate_reward;
 - Multiple concurrent locks possible (each mining event creates a new lock entry)
 - Wallet displays: Available Balance / Locked Balance / Total Balance
 
-**Coinbase Maturity**: In addition to the 6-month vesting, all mining rewards (including the immediate 47.5%) are subject to a **100-block coinbase maturity** before they can be included in a spend. This prevents spending mining rewards from orphaned blocks.
+**Coinbase Maturity**: All mining rewards (including the immediate 47.5%) are subject to a **100-block coinbase maturity** before they can be spent. This prevents spending rewards from orphaned blocks. The additional 157,680-block anti-dump lock applies on top of this.
 
 ### 5.2 Economic Impact of Vesting
 
@@ -632,7 +632,7 @@ let fee_to_miner    = total_fees - fee_burned - fee_to_treasury;   // 10% + rema
 account_state.add_locked_balance(
     miner_address,
     locked_reward,
-    current_height + MINING_REWARD_LOCK_BLOCKS  // current + 52,560
+    current_height + 157_680  // ~54.75 days
 );
 ```
 
@@ -661,7 +661,7 @@ Full spending procedures: [GOVERNANCE.md](GOVERNANCE.md)
 
 ---
 
-**Document Version**: 2.1  
-**Last Updated**: 2026-03-14  
+**Document Version**: 2.2  
+**Last Updated**: May 2026  
 **Founder**: Kishore K (admin@quantachain.org)  
 **License**: CC BY 4.0

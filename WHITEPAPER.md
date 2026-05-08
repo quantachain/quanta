@@ -302,24 +302,26 @@ Valid Block: Hash starts with `difficulty` leading zero nibbles
 
 Double-SHA3 provides a two-layer pre-image resistance barrier and eliminates length-extension attacks present in SHA-2 based double-hash constructions.
 
-#### Difficulty Adjustment
-- **Interval**: Every **2,016 blocks** (~5.6 hours at 10-second average)
-  - *Why 2,016?* Security fix from original design (was 10 blocks). 2,016 prevents rapid oscillation — matches Bitcoin's proven stability window.
+#### Difficulty Adjustment — LWMA (Linearly Weighted Moving Average)
+
+QUANTA uses the **LWMA algorithm** (Zawy 2017), the same algorithm used by Zcash, Grin, Beam, and MimbleWimble variants. It adjusts difficulty **every block** using a 45-block sliding window (~22.5 minutes of smoothing), replacing the original Bitcoin-style 2,016-block interval which was unsuitable for a small, variable-hashrate testnet.
+
+- **Window**: **45 blocks** (`LWMA_WINDOW = 45`) — each block's solve-time is weighted linearly (newest block gets weight 45, oldest gets weight 1)
 - **Target Block Time**: 30 seconds
 - **Formula (pure integer math — no floats)**:
   ```
-  scaled = round(current_difficulty × expected_time / actual_time)
-  
-  Where:
-    expected_time = 2,016 blocks × 30 seconds = 60,480 seconds
-    actual_time   = median_time_past(latest_block) - median_time_past(2016_blocks_ago)
-    # Median-Time-Past (MTP) prevents timestamp manipulation attacks
+  LWMA = Σ(solve_time[i] × weight[i]) / Σ(weight[i])  where weight[i] = i
+  next_difficulty = current_difficulty × TARGET_BLOCK_TIME / LWMA
+
+  solve_time[i] clamped to [1, 6×30s] to prevent stalled-block spikes
   ```
-- **Bounds** (integer percentages):
-  - Maximum increase: ×1.15 per adjustment (15% cap — prevents rapid difficulty spikes)
-  - Maximum decrease: ×0.85 per adjustment (15% floor — prevents hash-rate collapse death spiral)
-  - Minimum difficulty: 4
-  - Maximum difficulty: 2,147,483,647 (2^31−1, supports massive hashrate growth for decades)
+- **Per-block bounds**:
+  - Maximum increase: ×2.0 per block (`MAX_DIFF_UP_PCT = 200`) — prevents single fast block spiking difficulty
+  - Maximum decrease: ×0.75 per block (`MAX_DIFF_DOWN_PCT = 75`) — prevents hash-rate-collapse death spirals
+  - Minimum difficulty: **8,304,130** (`MIN_DIFFICULTY` — genesis difficulty, never easier than this)
+  - Maximum difficulty: 2,147,483,647 (2^31−1)
+
+**Why LWMA over Bitcoin-style intervals**: A high-hashrate miner joining a small testnet can mine 2,016 blocks quickly, spike difficulty 4×, then leave — stranding low-hash nodes for hours. LWMA's per-block adjustment with recent-weighted smoothing converges in minutes, not days.
 
 ### 4.2 Block Structure
 
@@ -500,8 +502,8 @@ Treasury allocation:  R × 5%  → ms69216b1d10425689704d5ae3b2a4aa17049f59b1 (3
 Miner reward:         R × 95% → Miner address
 
   Of miner reward:
-    Immediate:  (R × 95%) × 50% = 47.5% of R  (spendable now)
-    Locked:     (R × 95%) × 50% = 47.5% of R  (locked for 52,560 blocks / ~6 months)
+    Immediate:  (R × 95%) × 50% = 47.5% of R  (spendable now, after 100-block coinbase maturity)
+    Locked:     (R × 95%) × 50% = 47.5% of R  (locked for 157,680 blocks / ~54.75 days)
 ```
 
 ### 5.4 Fee Distribution Per Block
@@ -988,7 +990,7 @@ A: Target Q1 2027. The current phase is testnet development (Q2-Q3 2026) followe
 
 ---
 
-**Document Version**: 2.0  
-**Last Updated**: March 2026  
+**Document Version**: 2.2  
+**Last Updated**: May 2026  
 **Founder**: Kishore K (admin@quantachain.org)  
 **License**: CC BY 4.0  

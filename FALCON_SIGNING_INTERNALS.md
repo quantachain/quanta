@@ -1,123 +1,94 @@
 # Falcon-512 Signing Libraries: pqcrypto-falcon vs falcon-rust
 
-**Document Type:** Internal Developer Reference
-**Relevant Files:** `src/crypto/signatures.rs`, `src/bin/distribute_faucet.rs`, `src/benchmark/network_bench.rs`, `quanta-wasm/src/lib.rs`
+**Document Type:** Internal Developer Reference  
+**Relevant Files:** `src/crypto/signatures.rs`, `src/bin/distribute_faucet.rs`, `src/benchmark/network_bench.rs`, `quanta-wasm/src/lib.rs`  
+**Last Updated:** May 2026
 
 ---
 
-## Why Two Libraries Exist in This Codebase
+## Summary (Current State — Resolved)
 
-QuantaChain uses two separate Rust crates that both implement Falcon-512, a NIST PQC Round 3 finalist lattice-based signature scheme. They coexist because each solves a different compilation and deployment constraint.
+The two-library signing incompatibility described in early versions of this document has been **fixed**. All signing paths now use `falcon-rust`, producing the canonical blob format that `verify_signature_strict()` and the WASM wallet both expect.
+
+**You can safely use `FalconKeypair::sign_transaction_canonical()` for all transaction signing.**
+
+---
+
+## Why Two Libraries Exist
+
+QuantaChain uses two separate Rust crates that both implement Falcon-512:
 
 ### pqcrypto-falcon
 
 - **What it is:** Rust FFI bindings over the official NIST reference C implementation of Falcon-512.
-- **How it works:** Compiles the C reference code and calls it from Rust via `unsafe` FFI. Produces production-grade, standards-compliant Falcon-512 key generation and signing.
-- **Why it was chosen first:** The C reference implementation is the authoritative Falcon implementation. It is the basis of the NIST PQC submission and is trusted for correctness.
-- **The limitation:** Because it compiles C code, it cannot be compiled to WebAssembly (WASM). The WASM target requires pure Rust. Any `cc` or `cmake` dependency in the build graph causes WASM compilation to fail.
+- **How it works:** Compiles the C reference code and calls it from Rust via `unsafe` FFI.
+- **Current role:** **Key generation only.** `FalconKeypair::generate()` uses `pqcrypto-falcon::keypair()` because the NIST reference C impl is the authoritative source for correct key material.
+- **The limitation:** Cannot compile to WebAssembly (WASM) because it depends on C FFI. **Not used for signing.**
 
 ### falcon-rust
 
 - **What it is:** A pure Rust implementation of Falcon-512, with no C dependencies.
-- **How it works:** Implements the full Falcon-512 specification in native Rust. Compiles cleanly to WASM, native Linux, macOS, and Windows targets without any C toolchain.
-- **Why it was added:** The WASM wallet (`quanta-wasm`) must run in a browser. It cannot use `pqcrypto-falcon` because the WASM build fails when any C FFI crate is in the dependency graph. `falcon-rust` was chosen as the WASM-compatible alternative.
-- **Critical consequence:** `falcon-rust` produces signatures in a different byte encoding than `pqcrypto-falcon`, even though both implement the same Falcon-512 cryptographic algorithm.
+- **Why it was added:** The WASM wallet (`quanta-wasm`) must run in a browser — C FFI fails in WASM. `falcon-rust` compiles cleanly to WASM, native Linux, macOS, and Windows.
+- **Current role:** **All signing AND all verification.** Both `FalconKeypair::sign_raw()` and `verify_signature_strict()` use `falcon-rust`.
 
 ---
 
-## The Signature Format Difference
+## The Canonical Signature Blob Format
 
-This is the most important thing to understand. Both libraries are correct implementations of Falcon-512. However, their output byte representations are not identical.
-
-`pqcrypto-falcon` wraps the C reference implementation. When you call `falcon512::sign(message, sk)`, it returns a `SignedMessage` struct whose bytes are laid out as:
+All signing produces blobs in this exact layout (frozen forever — consensus-critical):
 
 ```
-pqcrypto output: [ signature_bytes ] [ message_bytes ]
+signature field = raw_falcon512_sig_bytes (≤666 B) || sha3_hash_bytes (32 B)
 ```
 
-The `SignedMessage::as_bytes()` call returns the concatenation of the signature and the original message.
+Where:
+- `raw_falcon512_sig_bytes` = output of `falcon_rust::falcon512::sign(hash, sk).to_bytes()`
+- `sha3_hash_bytes` = `SHA3-256("QUANTA_TX_V1:" || signing_bytes)` — the 32-byte canonical signing hash
 
-`falcon-rust` exposes a lower-level interface. When you call `fr::sign(hash, sk)`, it returns a `Signature` struct, and `sig.to_bytes()` returns only the raw signature bytes with no appended message.
-
-The QuantaChain node's canonical verification function (`verify_signature_strict` in `src/crypto/signatures.rs`) was designed around the format that `falcon-rust` produces. Its expected blob format is:
-
-```
-verify_signature_strict expects: [ raw_sig_bytes ] [ 32-byte hash ]
-```
-
-Where the last 32 bytes are the SHA3-256 domain-separated hash that was signed, appended manually by the caller. This format was chosen because it is what the WASM wallet produces, and the WASM wallet is the primary transaction signing path.
+`verify_signature_strict()` splits at `len - 32`, verifies the embedded hash matches the expected hash, then calls `falcon_rust::falcon512::verify()`.
 
 ---
 
 ## Which Library Is Used Where
 
-| Location | Library | Reason |
+| Location | Library | Role |
 |---|---|---|
-| `src/crypto/signatures.rs` (key generation, `FalconKeypair::generate`) | pqcrypto-falcon | Authoritative key generation on native node |
-| `src/crypto/signatures.rs` (`sign_raw`, `sign_transaction_canonical`) | pqcrypto-falcon | Existing signing path for native tools |
-| `src/crypto/signatures.rs` (`verify_signature_strict`) | falcon-rust | Verifies the format produced by the WASM wallet |
-| `quanta-wasm/src/lib.rs` (browser wallet) | falcon-rust | WASM compilation requires pure Rust |
-| `src/bin/distribute_faucet.rs` | falcon-rust | Must produce signatures the node accepts |
-| `src/benchmark/network_bench.rs` | falcon-rust | Must produce signatures the node accepts |
+| `FalconKeypair::generate()` | pqcrypto-falcon | Key generation (authoritative NIST C impl) |
+| `FalconKeypair::sign_raw()` | **falcon-rust** | Raw signing — internal |
+| `FalconKeypair::sign_transaction_canonical()` | **falcon-rust** | ✅ Canonical signing for all transactions |
+| `verify_signature_strict()` | **falcon-rust** | All signature verification (consensus path) |
+| `quanta-wasm/src/lib.rs` | **falcon-rust** | Browser wallet signing |
+| `src/bin/distribute_faucet.rs` | **falcon-rust** | Faucet transaction signing |
+| `src/benchmark/network_bench.rs` | **falcon-rust** | Benchmark signing |
 
 ---
 
-## The Compatibility Problem and Why It Matters
+## Correct Signing Pattern
 
-`FalconKeypair::sign_transaction_canonical()` (in `signatures.rs`) uses `pqcrypto-falcon` internally. The signature blob it produces does not match what `verify_signature_strict()` expects, because `verify_signature_strict()` was written to accept the `falcon-rust` format used by the WASM wallet.
-
-This means: **any code that signs with `FalconKeypair::sign_transaction_canonical()` and then submits to the live node will get `invalid_signature` rejections**, even though the local `tx.verify()` call also uses `verify_signature_strict()` and will also return false.
-
-The only correct way to sign a transaction for submission to the live node is to use `falcon-rust` directly, following the pattern in `distribute_faucet.rs`:
+Use `FalconKeypair::sign_transaction_canonical()` — this is now correct for all paths:
 
 ```rust
-use falcon_rust::falcon512::{self as fr, SecretKey as FrSK};
-use sha3::{Sha3_256, Digest};
+let kp = FalconKeypair::generate();  // or load from wallet
 
-const SIGNING_DOMAIN: &[u8] = b"QUANTA_TX_V1:";
-
-fn sign_for_node(sk_bytes: &[u8], signing_data: &[u8]) -> Vec<u8> {
-    // 1. Domain-separated SHA3-256 hash
-    let mut h = Sha3_256::new();
-    h.update(SIGNING_DOMAIN);
-    h.update(signing_data);
-    let mut hash = [0u8; 32];
-    hash.copy_from_slice(&h.finalize());
-
-    // 2. Sign with falcon-rust
-    let sk = FrSK::from_bytes(sk_bytes).expect("invalid SK");
-    let sig = fr::sign(&hash, &sk);
-    let sig_bytes = sig.to_bytes();
-
-    // 3. Append hash to form the blob verify_signature_strict expects
-    let mut blob = Vec::with_capacity(sig_bytes.len() + 32);
-    blob.extend_from_slice(&sig_bytes);
-    blob.extend_from_slice(&hash);
-    blob
-}
+let signing_bytes = tx.get_signing_bytes();
+tx.signature = kp.sign_transaction_canonical(&signing_bytes);
+tx.public_key = kp.public_key.clone();
 ```
 
-Then set `tx.signature = sign_for_node(&sk_bytes, &tx.get_signing_bytes())`.
+This produces the canonical `raw_sig || hash` blob that the node's `verify_signature_strict()` accepts.
 
 ---
 
-## Key Compatibility: Public Keys Are Interoperable
+## Key Compatibility
 
-While signatures are not directly interchangeable, **public keys are**. Both `pqcrypto-falcon` and `falcon-rust` use the standard Falcon-512 public key format: 897 bytes representing the polynomial coefficients in the ring used for verification. A key pair generated with `pqcrypto-falcon` can be verified against a signature produced by `falcon-rust`, and vice versa, as long as the signature blob is in the correct format.
+Public keys are byte-compatible between both libraries. Both use the standard Falcon-512 format: 897 bytes representing polynomial coefficients. A key generated by `pqcrypto-falcon::keypair()` can be used to verify a signature produced by `falcon-rust::sign()`.
 
-This means:
-- Key generation can use either library.
-- The wallet or tool that signs determines which library must be used for verification.
-- Because the node's `verify_signature_strict` is written for the `falcon-rust` format, all signing paths must use `falcon-rust` when targeting the live node.
+- **Key generation**: either library (pqcrypto preferred — NIST reference)
+- **Signing**: always `falcon-rust` (via `FalconKeypair` methods)
+- **Verification**: always `falcon-rust` (via `verify_signature_strict`)
 
 ---
 
-## Current Status and Recommended Path Forward
+## Historical Note
 
-The cleanest long-term resolution is to unify signing under `falcon-rust` across the entire codebase, since `falcon-rust` is both WASM-compatible and produces the format the node verifies. `pqcrypto-falcon` can then be kept only for key generation if needed, or removed entirely once `falcon-rust` key generation is validated to produce correctly sized and formatted key material.
-
-Until that refactor is done:
-
-- Use `FalconKeypair` for key management (generation, storage, address derivation).
-- Use the `sign_for_node` pattern above (or the equivalent in `distribute_faucet.rs`) for any signing that must be verified by the live node.
-- Do not use `FalconKeypair::sign_transaction_canonical` for transactions that will be submitted to the node. It produces pqcrypto format, which the node rejects.
+Prior to the unification fix, `sign_transaction_canonical()` used `pqcrypto-falcon` internally, which produced a `SignedMessage` blob (signature + original message concatenated) incompatible with `verify_signature_strict()`. The fix rewrote `sign_raw()` to use `falcon-rust` directly, producing the `raw_sig || hash` format that the WASM wallet and verifier both expect. The old warning ("do not use `sign_transaction_canonical` for live node submissions") no longer applies.
