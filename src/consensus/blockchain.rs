@@ -214,7 +214,7 @@ const TESTNET_CHECKPOINTS: &[(u64, &str)] = &[
     (85_000, "0000007305d4ceeaf72a4f3c58001295a335d588e16a05f037d21dfb21ac06ca"),
     // Verified live from scan.quantachain.org on 2026-05-08 — anchors the
     // STATE_ROOT_SORT_FIX_HEIGHT boundary; all nodes must be on v0.7.5+ past here.
-    (90_000, "000000dc0e178a5140a5c68481234a9541373ac349b1ae3cbc3f0f3f1fc58d5e"),
+    (90_000, "000000dc8e178a5140a5c68461234a9541373ac349b1ae3cbc3f0f3f1fc58d5e"),
     // Next: add (95_000, ...) or (100_000, ...) once chain reaches that height.
 ];
 
