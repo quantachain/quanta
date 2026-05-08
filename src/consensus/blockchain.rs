@@ -177,14 +177,24 @@ const MAX_ADDRESS_LEN: usize = 128;
 /// Blocks BELOW this height skip state_root validation — they are already
 /// secured by hardcoded checkpoints.
 // Height from which state_root validation is enforced.
-// Blocks below this height are exempt because:
-//   1. Early blocks (< 85,000) used unsorted locked_balances in the state hash.
-//   2. Blocks 85,000–89,999 were mined while the node had corrupted account state
-//      due to the snapshot-fallback bug fixed in v0.7.4.  Sequential-sync nodes
-//      cannot reproduce those state roots.  The 85,000-block checkpoint already
-//      anchors chain integrity; a new checkpoint at 90,000 will be added once the
-//      main node restarts on v0.7.4 and that height is reached with correct state.
-const STATE_ROOT_SORT_FIX_HEIGHT: u64 = 90_000;
+//
+// WHY 95,000:
+//   Blocks below this boundary were all mined by a node whose account state had
+//   accumulated bugs from prior versions (unsorted locked_balances pre-v0.7.2,
+//   snapshot-fallback corruption pre-v0.7.4, and dirty incremental state up to
+//   the v0.7.5 clean restart at ~block 90,000).  The chain tip at the time of the
+//   v0.7.5 clean restart was block 91,768 — all of those blocks carry state_roots
+//   that a fresh-genesis-replay node cannot reproduce.
+//
+//   Hardcoded checkpoints at 85,000 and 90,000 already anchor chain integrity;
+//   the Fix-2 checkpoint-bypass in validate_block_consensus handles any remaining
+//   checkpointed heights.  From block 95,000 onward every active node will have
+//   been running on clean-replayed state long enough that their state_roots
+//   will be identical and enforcement is meaningful.
+//
+//   NEXT ACTION: once the chain reaches block 95,000, add a checkpoint for that
+//   height and leave this constant in place permanently.
+const STATE_ROOT_SORT_FIX_HEIGHT: u64 = 95_000;
 
 /// CONSENSUS-CRITICAL: Genesis block hashes (prevent chain-split attacks)
 /// Mainnet genesis — pending final mining before mainnet launch.
@@ -1153,22 +1163,46 @@ impl Blockchain {
         // all transaction data; state_root adds an extra account-state binding
         // for nodes that compute it.
         //
-        // STATE_ROOT_SORT_FIX_HEIGHT exemption: blocks mined before the sort fix
-        // stored a state_root computed with unsorted locked_balances.  Re-validating
-        // them with the now-sorted calculate_state_root would always produce a
-        // different hash and reject them.  Those blocks are already secured by
-        // hardcoded checkpoints, so we skip state_root validation for them.
+        // Exemptions (skip state_root check):
+        //   1. STATE_ROOT_SORT_FIX_HEIGHT: blocks below this used unsorted locked_balances
+        //      and are already secured by hardcoded checkpoints.
+        //   2. CHECKPOINTED BLOCKS: if the block's hash matches a hardcoded checkpoint,
+        //      the block's content is already canonical — we cannot reject it regardless
+        //      of what our local state replay produced.  This handles the case where a
+        //      clean-sync node's account state at some prior height diverges from the
+        //      mining node's state (e.g. block 90,000: the mining node's state at 89,999
+        //      differs from a node that replayed all blocks from genesis).  The checkpoint
+        //      hash already commits to every tx in the block; the state_root check adds
+        //      no additional security for checkpointed heights.
         let computed_state_root = temp_state.calculate_state_root();
+        let is_checkpointed = self.validate_checkpoint(block.index, &block.hash)
+            && {
+                // validate_checkpoint returns true for heights with NO checkpoint too,
+                // so we must confirm there IS a checkpoint at this exact height.
+                let checkpoints = match self.network {
+                    ChainNetwork::Testnet => TESTNET_CHECKPOINTS,
+                    ChainNetwork::Mainnet => MAINNET_CHECKPOINTS,
+                };
+                checkpoints.iter().any(|(h, _)| *h == block.index)
+            };
         if block.index > 0
             && block.index >= STATE_ROOT_SORT_FIX_HEIGHT
             && !block.state_root.is_empty()
             && block.state_root != computed_state_root
+            && !is_checkpointed
         {
             tracing::warn!(
                 "Invalid state root at block {}: computed={}, block={}",
                 block.index, computed_state_root, block.state_root
             );
             return Err(BlockchainError::InvalidBlock);
+        }
+        if is_checkpointed && !block.state_root.is_empty() && block.state_root != computed_state_root {
+            tracing::info!(
+                "State root mismatch at checkpointed block {} (computed={}, block={}) — \
+                 trusting checkpoint; local state will converge from this height onward.",
+                block.index, computed_state_root, block.state_root
+            );
         }
         
         Ok(())
