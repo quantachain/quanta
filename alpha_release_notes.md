@@ -230,10 +230,17 @@ docker run -d --name quanta-node ^
 
 ### How long does resync take?
 
-| Chain Height | Approx. Time |
-|---|---|
-| 0 → 50,000 | ~15–25 min |
-| 0 → 85,000+ | ~25–40 min |
+> Times depend on VPS CPU core count (Rayon uses all cores for Falcon-512 verification)
+> and network speed to the bootstrap node.
+
+| Chain Height | Good VPS (4+ cores) | Weak VPS / slow link |
+|---|---|---|
+| 0 → 50,000 | ~3–6 min | ~10–15 min |
+| 0 → 91,000+ | ~5–15 min | ~15–25 min |
+
+The main bottleneck is **Falcon-512 signature verification** — each block's signatures are
+verified in parallel via Rayon, and the LRU cache skips re-verification of seen sigs.
+State replay is fast due to 1,000-block snapshots (only the delta is replayed, not from genesis).
 
 ```bash
 # Watch sync in real time
