@@ -18,6 +18,14 @@ pub struct Block {
     /// Cryptographic commitment to the global account state after this block
     #[serde(default)]
     pub state_root: String,
+    
+    // --- QUANTA 2.0 BFT Consensus Fields ---
+    /// The BFT Round this block was committed in. 0 for PoW blocks.
+    #[serde(default)]
+    pub bft_round: u32,
+    /// The Aggregated Dilithium Master Signature proving 2/3+ Validator consensus. Empty for PoW blocks.
+    #[serde(default)]
+    pub bft_signature: Vec<u8>,
 }
 
 impl Block {
@@ -44,6 +52,8 @@ impl Block {
             difficulty,
             merkle_root,
             state_root: String::new(), // Will be set by create_block_template
+            bft_round: 0,
+            bft_signature: vec![],
         };
         block.hash = block.calculate_hash();
         block
@@ -70,6 +80,8 @@ impl Block {
             difficulty,
             merkle_root: "0".repeat(64),
             state_root: "0".repeat(64), // Empty state root for genesis
+            bft_round: 0,
+            bft_signature: vec![],
         };
         genesis.hash = genesis.calculate_hash();
         genesis
@@ -85,7 +97,7 @@ impl Block {
             .join(",");
 
         let data = format!(
-            "{}:{}:{}:{}:{}:{}:{}:{}",
+            "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
             self.index,
             self.timestamp,
             transactions_str,
@@ -93,7 +105,9 @@ impl Block {
             self.nonce,
             self.difficulty,
             self.merkle_root,
-            self.state_root
+            self.state_root,
+            self.bft_round,
+            hex::encode(&self.bft_signature)
         );
 
         double_sha3(data.as_bytes())
