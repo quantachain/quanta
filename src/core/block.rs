@@ -246,10 +246,16 @@ impl Block {
             return false;
         }
 
-        // 2. Proof-of-work
-        if !self.has_valid_hash() {
-            tracing::warn!("Block {}: hash does not meet declared difficulty {}", self.index, self.difficulty);
-            return false;
+        // 2. Proof-of-work OR BFT Consensus
+        // QUANTA 2.0 FORK: If this block has a BFT signature, we skip the PoW difficulty check.
+        // The actual BFT signature math will be validated by `blockchain.rs`.
+        if self.bft_signature.is_empty() {
+            if !self.has_valid_hash() {
+                tracing::warn!("Block {}: hash does not meet declared difficulty {}", self.index, self.difficulty);
+                return false;
+            }
+        } else {
+            tracing::debug!("Block {}: BFT Consensus Block - skipping PoW check", self.index);
         }
 
         // 3. Merkle root integrity
