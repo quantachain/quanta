@@ -1,4 +1,5 @@
 pub mod blockchain;
+pub mod bft;
 pub mod mempool;
 pub mod performance; // PERFORMANCE OPTIMIZATIONS
 

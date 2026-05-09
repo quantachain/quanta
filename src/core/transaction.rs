@@ -88,6 +88,8 @@ pub enum TransactionType {
     Transfer,
     TimeLockTransfer { unlock_height: u64 },
     MultiSigTransfer { signers_required: u8 },
+    /// Quanta 2.0 PQ-BFT Validator Stake Registration
+    Stake { validator_pubkey: Vec<u8> },
 }
 
 impl Transaction {
@@ -181,6 +183,10 @@ impl Transaction {
                 buf.push(2u8);
                 buf.push(*signers_required);
             }
+            TransactionType::Stake { validator_pubkey } => {
+                buf.push(3u8);
+                buf.extend_from_slice(validator_pubkey);
+            }
         }
 
         buf
@@ -234,6 +240,10 @@ impl Transaction {
             TransactionType::MultiSigTransfer { signers_required } => {
                 hasher.update(&[2u8]);
                 hasher.update(&[*signers_required]);
+            }
+            TransactionType::Stake { validator_pubkey } => {
+                hasher.update(&[3u8]);
+                hasher.update(validator_pubkey);
             }
         }
 
