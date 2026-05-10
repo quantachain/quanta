@@ -1,180 +1,129 @@
 use serde::{Serialize, Deserialize};
-use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use aleph_bft::{Keychain as AlephKeychain, NodeIndex, MultiKeychain};
+use async_trait::async_trait;
+use falcon_rust::{PrivateKey, PublicKey, Signature};
 use sha3::{Digest, Sha3_256};
-use pqcrypto_dilithium::dilithium5::{verify, Signature as DilithiumSignature, PublicKey as DilithiumPublicKey};
 
-/// The Post-Quantum BFT Consensus Engine for Quanta 2.0.
-/// 
-/// This module implements a Tendermint-style Byzantine Fault Tolerant (BFT) 
-/// consensus algorithm. It achieves absolute finality in 3 steps:
-/// 1. Propose: A leader proposes a block.
-/// 2. PreVote: Validators vote on the proposal.
-/// 3. PreCommit: Validators commit to the block if 2/3 majority is reached.
-/// 
-/// SIGNATURE AGGREGATION:
-/// All votes are signed using ML-DSA (Dilithium-5). When 2/3 of validators PreCommit,
-/// the Proposer aggregates the Dilithium signatures into a single Master Signature.
-
+/// A Quanta BFT Signable Data — represents the commitment to a specific block.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum BftStep {
-    Propose,
-    PreVote,
-    PreCommit,
-    Commit,
+pub struct BftData {
+    pub chain_id: u32,
+    pub height: u64,
+    pub block_hash: [u8; 32],
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Validator {
-    pub address: String,
-    pub dilithium_pubkey: Vec<u8>,
-    pub voting_power: u64, // Based on QUA staked
+impl aleph_bft::Data for BftData {}
+
+/// FalconKeychain: Bridges AlephBFT consensus with Quanta's Falcon-512 cryptography.
+/// 
+/// This implementation ensures that every consensus message is signed using 
+/// NIST-standardized Post-Quantum signatures.
+pub struct FalconKeychain {
+    node_index: NodeIndex,
+    private_key: Arc<PrivateKey>,
+    validator_pks: Vec<PublicKey>,
+    chain_id: u32,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BftVote {
-    pub step: BftStep,
-    pub block_hash: String,
-    pub validator_address: String,
-    pub signature: Vec<u8>, // Dilithium Signature
-}
-
-pub struct BftEngine {
-    pub validators: HashMap<String, Validator>,
-    pub current_height: u64,
-    pub current_round: u32,
-    pub current_step: BftStep,
-    
-    // Votes for the current round
-    prevotes: HashMap<String, Vec<BftVote>>, // block_hash -> votes
-    precommits: HashMap<String, Vec<BftVote>>, // block_hash -> votes
-}
-
-impl BftEngine {
-    pub fn new() -> Self {
+impl FalconKeychain {
+    pub fn new(
+        node_index: NodeIndex,
+        private_key: PrivateKey,
+        validator_pks: Vec<PublicKey>,
+        chain_id: u32,
+    ) -> Self {
         Self {
-            validators: HashMap::new(),
-            current_height: 0,
-            current_round: 0,
-            current_step: BftStep::Propose,
-            prevotes: HashMap::new(),
-            precommits: HashMap::new(),
+            node_index,
+            private_key: Arc::new(private_key),
+            validator_pks,
+            chain_id,
         }
     }
+}
 
-    pub fn total_voting_power(&self) -> u64 {
-        self.validators.values().map(|v| v.voting_power).sum()
+impl aleph_bft::Index for FalconKeychain {
+    fn index(&self) -> NodeIndex {
+        self.node_index
+    }
+}
+
+#[async_trait]
+impl AlephKeychain for FalconKeychain {
+    type Signature = Vec<u8>;
+
+    fn sign(&self, msg: &[u8]) -> Self::Signature {
+        // Domain separation and chain ID binding for replay protection
+        let mut hasher = Sha3_256::new();
+        hasher.update(b"QUANTA_BFT_V1:");
+        hasher.update(&self.chain_id.to_le_bytes());
+        hasher.update(msg);
+        let digest = hasher.finalize();
+
+        // Sign the digest with Falcon-512
+        self.private_key.sign(&digest).to_vec()
     }
 
-    /// Process an incoming Dilithium vote from a validator.
-    pub fn process_vote(&mut self, vote: BftVote) -> bool {
-        // 1. Check if validator exists
-        let validator = match self.validators.get(&vote.validator_address) {
-            Some(v) => v,
+    fn verify(&self, msg: &[u8], sig: &Self::Signature, index: NodeIndex) -> bool {
+        let pk = match self.validator_pks.get(index.0) {
+            Some(pk) => pk,
             None => return false,
         };
 
-        // 2. Load the Dilithium Public Key
-        let pk_result = DilithiumPublicKey::from_bytes(&validator.dilithium_pubkey);
-        let pk = match pk_result {
-            Ok(pk) => pk,
-            Err(_) => return false, // Invalid key
-        };
-
-        // 3. Load the Dilithium Signature
-        let sig_result = DilithiumSignature::from_bytes(&vote.signature);
-        let sig = match sig_result {
-            Ok(sig) => sig,
+        let falcon_sig = match Signature::from_bytes(sig) {
+            Ok(s) => s,
             Err(_) => return false,
         };
 
-        // 4. Verify the Vote Payload
-        // We sign: Step || Round || BlockHash
-        let payload = format!("{:?}:{}:{}", vote.step, self.current_round, vote.block_hash);
-        
-        // PQC Verification!
-        if verify(&sig, payload.as_bytes(), &pk).is_err() {
-            return false; // Cryptographic rejection
-        }
-
-        // 5. Tally the vote
-        match vote.step {
-            BftStep::PreVote => {
-                let entry = self.prevotes.entry(vote.block_hash.clone()).or_insert(Vec::new());
-                // Prevent double voting
-                if !entry.iter().any(|v| v.validator_address == vote.validator_address) {
-                    entry.push(vote);
-                }
-            },
-            BftStep::PreCommit => {
-                let entry = self.precommits.entry(vote.block_hash.clone()).or_insert(Vec::new());
-                if !entry.iter().any(|v| v.validator_address == vote.validator_address) {
-                    entry.push(vote);
-                }
-            },
-            _ => return false,
-        }
-
-        self.check_quorum(&vote.block_hash, &vote.step)
-    }
-
-    /// Check if 2/3+ voting power has been reached for a specific block hash.
-    pub fn check_quorum(&mut self, block_hash: &str, step: &BftStep) -> bool {
-        let votes = match step {
-            BftStep::PreVote => self.prevotes.get(block_hash),
-            BftStep::PreCommit => self.precommits.get(block_hash),
-            _ => return false,
-        };
-
-        let votes = match votes {
-            Some(v) => v,
-            None => return false,
-        };
-
-        let mut power: u64 = 0;
-        for vote in votes {
-            if let Some(val) = self.validators.get(&vote.validator_address) {
-                power += val.voting_power;
-            }
-        }
-
-        // Tendermint BFT Rule: Needs > 2/3 of total power
-        let threshold = (self.total_voting_power() * 2) / 3;
-        
-        if power > threshold {
-            if *step == BftStep::PreVote {
-                self.current_step = BftStep::PreCommit;
-            } else if *step == BftStep::PreCommit {
-                self.current_step = BftStep::Commit;
-            }
-            true
-        } else {
-            false
-        }
-    }
-
-    /// Compress all 67%+ Dilithium PreCommit signatures into 1 Master Signature.
-    /// This uses a Fiat-Shamir deterministic hash compression to simulate 
-    /// the full lattice MPC aggregation for Quanta 2.0.
-    pub fn aggregate_master_signature(&self, block_hash: &str) -> Option<Vec<u8>> {
-        if self.current_step != BftStep::Commit {
-            return None;
-        }
-
-        let precommits = self.precommits.get(block_hash)?;
-        
         let mut hasher = Sha3_256::new();
-        hasher.update(b"QUANTA_2.0_DILITHIUM_MASTER_SIG:");
-        hasher.update(block_hash.as_bytes());
-        
-        // Sort to ensure deterministic aggregation
-        let mut sorted_votes = precommits.clone();
-        sorted_votes.sort_by(|a, b| a.validator_address.cmp(&b.validator_address));
+        hasher.update(b"QUANTA_BFT_V1:");
+        hasher.update(&self.chain_id.to_le_bytes());
+        hasher.update(msg);
+        let digest = hasher.finalize();
 
-        for vote in sorted_votes {
-            hasher.update(&vote.signature);
+        // Verify the signature against the validator's Falcon public key
+        pk.verify(&digest, &falcon_sig)
+    }
+}
+
+/// MultiKeychain implementation to support AlephBFT's multi-signature verification.
+impl MultiKeychain for FalconKeychain {
+    type PartialMultisignature = Vec<(NodeIndex, Vec<u8>)>;
+
+    fn from_signature(&self, sig: Self::Signature, index: NodeIndex) -> Self::PartialMultisignature {
+        vec![(index, sig)]
+    }
+
+    fn is_complete(&self, msg: &[u8], partial: &Self::PartialMultisignature) -> bool {
+        // In AlephBFT, 2/3+1 majority is required.
+        let threshold = (self.validator_pks.len() * 2) / 3 + 1;
+        
+        if partial.len() < threshold {
+            return false;
         }
 
-        // Return the 32-byte aggregated Master Signature
-        Some(hasher.finalize().to_vec())
+        // Verify each signature in the partial set
+        let mut seen = std::collections::HashSet::new();
+        for (idx, sig) in partial {
+            if !seen.insert(idx.0) || !self.verify(msg, sig, *idx) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// BFT Config for Quanta Mainnet
+pub struct QuantaBftConfig {
+    pub n_validators: usize,
+    pub epoch_id: u64,
+}
+
+impl QuantaBftConfig {
+    pub fn mainnet_v1() -> Self {
+        Self {
+            n_validators: 21,
+            epoch_id: 1,
+        }
     }
 }

@@ -284,6 +284,21 @@ enum Commands {
         #[arg(long, default_value = "false")]
         quick: bool,
     },
+    
+    /// Register this node as a Quanta 2.0 BFT Validator
+    RegisterValidator {
+        /// Miner wallet file
+        #[arg(short, long, default_value = "wallet.qua")]
+        wallet: String,
+        
+        /// Database path
+        #[arg(short, long, default_value = "./quanta_data")]
+        db: String,
+
+        /// Network type (mainnet or testnet)
+        #[arg(long, default_value = "testnet")]
+        network: String,
+    },
 }
 
 #[tokio::main]
@@ -1017,6 +1032,62 @@ async fn main() {
                 Err(e)   => eprintln!(" ❌ Markdown write failed: {}", e),
             }
             println!("\n Benchmark complete. Results saved to: {}\n", output_dir);
+        }
+
+        Commands::RegisterValidator { wallet, db, network } => {
+            let password = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
+                p
+            } else {
+                println!("Enter wallet password:");
+                rpassword::read_password().expect("Failed to read password")
+            };
+            
+            let wallet_obj = match QuantumWallet::load_quantum_safe(&wallet, &password) {
+                Ok(w) => w,
+                Err(e) => {
+                    eprintln!("Failed to load wallet: {}", e);
+                    return;
+                }
+            };
+
+            let network_type = if network == "mainnet" {
+                crate::core::ChainNetwork::Mainnet
+            } else {
+                crate::core::ChainNetwork::Testnet
+            };
+
+            let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
+            let blockchain = Blockchain::new(storage, network_type).expect("Failed to initialize blockchain");
+
+            println!("Registering {} as a BFT Validator...", wallet_obj.address);
+            
+            let mut tx = crate::core::transaction::Transaction::new(
+                wallet_obj.address.clone(),
+                "TREASURY".to_string(),
+                0,
+                chrono::Utc::now().timestamp(),
+            );
+            
+            tx.tx_type = crate::core::transaction::TransactionType::Stake {
+                validator_pubkey: wallet_obj.public_key.clone(),
+            };
+            tx.public_key = wallet_obj.public_key.clone();
+            tx.nonce = blockchain.get_account_state_read().get_nonce(&wallet_obj.address) + 1;
+            tx.network_id = network_type.network_id();
+            
+            let signing_bytes = tx.get_signing_bytes();
+            tx.signature = wallet_obj.sign_transaction_canonical(&signing_bytes);
+
+            match blockchain.add_transaction(tx.clone()) {
+                Ok(_) => {
+                    println!("\n ✓ Validator registration transaction submitted!");
+                    println!("   Address: {}", wallet_obj.address);
+                    println!("   Status:  PENDING (will be active after next block)");
+                }
+                Err(e) => {
+                    eprintln!(" Failed to register validator: {}", e);
+                }
+            }
         }
     }
 }

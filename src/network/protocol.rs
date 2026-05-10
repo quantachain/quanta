@@ -46,6 +46,10 @@ pub enum P2PMessage {
     Ping(u64),
     Pong(u64),
 
+    // BFT Consensus (Quanta 2.0)
+    /// AlephBFT consensus message (serialized internal protocol data)
+    BftMessage(Vec<u8>),
+
     // Error handling
     Error(String),
     Disconnect,
@@ -124,6 +128,7 @@ pub trait MessageHandler: Send + Sync {
     async fn handle_get_blocks(&self, start: u64, end: u64) -> Result<Vec<Block>, String>;
     async fn handle_get_height(&self) -> Result<u64, String>;
     async fn handle_get_mempool(&self) -> Result<Vec<Transaction>, String>;
+    async fn handle_bft_message(&self, data: Vec<u8>) -> Result<(), String>;
 }
 
 /// Serialize a P2P message with network magic bytes for transmission.

@@ -47,9 +47,9 @@ pqcrypto-traits = "0.3"
 # with the browser WASM wallet. Cross-library public keys are compatible.
 falcon-rust = "0.1"
 
-# [NEW] Quanta 2.0 Consensus: Dilithium (ML-DSA)
-# Used specifically by Validators to sign and aggregate consensus votes.
-# Dilithium supports Fiat-Shamir with Aborts, allowing for MPC aggregation.
+# [NEW] Quanta 2.0 Consensus: AlephBFT + Falcon-512
+# aleph-bft: Asynchronous BFT consensus engine (pure Rust).
+aleph-bft = "0.45"
 pqcrypto-dilithium = "0.3"
 
 # SHA3 hashing (quantum-resistant)

@@ -378,6 +378,11 @@ impl Network {
             P2PMessage::Disconnect => {
                 self.peer_manager.remove_peer(addr).await;
             }
+            P2PMessage::BftMessage(data) => {
+                // Bridge to AlephBFT engine
+                // In a production setup, this would be routed to a dedicated consensus channel
+                debug!("Received BFT message ({} bytes) from {}", data.len(), addr);
+            }
             _ => {
                 debug!("Unhandled message type from {}", addr);
             }

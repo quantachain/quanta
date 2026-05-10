@@ -349,11 +349,17 @@ pub struct AccountBalance {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AccountState {
     accounts: HashMap<String, AccountBalance>,
+    /// Active BFT validators (Address -> Falcon Public Key)
+    #[serde(default)]
+    validators: HashMap<String, Vec<u8>>,
 }
 
 impl AccountState {
     pub fn new() -> Self {
-        Self { accounts: HashMap::new() }
+        Self { 
+            accounts: HashMap::new(),
+            validators: HashMap::new(),
+        }
     }
 
     /// Calculate deterministic state root hash of all accounts.
@@ -537,6 +543,16 @@ impl AccountState {
     /// Returns `None` if the address has never appeared on-chain.
     pub fn get_account(&self, address: &str) -> Option<&AccountBalance> {
         self.accounts.get(address)
+    }
+
+    /// Register a new validator in the state
+    pub fn register_validator(&mut self, address: &str, public_key: Vec<u8>) {
+        self.validators.insert(address.to_string(), public_key);
+    }
+
+    /// Get all active validators
+    pub fn get_validators(&self) -> &HashMap<String, Vec<u8>> {
+        &self.validators
     }
 }
 

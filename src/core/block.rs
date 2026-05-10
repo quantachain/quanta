@@ -23,9 +23,9 @@ pub struct Block {
     /// The BFT Round this block was committed in. 0 for PoW blocks.
     #[serde(default)]
     pub bft_round: u32,
-    /// The Aggregated Dilithium Master Signature proving 2/3+ Validator consensus. Empty for PoW blocks.
+    /// The BFT Certificate (collection of Falcon-512 signatures from validators).
     #[serde(default)]
-    pub bft_signature: Vec<u8>,
+    pub bft_signatures: Vec<Vec<u8>>,
 }
 
 impl Block {
@@ -53,7 +53,7 @@ impl Block {
             merkle_root,
             state_root: String::new(), // Will be set by create_block_template
             bft_round: 0,
-            bft_signature: vec![],
+            bft_signatures: vec![],
         };
         block.hash = block.calculate_hash();
         block
@@ -81,7 +81,7 @@ impl Block {
             merkle_root: "0".repeat(64),
             state_root: "0".repeat(64), // Empty state root for genesis
             bft_round: 0,
-            bft_signature: vec![],
+            bft_signatures: vec![],
         };
         genesis.hash = genesis.calculate_hash();
         genesis
@@ -96,8 +96,14 @@ impl Block {
             .collect::<Vec<String>>()
             .join(",");
 
+        let signatures_str = self.bft_signatures
+            .iter()
+            .map(|sig| hex::encode(sig))
+            .collect::<Vec<String>>()
+            .join(",");
+            
         let data = format!(
-            "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+            "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
             self.index,
             self.timestamp,
             transactions_str,
@@ -107,7 +113,7 @@ impl Block {
             self.merkle_root,
             self.state_root,
             self.bft_round,
-            hex::encode(&self.bft_signature)
+            signatures_str
         );
 
         double_sha3(data.as_bytes())
@@ -247,15 +253,22 @@ impl Block {
         }
 
         // 2. Proof-of-work OR BFT Consensus
-        // QUANTA 2.0 FORK: If this block has a BFT signature, we skip the PoW difficulty check.
-        // The actual BFT signature math will be validated by `blockchain.rs`.
-        if self.bft_signature.is_empty() {
+        // QUANTA 2.0 FORK: If this block has BFT signatures, we skip the PoW difficulty check.
+        // The actual BFT majority math will be validated by the AlephBFT integration.
+        if self.bft_signatures.is_empty() {
             if !self.has_valid_hash() {
                 tracing::warn!("Block {}: hash does not meet declared difficulty {}", self.index, self.difficulty);
                 return false;
             }
         } else {
             tracing::debug!("Block {}: BFT Consensus Block - skipping PoW check", self.index);
+            // Verify each signature is the correct length (666 bytes for Falcon-512)
+            for (i, sig) in self.bft_signatures.iter().enumerate() {
+                if sig.len() != 666 {
+                    tracing::warn!("Block {}: Invalid Falcon-512 signature length at index {} (must be 666 bytes)", self.index, i);
+                    return false;
+                }
+            }
         }
 
         // 3. Merkle root integrity
