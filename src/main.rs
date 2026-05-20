@@ -1064,19 +1064,19 @@ async fn main() {
             let mut tx = crate::core::transaction::Transaction::new(
                 wallet_obj.address.clone(),
                 "TREASURY".to_string(),
-                0,
+                1_000 * 1_000_000, // Enforce 1,000 QUA stake
                 chrono::Utc::now().timestamp(),
             );
             
             tx.tx_type = crate::core::transaction::TransactionType::Stake {
-                validator_pubkey: wallet_obj.public_key.clone(),
+                validator_pubkey: wallet_obj.keypair.public_key.clone(),
             };
-            tx.public_key = wallet_obj.public_key.clone();
+            tx.public_key = wallet_obj.keypair.public_key.clone();
             tx.nonce = blockchain.get_account_state_read().get_nonce(&wallet_obj.address) + 1;
             tx.network_id = network_type.network_id();
             
             let signing_bytes = tx.get_signing_bytes();
-            tx.signature = wallet_obj.sign_transaction_canonical(&signing_bytes);
+            tx.signature = wallet_obj.keypair.sign_transaction_canonical(&signing_bytes);
 
             match blockchain.add_transaction(tx.clone()) {
                 Ok(_) => {

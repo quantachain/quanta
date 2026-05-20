@@ -103,7 +103,7 @@ impl Block {
             .join(",");
             
         let data = format!(
-            "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+            "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
             self.index,
             self.timestamp,
             transactions_str,

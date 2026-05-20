@@ -129,6 +129,7 @@ tower_governor = "0.8.0"
 
 # System info for benchmark reports
 sysinfo = "0.30"
+parity-scale-codec = { version = "3.0.0", features = ["derive"] }
 
 # For tests
 [dev-dependencies]

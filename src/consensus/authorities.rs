@@ -1,28 +1,44 @@
-use falcon_rust::PublicKey;
-use std::sync::OnceLock;
+/// Quanta 2.0 BFT Authority Registry
+///
+/// During the PoW→BFT transition the authority set is entirely DYNAMIC —
+/// validators register by submitting a `Stake` transaction on-chain and their
+/// Falcon-512 public keys are stored in `AccountState::validators`.
+///
+/// This module provides helpers that load the live authority set from an
+/// `AccountState` snapshot.  The old approach of hardcoding placeholder hex
+/// strings is intentionally removed; no off-chain static keys are trusted.
+///
+/// Usage (inside `validate_block_consensus`):
+/// ```rust
+/// let authorities_map = base_state.get_validators();
+/// let threshold = (authorities_map.len() * 2) / 3 + 1;
+/// ```
+/// That is already the approach taken in blockchain.rs; this module is kept
+/// as a documentation anchor and may house helper types in the future.
 
-/// The initial set of 21 Authority Nodes for the Quanta 2.0 Merge.
-/// 
-/// These public keys are hardcoded in the consensus layer to prevent 
-/// authority-takeover attacks during the bootstrap phase.
-pub const AUTHORITY_PUBKEYS: &[&str] = &[
-    "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20", // Placeholder 1
-    "2122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40", // Placeholder 2
-    // ... we would list all 21 here
-];
+use crate::core::transaction::AccountState;
+use falcon_rust::falcon512::PublicKey;
 
-static LOADED_AUTHORITIES: OnceLock<Vec<PublicKey>> = OnceLock::new();
+/// Return all currently-registered Falcon-512 public keys from `state`.
+///
+/// The order is deterministic (sorted by validator address) so that every node
+/// builds the same `validator_pks` vec when constructing a `FalconKeychain`.
+pub fn get_authority_pks_from_state(state: &AccountState) -> Vec<PublicKey> {
+    let mut entries: Vec<_> = state.get_validators().iter().collect();
+    entries.sort_by_key(|(addr, _)| addr.as_str());
 
-/// Load and cache the Falcon-512 public keys for all consensus validators.
-pub fn get_authority_pks() -> &'static Vec<PublicKey> {
-    LOADED_AUTHORITIES.get_or_init(|| {
-        AUTHORITY_PUBKEYS.iter()
-            .map(|hex| {
-                // In production, we'd hex-decode and use PublicKey::from_bytes
-                // For now, returning a mock key or handling the empty set
-                // (This needs real 897-byte Falcon public keys)
-                PublicKey::from_bytes(&vec![0u8; 897]).unwrap()
-            })
-            .collect()
-    })
+    entries
+        .iter()
+        .filter_map(|(_, pk_bytes)| {
+            PublicKey::from_bytes(pk_bytes).ok()
+        })
+        .collect()
+}
+
+/// Return the addresses in the same sorted order as `get_authority_pks_from_state`.
+/// Used to build the `FalconKeychain` index ↔ address mapping.
+pub fn get_authority_addresses_sorted(state: &AccountState) -> Vec<String> {
+    let mut entries: Vec<_> = state.get_validators().keys().cloned().collect();
+    entries.sort();
+    entries
 }

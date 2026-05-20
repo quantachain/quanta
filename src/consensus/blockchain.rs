@@ -9,6 +9,7 @@ use std::collections::VecDeque;
 use thiserror::Error;
 use dashmap::DashMap;
 use tokio::sync::watch; // New-block notification channel (abort-on-stale mining)
+use sha3::Digest;
 
 
 // PERFORMANCE OPTIMIZATIONS FOR POST-QUANTUM CRYPTO
@@ -198,7 +199,7 @@ const STATE_ROOT_SORT_FIX_HEIGHT: u64 = 95_000;
 
 // QUANTA 2.0 HARD FORK
 // The block height where Proof-of-Work ends and AlephBFT (Falcon-512) Consensus begins.
-pub const QUANTA_V2_FORK_HEIGHT: u64 = 100_000;
+pub const QUANTA_V2_FORK_HEIGHT: u64 = 150_000;
 
 /// CONSENSUS-CRITICAL: Genesis block hashes (prevent chain-split attacks)
 /// Mainnet genesis — pending final mining before mainnet launch.
@@ -973,9 +974,9 @@ impl Blockchain {
                 for (address, pk_bytes) in authorities_map {
                     if seen_authorities.contains(address) { continue; }
                     
-                    if let Ok(pk) = falcon_rust::PublicKey::from_bytes(pk_bytes) {
-                        if let Ok(falcon_sig) = falcon_rust::Signature::from_bytes(sig_bytes) {
-                            if pk.verify(&digest, &falcon_sig) {
+                    if let Ok(pk) = falcon_rust::falcon512::PublicKey::from_bytes(pk_bytes) {
+                        if let Ok(falcon_sig) = falcon_rust::falcon512::Signature::from_bytes(sig_bytes) {
+                            if falcon_rust::falcon512::verify(&digest, &falcon_sig, &pk) {
                                 seen_authorities.insert(address.clone());
                                 valid_sigs += 1;
                                 found = true;
@@ -1833,13 +1834,21 @@ impl Blockchain {
             // MED-4 FIX: Verify PoW difficulty meets minimum BEFORE storing orphan.
             // Previously, any block passing a cheap hash-format check could fill
             // the orphan pool — now it must meet minimum difficulty too.
-            if block.difficulty < MIN_DIFFICULTY {
-                tracing::warn!("Rejecting orphan block: difficulty {} < minimum {}", block.difficulty, MIN_DIFFICULTY);
-                return Err(BlockchainError::InvalidBlock);
-            }
-            if !block.has_valid_hash() {
-                tracing::warn!("Rejecting orphan block with invalid PoW");
-                return Err(BlockchainError::InvalidBlock);
+            if block.index < QUANTA_V2_FORK_HEIGHT {
+                if block.difficulty < MIN_DIFFICULTY {
+                    tracing::warn!("Rejecting orphan block: difficulty {} < minimum {}", block.difficulty, MIN_DIFFICULTY);
+                    return Err(BlockchainError::InvalidBlock);
+                }
+                if !block.has_valid_hash() {
+                    tracing::warn!("Rejecting orphan block with invalid PoW");
+                    return Err(BlockchainError::InvalidBlock);
+                }
+            } else {
+                // BFT Validation
+                if block.bft_signatures.is_empty() {
+                    tracing::warn!("Rejecting orphan block with missing BFT certificate");
+                    return Err(BlockchainError::InvalidBlock);
+                }
             }
             
             // Validate merkle root

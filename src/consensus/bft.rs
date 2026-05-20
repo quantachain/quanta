@@ -1,24 +1,25 @@
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
-use aleph_bft::{Keychain as AlephKeychain, NodeIndex, MultiKeychain};
+use aleph_bft::{Keychain as AlephKeychain, NodeIndex, MultiKeychain, NodeCount};
 use async_trait::async_trait;
-use falcon_rust::{PrivateKey, PublicKey, Signature};
+use falcon_rust::falcon512::{SecretKey as PrivateKey, PublicKey, Signature};
 use sha3::{Digest, Sha3_256};
 
 /// A Quanta BFT Signable Data — represents the commitment to a specific block.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash, parity_scale_codec::Encode, parity_scale_codec::Decode)]
 pub struct BftData {
     pub chain_id: u32,
     pub height: u64,
     pub block_hash: [u8; 32],
 }
 
-impl aleph_bft::Data for BftData {}
+
 
 /// FalconKeychain: Bridges AlephBFT consensus with Quanta's Falcon-512 cryptography.
 /// 
 /// This implementation ensures that every consensus message is signed using 
 /// NIST-standardized Post-Quantum signatures.
+#[derive(Clone)]
 pub struct FalconKeychain {
     node_index: NodeIndex,
     private_key: Arc<PrivateKey>,
@@ -52,6 +53,10 @@ impl aleph_bft::Index for FalconKeychain {
 impl AlephKeychain for FalconKeychain {
     type Signature = Vec<u8>;
 
+    fn node_count(&self) -> NodeCount {
+        NodeCount(self.validator_pks.len())
+    }
+
     fn sign(&self, msg: &[u8]) -> Self::Signature {
         // Domain separation and chain ID binding for replay protection
         let mut hasher = Sha3_256::new();
@@ -61,7 +66,8 @@ impl AlephKeychain for FalconKeychain {
         let digest = hasher.finalize();
 
         // Sign the digest with Falcon-512
-        self.private_key.sign(&digest).to_vec()
+        let sig = falcon_rust::falcon512::sign(&digest, &self.private_key);
+        sig.to_bytes().to_vec()
     }
 
     fn verify(&self, msg: &[u8], sig: &Self::Signature, index: NodeIndex) -> bool {
@@ -82,29 +88,45 @@ impl AlephKeychain for FalconKeychain {
         let digest = hasher.finalize();
 
         // Verify the signature against the validator's Falcon public key
-        pk.verify(&digest, &falcon_sig)
+        falcon_rust::falcon512::verify(&digest, &falcon_sig, pk)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, parity_scale_codec::Encode, parity_scale_codec::Decode)]
+pub struct FalconPartialMultisig {
+    pub signatures: Vec<(NodeIndex, Vec<u8>)>,
+}
+
+impl aleph_bft::PartialMultisignature for FalconPartialMultisig {
+    type Signature = Vec<u8>;
+    fn add_signature(self, signature: &Self::Signature, index: NodeIndex) -> Self {
+        let mut new = self;
+        new.signatures.push((index, signature.clone()));
+        new
     }
 }
 
 /// MultiKeychain implementation to support AlephBFT's multi-signature verification.
 impl MultiKeychain for FalconKeychain {
-    type PartialMultisignature = Vec<(NodeIndex, Vec<u8>)>;
+    type PartialMultisignature = FalconPartialMultisig;
 
-    fn from_signature(&self, sig: Self::Signature, index: NodeIndex) -> Self::PartialMultisignature {
-        vec![(index, sig)]
+    fn bootstrap_multi(&self, sig: &Self::Signature, index: NodeIndex) -> Self::PartialMultisignature {
+        FalconPartialMultisig {
+            signatures: vec![(index, sig.clone())]
+        }
     }
 
     fn is_complete(&self, msg: &[u8], partial: &Self::PartialMultisignature) -> bool {
         // In AlephBFT, 2/3+1 majority is required.
         let threshold = (self.validator_pks.len() * 2) / 3 + 1;
         
-        if partial.len() < threshold {
+        if partial.signatures.len() < threshold {
             return false;
         }
 
         // Verify each signature in the partial set
         let mut seen = std::collections::HashSet::new();
-        for (idx, sig) in partial {
+        for (idx, sig) in &partial.signatures {
             if !seen.insert(idx.0) || !self.verify(msg, sig, *idx) {
                 return false;
             }

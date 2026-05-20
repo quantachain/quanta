@@ -69,10 +69,11 @@ pub struct Network {
     header_buffer: Arc<tokio::sync::Mutex<Vec<crate::network::protocol::BlockHeader>>>,
     /// REORG FIX: The exact [start, end] block index range currently being
     /// downloaded by the sync loop. Set just before GetBlocks is sent;
-    /// cleared after the buffer is drained. Allows handle_new_block to
-    /// buffer deep-reorg blocks whose index is BELOW the current chain tip
-    /// (the old `block.index > latest.index` check silently dropped them).
     sync_request_range: Arc<tokio::sync::Mutex<Option<(u64, u64)>>>,
+    /// BFT consensus vote buffer
+    bft_vote_buffer: Arc<tokio::sync::Mutex<Vec<crate::consensus::bft_proposer::VoteMsg>>>,
+    /// BFT consensus proposal buffer
+    bft_proposal_buffer: Arc<tokio::sync::Mutex<Vec<crate::core::block::Block>>>,
 }
 
 impl Network {
@@ -100,6 +101,8 @@ impl Network {
             sync_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             header_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             sync_request_range: Arc::new(tokio::sync::Mutex::new(None)),
+            bft_vote_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            bft_proposal_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -379,9 +382,23 @@ impl Network {
                 self.peer_manager.remove_peer(addr).await;
             }
             P2PMessage::BftMessage(data) => {
-                // Bridge to AlephBFT engine
-                // In a production setup, this would be routed to a dedicated consensus channel
                 debug!("Received BFT message ({} bytes) from {}", data.len(), addr);
+                if let Ok(msg) = bincode::deserialize::<crate::consensus::bft_proposer::BftProtocolMsg>(&data) {
+                    match msg {
+                        crate::consensus::bft_proposer::BftProtocolMsg::Vote(vote) => {
+                            let mut buffer = self.bft_vote_buffer.lock().await;
+                            if buffer.len() < 10000 {
+                                buffer.push(vote);
+                            }
+                        }
+                        crate::consensus::bft_proposer::BftProtocolMsg::Proposal(block) => {
+                            let mut buffer = self.bft_proposal_buffer.lock().await;
+                            if buffer.len() < 100 {
+                                buffer.push(block);
+                            }
+                        }
+                    }
+                }
             }
             _ => {
                 debug!("Unhandled message type from {}", addr);
@@ -703,6 +720,63 @@ impl Network {
         // will compute their own value after fetching the full block.
         header.cumulative_work = 0;
         self.peer_manager.broadcast(P2PMessage::Headers(vec![header])).await;
+    }
+
+    /// Broadcast a BFT Vote to all peers
+    pub async fn broadcast_bft_vote(&self, vote: crate::consensus::bft_proposer::VoteMsg) {
+        let msg = crate::consensus::bft_proposer::BftProtocolMsg::Vote(vote);
+        if let Ok(data) = bincode::serialize(&msg) {
+            self.peer_manager.broadcast(P2PMessage::BftMessage(data)).await;
+        }
+    }
+
+    /// Broadcast a BFT Block Proposal to all peers
+    pub async fn broadcast_bft_proposal(&self, block: Block) {
+        let msg = crate::consensus::bft_proposer::BftProtocolMsg::Proposal(block);
+        if let Ok(data) = bincode::serialize(&msg) {
+            self.peer_manager.broadcast(P2PMessage::BftMessage(data)).await;
+        }
+    }
+
+    /// Drain collected BFT votes for a specific block hash
+    pub async fn drain_vote_messages(&self, target_block_hash: &str) -> Vec<crate::consensus::bft_proposer::VoteMsg> {
+        let mut buffer = self.bft_vote_buffer.lock().await;
+        let mut matched = Vec::new();
+        let mut i = 0;
+        while i < buffer.len() {
+            if buffer[i].block_hash == target_block_hash {
+                matched.push(buffer.remove(i));
+            } else {
+                i += 1;
+            }
+        }
+        
+        // Periodically prune old votes from the buffer to prevent unbounded growth
+        // if we received votes for a block we never finalized.
+        if buffer.len() > 1000 {
+            let current_height = self.blockchain.read().await.get_height();
+            buffer.retain(|v| v.height + 5 >= current_height);
+        }
+        matched
+    }
+
+    /// Drain collected BFT block proposals for the current height
+    pub async fn drain_bft_proposals(&self, target_height: u64) -> Vec<Block> {
+        let mut buffer = self.bft_proposal_buffer.lock().await;
+        let mut matched = Vec::new();
+        let mut i = 0;
+        while i < buffer.len() {
+            if buffer[i].index == target_height {
+                matched.push(buffer.remove(i));
+            } else {
+                i += 1;
+            }
+        }
+        
+        // Prune old proposals
+        buffer.retain(|b| b.index + 5 >= target_height);
+        
+        matched
     }
 
     /// Synchronize blockchain from peers
