@@ -192,8 +192,7 @@ const MAX_ADDRESS_LEN: usize = 128;
 //   been running on clean-replayed state long enough that their state_roots
 //   will be identical and enforcement is meaningful.
 //
-//   NEXT ACTION: once the chain reaches block 95,000, add a checkpoint for that
-//   height and leave this constant in place permanently.
+//   Checkpoints at 95,000 and 100,000 are now in TESTNET_CHECKPOINTS (added 2026-05-26).
 const STATE_ROOT_SORT_FIX_HEIGHT: u64 = 95_000;
 
 /// CONSENSUS-CRITICAL: Genesis block hashes (prevent chain-split attacks)
@@ -207,7 +206,7 @@ const TESTNET_GENESIS_HASH: &str = "00000012d3a2cbb7eb9579330ccdaa4f83ca9e6e016b
 // Format: (block_height, block_hash)
 // Add checkpoints every ~10000 blocks.
 //
-// TESTNET checkpoints — fetched live from rpc.quantachain.org on 2026-04-22
+// TESTNET checkpoints — fetched live from rpc.quantachain.org
 // Never add a checkpoint you haven't independently verified.
 const TESTNET_CHECKPOINTS: &[(u64, &str)] = &[
     (0,      TESTNET_GENESIS_HASH),
@@ -225,7 +224,13 @@ const TESTNET_CHECKPOINTS: &[(u64, &str)] = &[
     // Verified live from scan.quantachain.org on 2026-05-08 — anchors the
     // STATE_ROOT_SORT_FIX_HEIGHT boundary; all nodes must be on v0.7.5+ past here.
     (90_000, "000000dc8e178a5140a5c68461234a9541373ac349b1ae3cbc3f0f3f1fc58d5e"),
-    // Next: add (95_000, ...) or (100_000, ...) once chain reaches that height.
+    // Verified live from rpc.quantachain.org on 2026-05-26
+    (95_000,  "000001af31c4856116914ad6efc9163e5f8eebc2199dce2ccaa0888301407e83"),
+    (100_000, "000000430de2e07ad306cbf7755cd0ec32b48bb646f2eed0236f379a655804ee"),
+    (110_000, "0000011b7a2f213c82e80f84fd5ce77178c9334f300f910f6c11776140df7a0f"),
+    (120_000, "000000fb990939e7d6b5abc28617deac26f12a3eaf581bf25bd78fdb460ff472"),
+    (130_000, "0000009ceac47dfa1f36cdc02c7bebabd24f3b364f7b926e53cd2b0e33582c8a"),
+    // Next: add (140_000, ...) once chain reaches that height.
 ];
 
 // MAINNET checkpoints — empty until mainnet launch
