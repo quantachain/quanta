@@ -72,58 +72,19 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 
 ## Quick Start with Docker
 
-### Option 1: Docker Desktop (Graphical Interface)
-1. Open Docker Desktop and find `xd637/quanta-node:v0.7.1-alpha` (or `:latest`) in your Images.
-2. Click **Run**.
-3. Under **Optional settings**, configure:
-   - **Container name**: `quanta-node`
-   - **Ports**: Map `3000`, `7782`, `8333`, `9090` to themselves.
-   - **Volumes**:
-     - Add host path `quanta-data` to container path `/home/quanta/quanta_data`
-     - Add host path `quanta-logs` to container path `/home/quanta/logs`
-4. Click **Run**.
+## Running a Node
 
-### Option 2: Docker CLI
-```bash
-docker pull xd637/quanta-node:v0.7.6-alpha
-
-docker run -d \
-  --name quanta-node \
-  -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
-  -v quanta-data:/home/quanta/quanta_data \
-  -v quanta-logs:/home/quanta/logs \
-  xd637/quanta-node:v0.7.6-alpha
-```
-
-### Option 3: Docker Compose (Recommended)
-
-**Upgrading from v0.7.0 — no data wipe needed:**
-```bash
-docker compose -f docker-compose.single.yml pull
-docker compose -f docker-compose.single.yml up -d
-```
+> ⚠️ **Your wallet file is never affected by node updates or data wipes.**
+> Mining rewards are on-chain — your balance is safe as long as your address exists.
+> Never delete your wallet file. Only ever wipe the data directory.
 
 ---
 
-## Server Setup (Ubuntu / VPS)
+### Upgrade to v0.7.6 — no data wipe needed
 
-**1. Update system and install Docker:**
-```bash
-sudo apt update && sudo apt upgrade -y
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker ubuntu && newgrp docker
-```
+Use this for every normal update. Your chain data stays intact and the node
+resumes from where it left off.
 
-**2. Open necessary ports:**
-```bash
-sudo ufw allow 8333/tcp
-sudo ufw allow 7782/tcp
-sudo ufw allow 3000/tcp
-sudo ufw allow ssh
-sudo ufw --force enable
-```
-
-**3. Upgrade to v0.7.5 (no data wipe required):**
 ```bash
 docker pull xd637/quanta-node:latest
 docker stop quanta-node && docker rm quanta-node
@@ -131,33 +92,20 @@ docker run -d \
   --name quanta-node \
   --restart always \
   --network host \
-  -v ~/quanta_data:/home/quanta/quanta_data \
+  -v quanta-data:/home/quanta/quanta_data \
+  -v quanta-logs:/home/quanta/logs \
   xd637/quanta-node:latest
-```
 
-**4. Check logs:**
-```bash
-docker logs quanta-node --tail 30 -f
+docker logs quanta-node --tail 50 -f
 ```
 
 ---
 
-## 🔄 Clean Start Guide (Wipe Data & Resync from Genesis)
+### Fresh Start — wipe data and resync from genesis
 
-> **When should I do a clean start?**
-> - Node stuck at same block height for > 30 minutes
-> - Logs show repeated `"Invalid block"` or `"Reorg failed"` errors
-> - Running a version older than v0.7.0 (wire format changed)
-> - Support advises it
-
-> ⚠️ **Will I lose my mining rewards?**
-> Your **wallet file** is separate from the node database. Mining rewards live on-chain —
-> your balance is safe as long as your address exists on the canonical chain.
-> Wipe only the **data directory**, never your wallet file.
-
----
-
-### Docker — named volume (most common)
+Use this only if support advises it, or if you are stuck on an old version
+with a wire-format incompatibility (v0.7.0 was the last reset).
+**Not needed for v0.7.6 — the node recovers without a wipe.**
 
 ```bash
 # 1. Stop and remove the container
@@ -181,65 +129,15 @@ docker run -d \
 docker logs quanta-node --tail 50 -f
 ```
 
----
-
-### Docker — host path mount (`~/quanta_data`)
-
-```bash
-docker stop quanta-node && docker rm quanta-node
-rm -rf ~/quanta_data && mkdir -p ~/quanta_data
-
-docker pull xd637/quanta-node:latest
-docker run -d \
-  --name quanta-node \
-  --restart always \
-  --network host \
-  -v ~/quanta_data:/home/quanta/quanta_data \
-  xd637/quanta-node:latest
-
-docker logs quanta-node --tail 50 -f
-```
-
----
-
-### Bare Metal (no Docker)
-
-```bash
-pkill -f "quanta start"    # stop the node
-rm -rf ./quanta_data       # wipe chain data (adjust path if changed in quanta.toml)
-./target/release/quanta start -c quanta.toml
-```
-
----
-
-### Windows — Docker Desktop
-
-1. **Docker Desktop → Volumes** → delete `quanta-data`
-2. Open a terminal:
-```bash
-docker stop quanta-node && docker rm quanta-node
-docker pull xd637/quanta-node:latest
-docker run -d --name quanta-node ^
-  -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 ^
-  -v quanta-data:/home/quanta/quanta_data ^
-  xd637/quanta-node:latest
-```
-
----
-
-### How long does resync take?
-
-> Times depend on VPS CPU core count (Rayon uses all cores for Falcon-512 verification)
-> and network speed to the bootstrap node.
+**How long does resync take?**
 
 | Chain Height | Good VPS (4+ cores) | Weak VPS / slow link |
 |---|---|---|
 | 0 → 50,000 | ~3–6 min | ~10–15 min |
 | 0 → 140,000+ | ~8–18 min | ~20–35 min |
 
-The main bottleneck is **Falcon-512 signature verification** — each block's signatures are
-verified in parallel via Rayon, and the LRU cache skips re-verification of seen sigs.
-State replay is fast due to 1,000-block snapshots (only the delta is replayed, not from genesis).
+The bottleneck is Falcon-512 signature verification (parallelised via Rayon).
+State replay is fast — 1,000-block snapshots mean only a short delta is replayed.
 
 ```bash
 # Watch sync in real time
@@ -247,6 +145,26 @@ docker logs quanta-node -f | grep -i "accepted\|height\|sync"
 ```
 
 Or check live at [scan.quantachain.org](https://scan.quantachain.org)
+
+---
+
+### First-time VPS setup
+
+```bash
+# Install Docker
+sudo apt update && sudo apt upgrade -y
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker ubuntu && newgrp docker
+
+# Open required ports
+sudo ufw allow 8333/tcp
+sudo ufw allow 7782/tcp
+sudo ufw allow 3000/tcp
+sudo ufw allow ssh
+sudo ufw --force enable
+```
+
+Then run the **Upgrade** command above.
 
 ---
 
