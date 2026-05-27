@@ -1,11 +1,10 @@
-# QuantaChain Testnet — Alpha v0.7.5
+# QuantaChain Testnet — Alpha v0.7.6
 
 Post-quantum secure blockchain using Falcon-512 signatures and SHA3-256 Proof of Work.
 
-> **v0.7.5 — Consensus-critical: state root fix + stale mining fix + 90k checkpoint.**
-> All nodes MUST upgrade. Nodes stuck at block 91,096 ("Invalid state root") and all
-> nodes experiencing stale mined blocks or nonce errors after reorg are fixed.
-> **No testnet reset. No data wipe required.**
+> **v0.7.6 — Consensus-critical: permanent state root validator fix + block 140,000 checkpoint.**
+> All nodes MUST upgrade. Nodes stuck at any block height with repeated "Invalid state root"
+> errors (including 95,001 and 137,990) will resume syncing after restart. No data wipe needed.
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
@@ -86,14 +85,14 @@ Each address below received **1,000,000 QUA** at genesis. Faucet account 0 is th
 
 ### Option 2: Docker CLI
 ```bash
-docker pull xd637/quanta-node:v0.7.5-alpha
+docker pull xd637/quanta-node:v0.7.6-alpha
 
 docker run -d \
   --name quanta-node \
   -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
   -v quanta-data:/home/quanta/quanta_data \
   -v quanta-logs:/home/quanta/logs \
-  xd637/quanta-node:v0.7.4-alpha
+  xd637/quanta-node:v0.7.6-alpha
 ```
 
 ### Option 3: Docker Compose (Recommended)
@@ -236,7 +235,7 @@ docker run -d --name quanta-node ^
 | Chain Height | Good VPS (4+ cores) | Weak VPS / slow link |
 |---|---|---|
 | 0 → 50,000 | ~3–6 min | ~10–15 min |
-| 0 → 91,000+ | ~5–15 min | ~15–25 min |
+| 0 → 140,000+ | ~8–18 min | ~20–35 min |
 
 The main bottleneck is **Falcon-512 signature verification** — each block's signatures are
 verified in parallel via Rayon, and the LRU cache skips re-verification of seen sigs.
@@ -256,7 +255,7 @@ Or check live at [scan.quantachain.org](https://scan.quantachain.org)
 ```bash
 git clone https://github.com/quantachain/quanta
 cd quanta
-git checkout v0.7.5-alpha
+git checkout v0.7.6-alpha
 cargo build --release
 
 ./target/release/quanta start -c quanta.toml
@@ -312,6 +311,51 @@ docker exec -it quanta-node quanta mining_status --rpc-port 7782
 | `8333` | P2P Network |
 | `7782` | RPC |
 | `9090` | Prometheus Metrics |
+
+---
+
+## What Changed in Alpha v0.7.6
+
+**No testnet reset. No data wipe. All nodes must upgrade.**
+
+> Nodes stuck at varying block heights with "Invalid state root" errors (95,001, 137,990,
+> or anywhere else) will sync through cleanly after upgrading and restarting.
+
+### Fix — Permanent state root validator fix (root cause)
+
+`validate_block_consensus` was applying transactions in **two separate passes**:
+
+1. All user transactions (debit / credit / nonce)
+2. System transactions (coinbase, treasury credit)
+
+But `create_block_template` (the miner) processes them in a **single ordered pass**:
+`[coinbase → treasury → user_txs]`
+
+When a miner sent a user transaction in the same block they mined, the intermediate
+spendable balances diverged between the two paths. The validator's re-computed state root
+did not match the miner's embedded state root, causing:
+
+```
+WARN Invalid state root at block N: computed=<X>, block=<Y>
+WARN Failed to add block: Invalid block
+```
+
+The error appeared at different heights on different nodes because it only triggered when
+a block happened to contain a user tx from the miner's own address.
+
+Fix: the validator now replays all transactions in the same canonical block order as the
+miner (single pass, system txs first). A separate `check_state` clone handles
+balance/nonce validation independently, so security checks are unchanged.
+
+### Added — Checkpoint at block 140,000
+
+| Height | Hash |
+|--------|------|
+| 140,000 | `00000061c3b23d81f0b26e89ccebeb7cbf1192823035d8ca4d1f59bc0dc67005` |
+
+Verified live from `scan.quantachain.org` on 2026-05-27. Acts as a recovery anchor:
+any node stuck below 140,000 will have the state root check bypassed at that exact block
+and resume syncing with the corrected validator from block 140,001 onward.
 
 ---
 

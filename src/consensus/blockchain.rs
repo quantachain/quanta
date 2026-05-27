@@ -230,7 +230,11 @@ const TESTNET_CHECKPOINTS: &[(u64, &str)] = &[
     (110_000, "0000011b7a2f213c82e80f84fd5ce77178c9334f300f910f6c11776140df7a0f"),
     (120_000, "000000fb990939e7d6b5abc28617deac26f12a3eaf581bf25bd78fdb460ff472"),
     (130_000, "0000009ceac47dfa1f36cdc02c7bebabd24f3b364f7b926e53cd2b0e33582c8a"),
-    // Next: add (140_000, ...) once chain reaches that height.
+    // Verified live from scan.quantachain.org on 2026-05-27
+    // Also acts as recovery anchor for nodes stuck at 95,001 / 137,990 due to state-root
+    // divergence (fixed in v0.7.6 — validate_block_consensus now matches miner tx order).
+    (140_000, "00000061c3b23d81f0b26e89ccebeb7cbf1192823035d8ca4d1f59bc0dc67005"),
+    // Next: add (150_000, ...) once chain reaches that height.
 ];
 
 // MAINNET checkpoints — empty until mainnet launch
@@ -1081,7 +1085,11 @@ impl Blockchain {
             return Err(BlockchainError::InvalidSignature);
         }
         
-        // Now validate fees, nonces, and balances sequentially (need state tracking)
+        // Validate fees, nonces, and balances sequentially on user txs.
+        // We use a SEPARATE nonce/balance tracking clone so that the validation
+        // state is independent of the state_root computation state below.
+        // This avoids any ordering interaction between the two passes.
+        let mut check_state = temp_state.clone();
         for tx in &block.transactions {
             // Skip system transactions (coinbase, treasury, genesis premine)
             if tx.is_coinbase() || tx.sender == "TREASURY" || tx.is_genesis_premine() {
@@ -1103,7 +1111,7 @@ impl Blockchain {
             }
             
             // CRITICAL: Validate nonce is sequential (prevents replay)
-            let expected_nonce = temp_state.get_nonce(&tx.sender) + 1;
+            let expected_nonce = check_state.get_nonce(&tx.sender) + 1;
             if tx.nonce != expected_nonce {
                 // For blocks below the highest hardcoded checkpoint we trust the
                 // block's nonce rather than rejecting.  A buggy reorg (the snapshot-
@@ -1111,7 +1119,7 @@ impl Blockchain {
                 // contain a TX whose nonce is valid only relative to the post-reorg
                 // account state.  A clean sequential-sync node sees the "wrong" nonce
                 // because it counted transactions that the reorg erased.  Overriding
-                // temp_state's nonce to tx.nonce-1 reproduces the post-reorg state so
+                // check_state's nonce to tx.nonce-1 reproduces the post-reorg state so
                 // all subsequent blocks validate correctly.  The checkpoint hash already
                 // guarantees these blocks' content is canonical.
                 let max_cp = TESTNET_CHECKPOINTS.iter().map(|(h, _)| *h).max().unwrap_or(0);
@@ -1120,7 +1128,7 @@ impl Blockchain {
                         "Pre-checkpoint nonce override block {}: {} expected {} got {} — trusting block",
                         block.index, &tx.sender, expected_nonce, tx.nonce
                     );
-                    temp_state.set_nonce(&tx.sender, tx.nonce.saturating_sub(1));
+                    check_state.set_nonce(&tx.sender, tx.nonce.saturating_sub(1));
                 } else {
                     tracing::warn!("Invalid nonce in block: tx from {} has nonce {}, expected {}",
                         tx.sender, tx.nonce, expected_nonce);
@@ -1133,7 +1141,7 @@ impl Blockchain {
             
             // CRITICAL: Validate sufficient balance (prevents double-spend)
             let total_required = tx.amount.saturating_add(tx.fee);
-            let available = temp_state.get_balance(&tx.sender);
+            let available = check_state.get_balance(&tx.sender);
             if available < total_required {
                 tracing::warn!("Insufficient balance in block: {} has {} but needs {}",
                     tx.sender, available, total_required);
@@ -1143,21 +1151,38 @@ impl Blockchain {
                 });
             }
             
-            // Update temporary state to validate next transactions
-            if !temp_state.debit_account(&tx.sender, total_required) {
+            // Update check_state so subsequent tx validations see correct balances/nonces
+            if !check_state.debit_account(&tx.sender, total_required) {
                 return Err(BlockchainError::InvalidBlock);
             }
-            temp_state.credit_account(tx, block.index, COINBASE_MATURITY);
-            temp_state.increment_nonce(&tx.sender);
+            check_state.credit_account(tx, block.index, COINBASE_MATURITY);
+            check_state.increment_nonce(&tx.sender);
         }
         
-        // Apply system transactions to temp_state for state_root calculation
+        // STATE-ROOT COMPUTATION: Apply ALL transactions to temp_state in the same
+        // canonical order as create_block_template — system txs (coinbase, treasury)
+        // first (they appear first in block.transactions), then user txs.
+        //
+        // FIX (v0.7.6): Previously we did two separate passes — user txs first, then
+        // system txs — which diverged from the miner's single-ordered-pass approach.
+        // Even though calculate_state_root sorts locked_balances, the SPENDABLE balance
+        // of a miner who is also a tx sender differs between the two orderings because:
+        //   - Miner path: coinbase credited first → balance higher when user-tx debit runs
+        //   - Validator (old): user-tx debit first, then coinbase credit → different path
+        // By replaying in canonical block order (matching create_block_template) both
+        // nodes arrive at identical intermediate states and identical state_roots.
         for tx in &block.transactions {
             if tx.is_coinbase() || tx.sender == "TREASURY" {
                 temp_state.credit_account(tx, block.index, COINBASE_MATURITY);
             } else if tx.is_genesis_premine() {
-                // Genesis premine: immediately spendable (maturity = 0)
                 temp_state.credit_account(tx, block.index, 0);
+            } else {
+                // User tx — apply debit/credit/nonce in order, matching create_block_template.
+                // These have already been validated for balance/nonce above via check_state.
+                let total_required = tx.amount.saturating_add(tx.fee);
+                temp_state.debit_account(&tx.sender, total_required);
+                temp_state.credit_account(tx, block.index, COINBASE_MATURITY);
+                temp_state.increment_nonce(&tx.sender);
             }
         }
         

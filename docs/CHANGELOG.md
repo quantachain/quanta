@@ -11,6 +11,32 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [0.7.6-alpha] — 2026-05-27
+
+> **CONSENSUS-CRITICAL. All nodes must upgrade. No testnet reset. No data wipe.**
+> Permanently fixes the recurring "Invalid state root" errors at varying block heights
+> (reported at 95,001 and 137,990). Adds the block 140,000 checkpoint.
+
+### Fixed
+- **State root mismatch (root cause — permanent fix)** — `validate_block_consensus`
+  applied transactions in two separate passes: user txs first, then system txs (coinbase,
+  treasury). `create_block_template` (the miner) applies them in a single ordered pass:
+  `[coinbase → treasury → user_txs]`. When a miner also had a user tx in the same block,
+  the intermediate spendable balances differed between the two paths, causing a state root
+  mismatch even though `calculate_state_root` already sorted `locked_balances`.
+  The validator now replays all transactions in the exact canonical block order, using a
+  separate `check_state` clone for balance/nonce validation and `temp_state` for state
+  root computation — both paths now arrive at identical hashes.
+
+### Added
+- **Checkpoint at block 140,000** — verified live from `scan.quantachain.org` on 2026-05-27:
+  `(140_000, "00000061c3b23d81f0b26e89ccebeb7cbf1192823035d8ca4d1f59bc0dc67005")`
+  Acts as a recovery anchor for nodes stuck anywhere below 140,000 due to the state-root
+  divergence. Combined with the permanent fix, nodes that restart resume cleanly without
+  a data wipe.
+
+---
+
 ## [0.7.5-alpha] — 2026-05-08
 
 > **CONSENSUS-CRITICAL. All nodes must upgrade. No testnet reset required.**
@@ -295,7 +321,8 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
-[Unreleased]: https://github.com/quantachain/quanta/compare/v0.7.5-alpha...HEAD
+[Unreleased]: https://github.com/quantachain/quanta/compare/v0.7.6-alpha...HEAD
+[0.7.6-alpha]: https://github.com/quantachain/quanta/compare/v0.7.5-alpha...v0.7.6-alpha
 [0.7.5-alpha]: https://github.com/quantachain/quanta/compare/v0.7.4-alpha...v0.7.5-alpha
 [0.7.4-alpha]: https://github.com/quantachain/quanta/compare/v0.7.3-alpha...v0.7.4-alpha
 [0.7.3-alpha]: https://github.com/quantachain/quanta/compare/v0.7.2-alpha...v0.7.3-alpha
