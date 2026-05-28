@@ -110,11 +110,7 @@ pub fn verify_bft_certificate(
     // Pre-compute the payload all committee members must have signed.
     let payload = block.bft_signing_payload();
 
-    // Resolve Falcon-512 public keys for the committee.
-    let key_map: HashMap<String, falcon_rust::falcon512::PublicKey> =
-        resolve_committee_keys(committee, state)
-            .into_iter()
-            .collect();
+
 
     let mut valid_count = 0usize;
     let mut seen_signers: std::collections::HashSet<&str> = std::collections::HashSet::new();
@@ -285,7 +281,7 @@ mod tests {
 
     #[test]
     fn genesis_always_valid() {
-        let genesis = Block::genesis_v2();
+        let genesis = Block::genesis();
         let state = AccountState::new();
         assert!(verify_bft_certificate(&genesis, &[], &state));
     }
@@ -303,7 +299,7 @@ mod tests {
         }
         committee.sort(); // match compute_epoch_committee sort order
 
-        let genesis = Block::genesis_v2();
+        let genesis = Block::genesis();
         let mut block = Block::new_bft(
             1, vec![], genesis.hash.clone(), 0, 0,
             committee[0].clone(),
@@ -340,7 +336,7 @@ mod tests {
         }
         committee.sort();
 
-        let genesis = Block::genesis_v2();
+        let genesis = Block::genesis();
         let mut block = Block::new_bft(
             1, vec![], genesis.hash.clone(), 0, 0,
             committee[0].clone(),

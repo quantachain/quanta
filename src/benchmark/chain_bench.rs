@@ -15,7 +15,6 @@ use crate::core::transaction::{Transaction, AccountState, AccountBalance, Locked
 use crate::core::ChainNetwork;
 use crate::crypto::signatures::FalconKeypair;
 use crate::consensus::performance::verify_transactions_parallel;
-use crate::consensus::blockchain::MIN_DIFFICULTY;
 use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
 use crate::benchmark::crypto_bench::{stat, stat_us};
 use crate::benchmark::tx_bench::make_signed_tx;
@@ -64,9 +63,8 @@ pub fn run(iterations: usize) -> BenchmarkSection {
 
     // ── Block is_valid() pipeline ─────────────────────────────────────────────────
     {
-        let genesis = Block::genesis(ChainNetwork::Testnet);
-        let mut child = Block::new(1, vec![], genesis.hash.clone(), 1);
-        child.mine();
+        let genesis = Block::genesis();
+        let child = Block::new_bft(1, vec![], genesis.hash.clone(), 0, 0, "0xbenchmark".to_string());
 
         let n_iters = iterations.min(200);
         let mut samples = Vec::with_capacity(n_iters);
@@ -75,9 +73,8 @@ pub fn run(iterations: usize) -> BenchmarkSection {
             let _valid = black_box(child.is_valid(Some(&genesis)));
             samples.push(t.elapsed().as_secs_f64() * 1_000_000.0); // µs
         }
-        // stat_us: throughput = 1_000_000 / mean_µs = ops/sec
         let mut s = stat_us("Block Validation Pipeline (is_valid)", "µs/op", &samples);
-        s.note = Some("Hash integrity + PoW + Merkle root + chain linkage (excludes tx sig verify)".to_string());
+        s.note = Some("Hash integrity + BFT fields + Merkle root + chain linkage (excludes tx sig verify)".to_string());
         stats.push(s);
     }
 

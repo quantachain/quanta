@@ -385,86 +385,17 @@ pub struct MineResponse {
 }
 
 async fn mine_block(
-    State(state): State<Arc<ApiState>>,
-    Json(req): Json<MineRequest>,
+    State(_state): State<Arc<ApiState>>,
+    Json(_req): Json<MineRequest>,
 ) -> (StatusCode, Json<MineResponse>) {
-    // HIGH-5 FIX: Validate miner_address format before mining.
-    fn valid_quanta_addr(addr: &str) -> bool {
-        if addr.starts_with("0x") {
-            addr.len() == 42 && addr[2..].chars().all(|c| c.is_ascii_hexdigit())
-        } else if addr.starts_with("ms") {
-            addr.len() >= 42 && addr[2..].chars().all(|c| c.is_ascii_hexdigit())
-        } else {
-            false
-        }
-    }
-    if !valid_quanta_addr(&req.miner_address) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(MineResponse {
-                success: false,
-                block_index: None,
-                error: Some("Invalid miner_address: must be 0x<40 hex> or ms<40+ hex>".to_string()),
-            }),
-        );
-    }
-
-    let template_res = state.blockchain.read().await.create_block_template(req.miner_address.clone());
-
-    match template_res {
-        Ok(mut block) => {
-            let mined_block_res = tokio::task::spawn_blocking(move || {
-                block.mine();
-                block
-            }).await;
-
-            if let Ok(mined_block) = mined_block_res {
-                let blockchain = state.blockchain.read().await;
-                match blockchain.add_network_block(mined_block.clone()) {
-                    Ok(_) => {
-                        let index = mined_block.index;
-                        if let Some(ref network) = state.network {
-                            network.broadcast_block(mined_block).await;
-                        }
-                        drop(blockchain);
-                        (
-                            StatusCode::OK,
-                            Json(MineResponse {
-                                success: true,
-                                block_index: Some(index),
-                                error: None,
-                            }),
-                        )
-                    }
-                    Err(e) => (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(MineResponse {
-                            success: false,
-                            block_index: None,
-                            error: Some(format!("Failed to add block: {}", e)),
-                        }),
-                    ),
-                }
-            } else {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(MineResponse {
-                        success: false,
-                        block_index: None,
-                        error: Some("Mining task panicked".to_string()),
-                    }),
-                )
-            }
-        }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(MineResponse {
-                success: false,
-                block_index: None,
-                error: Some(format!("Failed to create template: {}", e)),
-            }),
-        ),
-    }
+    (
+        StatusCode::BAD_REQUEST,
+        Json(MineResponse {
+            success: false,
+            block_index: None,
+            error: Some("PoW mining is removed in Quanta v2. Validators use the BFT proposer.".to_string()),
+        }),
+    )
 }
 
 /// Request to get a block template
@@ -581,74 +512,12 @@ async fn submit_pool_block(
 
 /// Start continuous mining
 async fn start_continuous_mining(
-    State(state): State<Arc<ApiState>>,
-    Json(req): Json<MineRequest>,
+    State(_state): State<Arc<ApiState>>,
+    Json(_req): Json<MineRequest>,
 ) -> (StatusCode, Json<serde_json::Value>) {
-    if state.mining_active.load(Ordering::Relaxed) {
-        return (
-            StatusCode::OK,
-            Json(serde_json::json!({ "status": "already_running", "message": "Mining already active" }))
-        );
-    }
-    
-    state.mining_active.store(true, Ordering::Relaxed);
-    let blockchain = state.blockchain.clone();
-    let network = state.network.clone();
-    let mining_active = state.mining_active.clone();
-    let miner_address = req.miner_address.clone();
-    
-    tokio::spawn(async move {
-        while mining_active.load(Ordering::Relaxed) {
-            let has_txs = {
-                let bc = blockchain.read().await;
-                let result = !bc.get_pending_transactions().is_empty();
-                result
-            };
-            
-            if !has_txs {
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                continue;
-            }
-            
-            let template_res = blockchain.read().await.create_block_template(miner_address.clone());
-            
-            match template_res {
-                Ok(mut block) => {
-                    let mined_block_res = tokio::task::spawn_blocking(move || {
-                        block.mine();
-                        block
-                    }).await;
-                    
-                    if let Ok(mined_block) = mined_block_res {
-                        if !mining_active.load(Ordering::Relaxed) {
-                            break;
-                        }
-                        let bc = blockchain.read().await;
-                        match bc.add_network_block(mined_block.clone()) {
-                            Ok(_) => {
-                                if let Some(ref net) = network {
-                                    net.broadcast_block(mined_block).await;
-                                }
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to submit mined block: {}", e);
-                            }
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("Continuous mining error (create template): {}", e);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                }
-            }
-            
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        }
-    });
-    
     (
-        StatusCode::OK,
-        Json(serde_json::json!({ "status": "started", "message": "Continuous mining started" }))
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({ "status": "error", "message": "PoW mining is removed in Quanta v2. Validators use the BFT proposer." }))
     )
 }
 

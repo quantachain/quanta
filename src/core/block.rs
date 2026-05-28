@@ -101,7 +101,7 @@ impl Block {
     /// CONSENSUS-CRITICAL: The genesis hash is hardcoded in blockchain.rs.
     /// Any change to these fields requires a new hash to be computed and
     /// burned into the code.
-    pub fn genesis_v2() -> Self {
+    pub fn genesis() -> Self {
         // 2026-06-01 00:00:00 UTC — Quanta v2 genesis
         let timestamp = 1748736000i64;
 
@@ -307,22 +307,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn genesis_v2_hash_is_deterministic() {
-        let g1 = Block::genesis_v2();
-        let g2 = Block::genesis_v2();
+    fn genesis_hash_is_deterministic() {
+        let g1 = Block::genesis();
+        let g2 = Block::genesis();
         assert_eq!(g1.hash, g2.hash, "Genesis hash must be deterministic");
         assert!(!g1.hash.is_empty());
     }
 
     #[test]
-    fn genesis_v2_is_valid() {
-        let genesis = Block::genesis_v2();
+    fn genesis_is_valid() {
+        let genesis = Block::genesis();
         assert!(genesis.is_valid(None), "Genesis block must pass is_valid(None)");
     }
 
     #[test]
     fn bft_block_chain_linkage() {
-        let genesis = Block::genesis_v2();
+        let genesis = Block::genesis();
         let mut block1 = Block::new_bft(
             1,
             vec![],
@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn tampered_block_fails_validation() {
-        let genesis = Block::genesis_v2();
+        let genesis = Block::genesis();
         let mut block1 = Block::new_bft(
             1,
             vec![],
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn bft_signing_payload_is_deterministic() {
-        let genesis = Block::genesis_v2();
+        let genesis = Block::genesis();
         assert_eq!(
             genesis.bft_signing_payload(),
             genesis.bft_signing_payload(),

@@ -562,7 +562,7 @@ async fn main() {
                         println!("  Mining To:      (not set — use start_mining <address>)");
                     }
                     println!("  Blocks Mined:   {}                                      ", status.blocks_mined);
-                    println!("  Difficulty:     {}                                      ", status.difficulty);
+                    println!("  Current Epoch:  {}                                      ", status.current_epoch);
                     println!("  Block Reward:   {} microunits ({:.6} QUA)         ", 
                         status.mining_reward, 
                         status.mining_reward as f64 / 1_000_000.0
@@ -605,7 +605,10 @@ async fn main() {
                     println!("  Hash:           {}...", &block.hash[..24]);
                     println!("  Timestamp:      {}                        ", dt.format("%Y-%m-%d %H:%M:%S UTC"));
                     println!("  Transactions:   {}                                      ", block.transactions);
-                    println!("  Difficulty:     {}                                      ", block.difficulty);
+                    println!("  Epoch:          {}                                      ", block.epoch);
+                    println!("  BFT Round:      {}                                      ", block.bft_round);
+                    println!("  Proposer:       {}...", &block.proposer[..block.proposer.len().min(24)]);
+                    println!("  Sigs:           {}                                      ", block.sig_count);
                     println!("\n");
                 }
                 Err(e) => {
@@ -870,16 +873,8 @@ async fn main() {
             let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, network_type).expect("Failed to initialize blockchain")));
             
-            println!("  Mining new block...");
-            let mine_result = blockchain.write().await.mine_pending_transactions(wallet.address.clone());
-            match mine_result {
-                Ok(_) => {
-                    println!(" Block mined successfully!");
-                    let balance_microunits = blockchain.read().await.get_balance(&wallet.address);
-                    println!(" New balance: {:.6} QUA", microunits_to_qua(balance_microunits));
-                }
-                Err(e) => eprintln!(" Mining failed: {}", e),
-            }
+            println!("  Mine command removed in Quanta v2. Use the BFT proposer.");
+            println!("  Start a validator node with: ./quanta start --validator");
         }
 
         Commands::Send { wallet: wallet_file, to, amount, db, network } => {
@@ -967,7 +962,7 @@ async fn main() {
             println!("");
             println!(" Chain Length: {} blocks                                  ", stats.chain_length);
             println!(" Total Transactions: {}                                    ", stats.total_transactions);
-            println!(" Current Difficulty: {}                                     ", stats.current_difficulty);
+            println!(" Current Epoch: {}                                       ", stats.current_epoch);
             println!(" Mining Reward: {:.6} QUA                                 ", reward_qua);
             println!(" Total Supply: {:.6} QUA                                  ", supply_qua);
             println!(" Pending Transactions: {}                                   ", stats.pending_transactions);
@@ -1115,10 +1110,8 @@ async fn run_demo(db_path: &str) {
     wallet2.save_quantum_safe("demo_wallet2.qua", DEMO_PASSWORD).unwrap();
     wallet3.save_quantum_safe("demo_wallet3.qua", DEMO_PASSWORD).unwrap();
     
-    println!("\n  Mining genesis rewards...");
-    blockchain.write().await.mine_pending_transactions(wallet1.address.clone()).unwrap();
-    blockchain.write().await.mine_pending_transactions(wallet1.address.clone()).unwrap();
-    
+    println!("\n  (Mining genesis rewards skipped - BFT used in Quanta v2)");
+
     println!("\n Creating transactions...");
     
     // Transaction 1: 25 QUA = 25_000_000 microunits
@@ -1148,9 +1141,8 @@ async fn run_demo(db_path: &str) {
     blockchain.write().await.add_transaction(tx1).unwrap();
     println!("   Tx 1: 25 QUA to wallet2 (nonce {})", nonce1);
     
-    println!("\n  Mining first transaction...");
-    blockchain.write().await.mine_pending_transactions(wallet2.address.clone()).unwrap();
-    
+    println!("\n  (Transactions now processed by BFT consensus)");
+
     // Transaction 2: 15 QUA = 15_000_000 microunits
     let amount2_microunits = qua_to_microunits(15.0);
     let nonce2 = {
@@ -1178,9 +1170,8 @@ async fn run_demo(db_path: &str) {
     blockchain.write().await.add_transaction(tx2).unwrap();
     println!("   Tx 2: 15 QUA to wallet3 (nonce {})", nonce2);
     
-    println!("\n  Mining second transaction...");
-    blockchain.write().await.mine_pending_transactions(wallet3.address.clone()).unwrap();
-    
+    println!("\n  (Transactions now processed by BFT consensus)");
+
     // Show final balances
     println!("\n Final Balances:");
     let bc = blockchain.read().await;
@@ -1197,7 +1188,7 @@ async fn run_demo(db_path: &str) {
     println!("  Blocks: {}", stats.chain_length);
     println!("  Transactions: {}", stats.total_transactions);
     println!("  Total Supply: {:.6} QUA ({} microunits)", microunits_to_qua(stats.total_supply), stats.total_supply);
-    println!("  Current Difficulty: {}", stats.current_difficulty);
+    println!("  Current Epoch: {}", stats.current_epoch);
     
     // Validate
     println!("\n Validating blockchain...");

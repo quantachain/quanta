@@ -604,7 +604,7 @@ impl Network {
             let mut headers = Vec::new();
             for i in start..=end {
                 if let Some(block) = blockchain.load_block_from_storage(i) {
-                    running_work = running_work.saturating_add(block.difficulty as u128);
+                    running_work = running_work.saturating_add(1u128); // BFT: 1 work unit per block
                     let mut header: crate::network::protocol::BlockHeader = (&block).into();
                     header.cumulative_work = running_work;
                     headers.push(header);
@@ -933,7 +933,7 @@ impl Network {
             let unseen_headers: Vec<_> = headers.into_iter().filter(|h| h.index >= request_start).collect();
             let mut valid_headers = true;
             for h in &unseen_headers {
-                if h.difficulty < crate::consensus::blockchain::MIN_DIFFICULTY {
+                if h.index > 0 && h.sig_count == 0 {
                     valid_headers = false;
                     break;
                 }

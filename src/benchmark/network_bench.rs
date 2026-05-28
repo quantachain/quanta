@@ -239,7 +239,7 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
     if let Ok(resp) = client.get(&health_url).send().await {
         if let Ok(json) = resp.json::<serde_json::Value>().await {
             let height = json.get("chain_length").and_then(|v| v.as_u64()).unwrap_or(0);
-            let difficulty = json.get("current_difficulty").and_then(|v| v.as_u64()).unwrap_or(0);
+            let epoch = json.get("current_epoch").and_then(|v| v.as_u64()).unwrap_or(0);
             let mempool = json.get("pending_transactions").and_then(|v| v.as_u64()).unwrap_or(0);
             stats.push(BenchmarkStat {
                 name: "Node Live State Snapshot".to_string(),
@@ -254,11 +254,11 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
                 p99: 0.0,
                 throughput: None,
                 note: Some(format!(
-                    "Chain height: {} blocks | Difficulty: {} | Mempool: {} pending | URL: {}",
-                    height, difficulty, mempool, node_url
+                    "Chain height: {} blocks | Epoch: {} | Mempool: {} pending | URL: {}",
+                    height, epoch, mempool, node_url
                 )),
             });
-            println!("        Live node: height={} difficulty={} mempool={}", height, difficulty, mempool);
+            println!("        Live node: height={} epoch={} mempool={}", height, epoch, mempool);
         }
     }
 

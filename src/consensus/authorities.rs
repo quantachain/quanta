@@ -12,7 +12,7 @@ use crate::core::transaction::AccountState;
 use falcon_rust::falcon512::PublicKey;
 
 /// Maximum active validators per epoch committee.
-pub const MAX_COMMITTEE_SIZE: usize = 21;
+pub const MAX_COMMITTEE_SIZE: usize = 7;
 
 /// Epochs a deregistered validator must wait before staked QUA is returned.
 pub const UNBONDING_EPOCHS: u64 = 2;

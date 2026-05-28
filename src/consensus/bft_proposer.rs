@@ -32,6 +32,32 @@ use crate::network::Network;
 /// Duration of a single BFT slot (= one block target time).
 pub const SLOT_SECONDS: u64 = 6;
 
+/// A BFT precommit vote broadcast over the P2P network.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct VoteMsg {
+    /// Block height this vote is for.
+    pub height: u64,
+    /// BFT round (Tendermint).
+    pub round: u32,
+    /// Epoch.
+    pub epoch: u64,
+    /// Hash of the block being voted on.
+    pub block_hash: String,
+    /// Address of the signing validator.
+    pub validator: String,
+    /// Falcon-512 signature over bft_signing_payload().
+    pub signature: Vec<u8>,
+}
+
+/// Wire-level BFT protocol message (serialised with bincode into P2PMessage::BftMessage).
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub enum BftProtocolMsg {
+    /// A validator broadcasts its precommit vote.
+    Vote(VoteMsg),
+    /// The proposer broadcasts its proposed block (unsigned certificate).
+    Proposal(Block),
+}
+
 /// How long the proposer waits for votes before giving up (2/3 of slot time).
 const VOTE_COLLECTION_MS: u64 = (SLOT_SECONDS * 1000 * 2) / 3;
 
@@ -56,7 +82,7 @@ pub async fn handle_bft_proposal(
 
     // Basic structural validation.
     let prev = bc.get_block_by_index(block.index.saturating_sub(1));
-    if !block.is_valid(prev.as_deref()) {
+    if !block.is_valid(prev.as_ref()) {
         warn!("BFT: received invalid proposal for height {}", block.index);
         return None;
     }

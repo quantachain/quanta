@@ -45,7 +45,7 @@ pub struct MiningStatus {
     pub mining_address: Option<String>,
     pub last_block_time: Option<i64>,
     pub blocks_mined: u64,
-    pub difficulty: u64,
+    pub current_epoch: u64,
     pub mining_reward: u64,
 }
 
@@ -55,7 +55,10 @@ pub struct BlockInfo {
     pub hash: String,
     pub timestamp: i64,
     pub transactions: usize,
-    pub difficulty: u64,
+    pub epoch: u64,
+    pub bft_round: u32,
+    pub proposer: String,
+    pub sig_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

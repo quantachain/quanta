@@ -16,18 +16,9 @@ path = "src/main.rs"
 [[bin]]
 name = "quanta-wallet"
 path = "src/bin/wallet_cli.rs"
-
-[[bin]]
-name = "quanta-miner"
-path = "src/bin/miner.rs"
-
 [[bin]]
 name = "gen_faucet_wallets"
 path = "src/bin/gen_faucet_wallets.rs"
-
-[[bin]]
-name = "mine_genesis"
-path = "src/bin/mine_genesis.rs"
 
 [[bin]]
 name = "quanta-benchmark"

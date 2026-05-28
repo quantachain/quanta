@@ -299,10 +299,13 @@ pub struct Blockchain {
     // deserialized repeatedly. Cache gives O(1) after the first hit.
     pubkey_cache: Arc<DashMap<String, Vec<u8>>>,
 
-    /// Persisted cumulative PoW (sum of all block difficulties at the current tip).
+    /// Persisted cumulative work (1 per BFT block at the current tip).
     /// Stored in memory and in sled for O(1) access instead of O(height) scan.
     /// Enables instant best-peer selection at any chain height.
     cumulative_work: Arc<PLMutex<u128>>,
+
+    /// Treasury payout address (loaded from config or hardcoded default).
+    treasury_address: String,
 
     /// NEW-BLOCK NOTIFICATION CHANNEL
     ///
@@ -332,10 +335,10 @@ impl Blockchain {
         // Note: Mainnet hash is hardcoded constant. Testnet hash should be calculated or hardcoded once known.
         // For now, we trust the generated testnet genesis if it's testnet.
         
-        let (chain, account_state, _difficulty) = if height == 0 {
+        let (chain, mut account_state) = if height == 0 {
             // Create genesis block
             tracing::info!("Creating new blockchain with genesis block for {:?}", network);
-            let genesis = Block::genesis_v2();
+            let genesis = Block::genesis();
 
             
             // SECURITY: Verify genesis hash matches hardcoded value (prevents chain split)
@@ -366,6 +369,15 @@ impl Blockchain {
                     "0xa2270f30ca1aad922510375508bf68cd95509f29",  // Faucet 7
                     "0xe15a689775685ae324559ea9a492fc650354ca0b",  // Faucet 8
                     "0x005dcff212d27b55e7a74bf745e1349ab44ca25d",  // Faucet 9
+                    
+                    // --- BFT VALIDATORS (To be replaced with real addresses) ---
+                    "VALIDATOR_1_ADDR_PLACEHOLDER",
+                    "VALIDATOR_2_ADDR_PLACEHOLDER",
+                    "VALIDATOR_3_ADDR_PLACEHOLDER",
+                    "VALIDATOR_4_ADDR_PLACEHOLDER",
+                    "VALIDATOR_5_ADDR_PLACEHOLDER",
+                    "VALIDATOR_6_ADDR_PLACEHOLDER",
+                    "VALIDATOR_7_ADDR_PLACEHOLDER",
                 ];
                 (testnet_faucets.into_iter().map(String::from).collect(), 1_000_000_000_000)
             } else {
@@ -402,7 +414,7 @@ impl Blockchain {
             storage.save_account_state(&account_state)?;
             
             tracing::info!("✓ Genesis block verified: {}", genesis.hash);
-            (vec![genesis], account_state, if network == ChainNetwork::Testnet { 4 } else { 6 })
+            (vec![genesis], account_state)
         } else {
             // OPTIMIZATION: chain only contains genesis (loaded from db.rs load_chain())
             // Or we just load genesis manually here
@@ -417,12 +429,6 @@ impl Blockchain {
                     GENESIS_HASH, chain[0].hash);
             }
             
-            let _difficulty = if height > 0 {
-                // v2: BFT chain has no PoW difficulty
-                0u32
-            } else {
-                4
-            };
 
             // SELF-HEAL: Detect corrupted account state from bad reorg (v0.4.0 bug).
             // If Faucet 0 shows 0 balance on an existing chain that has blocks, the
@@ -481,9 +487,9 @@ impl Blockchain {
                 storage.save_account_state(&healed_state)?;
                 tracing::info!("✅ SELF-HEAL complete: Faucet 0 balance restored to {} microunits",
                     healed_state.get_balance(FAUCET_0));
-                (chain, healed_state, difficulty)
+                (chain, healed_state)
             } else {
-                (chain, account_state, difficulty)
+                (chain, account_state)
             }
         };
 
@@ -537,6 +543,7 @@ impl Blockchain {
             pubkey_cache: Arc::new(DashMap::new()),
             cumulative_work: Arc::new(PLMutex::new(initial_cumulative_work)),
             new_block_tx: Arc::new(new_block_tx),
+            treasury_address: TREASURY_ADDRESS.to_string(),
         })
     }
 
@@ -705,7 +712,6 @@ impl Blockchain {
     /// Create a block template for mining (does not mine or save)
     pub fn create_block_template(&self, miner_address: String) -> Result<Block, BlockchainError> {
         let reward = self.get_mining_reward();
-        let difficulty = self.calculate_next_difficulty();
         
         let current_height = self.get_height();
         
@@ -1016,39 +1022,9 @@ impl Blockchain {
         apply_annual_reduction(YEAR_1_REWARD, years_elapsed).max(MIN_REWARD)
     }
 
-    /// Mine pending transactions — REMOVED in v2 (BFT consensus).
-    #[deprecated(note = "PoW mining removed in Quanta v2. Use BFT proposer.")]
-    pub fn mine_pending_transactions(&self, _miner_address: String) -> Result<(), BlockchainError> {
-        Err(BlockchainError::InvalidBlock) // PoW removed
-    }
-
-
-    /// Get current mining reward with adaptive model (u64 microunits)
-    ///
-    /// CONSENSUS-CRITICAL: Pure integer math only. No f64.
-    /// Reduction formula: reward = YEAR_1_REWARD * (85/100)^years_elapsed
-    /// Applied iteratively to avoid any floating-point divergence.
-    fn get_mining_reward(&self) -> u64 {
-        let chain_len = self.get_height();
-        let years_elapsed = chain_len / BLOCKS_PER_YEAR;
-        apply_annual_reduction(YEAR_1_REWARD, years_elapsed).max(MIN_REWARD)
-    }
-    
-
-    
     /// Get current difficulty — reads from STORAGE (the real chain), not the
     /// in-memory `chain` vec which only holds genesis after startup.
     #[allow(dead_code)]
-    fn get_current_difficulty(&self) -> u32 {
-        let height = self.get_height();
-        if height == 0 {
-            return MIN_DIFFICULTY; // genesis — matches testnet genesis difficulty
-        }
-        self.storage.load_block(height - 1)
-            .map(|b| b.difficulty)
-            .unwrap_or(MIN_DIFFICULTY)
-    }
-
     /// Validate block against consensus rules (CRITICAL for network blocks)
     fn validate_block_consensus(&self, block: &Block, previous: &Block, base_state: &AccountState) -> Result<(), BlockchainError> {
         // 0. Block size limit (DoS protection)
@@ -1397,7 +1373,7 @@ impl Blockchain {
         // Size check.
         let block_size = bincode::serialize(block).map_err(|_| BlockchainError::InvalidBlock)?.len();
         if block_size > MAX_BLOCK_SIZE_BYTES {
-            return Err(BlockchainError::BlockTooLarge);
+            return Err(BlockchainError::BlockTooLarge { size: block_size });
         }
 
         // Timestamp must be strictly after parent.
@@ -1554,117 +1530,6 @@ impl Blockchain {
         timestamps[timestamps.len() / 2]  // Return median
     }
 
-    /// Calculate next difficulty using LWMA (Linearly Weighted Moving Average).
-    ///
-    /// LWMA ALGORITHM (Zawy 2017 variant, integer-only for consensus safety)
-    /// =========================================================================
-    /// Adjusts difficulty on EVERY block using the last LWMA_WINDOW solve times,
-    /// giving linearly increasing weights to more-recent blocks.
-    ///
-    /// Formula (all integer math, no f64):
-    ///
-    ///   For each block i in [tip-N .. tip] (oldest=1, newest=N):
-    ///     weight_i   = i                              (1 … N)
-    ///     solve_time = clamp(ts[i] - ts[i-1], 1, 6T) (anti-manipulation)
-    ///
-    ///   lwma_numerator   = Σ(weight_i × solve_time_i)   scaled by 1000
-    ///   weight_sum       = N×(N+1)/2
-    ///   lwma_denominator = weight_sum × T × 1000
-    ///
-    ///   new_diff = current_diff × lwma_denominator / lwma_numerator
-    ///            = current_diff × T / lwma_time    (no division-by-zero risk)
-    ///
-    /// Per-block clamp: [MAX_DIFF_DOWN_PCT%, MAX_DIFF_UP_PCT%] of current diff.
-    /// Global clamp:    [MIN_DIFFICULTY, MAX_DIFFICULTY].
-    fn calculate_next_difficulty(&self) -> u32 {
-        let chain_len = self.get_height();
-
-        // Need at least LWMA_WINDOW + 1 blocks (N blocks of solve times).
-        // Before that, hold the genesis difficulty constant.
-        if chain_len <= LWMA_WINDOW {
-            return match self.storage.load_block(chain_len.saturating_sub(1)) {
-                Ok(b) => b.difficulty,
-                Err(_) => MIN_DIFFICULTY,
-            };
-        }
-
-        // Load the tip block for the current difficulty reference.
-        let tip = match self.storage.load_block(chain_len - 1) {
-            Ok(b) => b,
-            Err(_) => return MIN_DIFFICULTY,
-        };
-        let current_diff = tip.difficulty as u64;
-
-        // ── Gather solve times for the last LWMA_WINDOW blocks ──────────────
-        // solve_time[i] = timestamp[tip - LWMA_WINDOW + i] - timestamp[tip - LWMA_WINDOW + i - 1]
-        // i runs from 1 (oldest pair) to LWMA_WINDOW (newest pair), weight = i.
-        let t_max = (LWMA_SOLVE_TIME_CAP_FACTOR * TARGET_BLOCK_TIME) as i64; // 180s
-        let n     = LWMA_WINDOW as u64;
-
-        let mut weighted_sum: u64 = 0; // Σ(weight × solve_time), scaled × 1000
-        let mut valid_count: u64  = 0;
-
-        for i in 1..=n {
-            // Block indices: current = (chain_len - 1 - (n - i))
-            //               previous = current - 1
-            let cur_idx  = chain_len.saturating_sub(1).saturating_sub(n - i);
-            let prev_idx = cur_idx.saturating_sub(1);
-
-            // Skip if we'd wrap around to genesis (shouldn't happen given guard above)
-            if prev_idx == cur_idx {
-                continue;
-            }
-
-            let cur_ts  = match self.storage.load_block(cur_idx)  { Ok(b) => b.timestamp, Err(_) => continue };
-            let prev_ts = match self.storage.load_block(prev_idx) { Ok(b) => b.timestamp, Err(_) => continue };
-
-            // Clamp solve time: must be positive and at most 6×T.
-            // This prevents timestamp manipulation from crashing difficulty.
-            let raw_solve = (cur_ts - prev_ts).max(1).min(t_max) as u64;
-
-            // weight = i (oldest block in window gets weight 1, newest gets weight N)
-            weighted_sum = weighted_sum.saturating_add(i * raw_solve * 1000);
-            valid_count += 1;
-        }
-
-        if valid_count == 0 || weighted_sum == 0 {
-            tracing::warn!("LWMA: no valid solve times found, holding difficulty");
-            return current_diff.clamp(MIN_DIFFICULTY as u64, MAX_DIFFICULTY as u64) as u32;
-        }
-
-        // weight_sum = N×(N+1)/2  (sum of weights 1..N)
-        let weight_sum = n * (n + 1) / 2; // 45×46/2 = 1035
-
-        // lwma_denominator = weight_sum × TARGET_BLOCK_TIME × 1000
-        // new_diff = current_diff × lwma_denominator / weighted_sum
-        //          = current_diff × weight_sum × T × 1000 / weighted_sum
-        let denominator = weight_sum
-            .saturating_mul(TARGET_BLOCK_TIME)
-            .saturating_mul(1000);
-
-        // Avoid division by zero (guaranteed non-zero above, but be safe)
-        let new_diff_raw = current_diff
-            .checked_mul(denominator)
-            .map(|v| v / weighted_sum)
-            .unwrap_or(current_diff);
-
-        // Per-block clamp: prevent single-block spikes
-        let floor = (current_diff * MAX_DIFF_DOWN_PCT as u64) / 100; // e.g. 75% of current
-        let ceil  = (current_diff * MAX_DIFF_UP_PCT   as u64) / 100; // e.g. 200% of current
-        let new_difficulty = new_diff_raw
-            .clamp(floor, ceil)
-            .clamp(MIN_DIFFICULTY as u64, MAX_DIFFICULTY as u64) as u32;
-
-        // Compute a human-readable LWMA time for the log (no f64 needed)
-        let lwma_time_s = weighted_sum / (weight_sum * 1000);
-        tracing::info!(
-            "LWMA difficulty: {} → {} (lwma_time: {}s, target: {}s, window: {} blocks)",
-            current_diff, new_difficulty, lwma_time_s, TARGET_BLOCK_TIME, LWMA_WINDOW
-        );
-
-        new_difficulty
-    }
-
     /// Validate the entire blockchain
     /// Validate the entire blockchain
     pub fn is_valid(&self) -> bool {
@@ -1707,22 +1572,14 @@ impl Blockchain {
     /// Get blockchain statistics
     pub fn get_stats(&self) -> BlockchainStats {
         let height = self.get_height();
-        let current_difficulty = if height > 0 {
-             self.get_latest_block().difficulty
-        } else {
-             4
-        };
-        
-        // Note: total_transactions needs full scan or separate counter in storage
-        // For now, return 0 or implement storage.get_total_txs()
-        let total_transactions = 0; 
-        
+        let current_epoch = crate::consensus::authorities::epoch_for_height(height);
+        let total_transactions = 0;
         let pending = self.pending_transactions.read();
-        
+
         BlockchainStats {
-            chain_length: height as usize, // Correct height
+            chain_length: height as usize,
             total_transactions,
-            current_difficulty,
+            current_epoch,
             mining_reward: self.get_mining_reward(),
             total_supply: self.calculate_total_supply(),
             pending_transactions: pending.len(),
@@ -1816,8 +1673,8 @@ impl Blockchain {
         // Slow path: arbitrary historical height (rare — only during deep fork).
         let mut total: u128 = 0;
         for h in 0..=tip_height {   // inclusive: block AT tip_height contributes its difficulty
-            if let Ok(b) = self.storage.load_block(h) {
-                total = total.saturating_add(b.difficulty as u128);
+            if let Ok(_) = self.storage.load_block(h) {
+                total = total.saturating_add(1u128);
             }
         }
         total
@@ -1855,24 +1712,10 @@ impl Blockchain {
             tracing::warn!("Fork detected: Block {} at height {}, we're at {}", 
                 &block.hash[..8], block.index, latest.index);
             
-            // MED-4 FIX: Verify PoW difficulty meets minimum BEFORE storing orphan.
-            // Previously, any block passing a cheap hash-format check could fill
-            // the orphan pool — now it must meet minimum difficulty too.
-            if block.index < QUANTA_V2_FORK_HEIGHT {
-                if block.difficulty < MIN_DIFFICULTY {
-                    tracing::warn!("Rejecting orphan block: difficulty {} < minimum {}", block.difficulty, MIN_DIFFICULTY);
-                    return Err(BlockchainError::InvalidBlock);
-                }
-                if !block.has_valid_hash() {
-                    tracing::warn!("Rejecting orphan block with invalid PoW");
-                    return Err(BlockchainError::InvalidBlock);
-                }
-            } else {
-                // BFT Validation
-                if block.bft_signatures.is_empty() {
-                    tracing::warn!("Rejecting orphan block with missing BFT certificate");
-                    return Err(BlockchainError::InvalidBlock);
-                }
+            // BFT: Validate BFT certificate for orphan blocks.
+            if block.index > 0 && block.bft_signatures.is_empty() {
+                tracing::warn!("Rejecting orphan block with missing BFT certificate");
+                return Err(BlockchainError::InvalidBlock);
             }
             
             // Validate merkle root
@@ -1899,13 +1742,9 @@ impl Blockchain {
             tracing::warn!("Competing block at height {}: incoming {} vs ours {}", 
                 block.index, &block.hash[..8], &latest.hash[..8]);
             
-            // MED-4 FIX: same PoW check for competing blocks
-            if block.difficulty < MIN_DIFFICULTY {
-                tracing::warn!("Rejecting competing block: difficulty below minimum");
-                return Err(BlockchainError::InvalidBlock);
-            }
-            if !block.has_valid_hash() {
-                tracing::warn!("Rejecting competing block with invalid PoW");
+            // BFT: require valid certificate for competing block.
+            if block.index > 0 && block.bft_signatures.is_empty() {
+                tracing::warn!("Rejecting competing block with missing BFT certificate");
                 return Err(BlockchainError::InvalidBlock);
             }
             
@@ -1916,31 +1755,15 @@ impl Blockchain {
                 return Err(BlockchainError::InvalidBlock);
             }
 
-            // FORK FIX: Compare cumulative PoW to decide which chain to follow.
-            // Our chain work is sum of all difficulties up to (and including) latest.index.
-            // Incoming chain work is everything up to previous block + incoming block difficulty.
-            // Since both chains share history up to (latest.index - 1), we only need to
-            // compare the tip block difficulties for a single-block tie-break.
-            // Incoming block wins if its difficulty strictly exceeds ours — most common case
-            // in a tie is that both are equal, in which case we keep ours (first-seen rule).
-            let our_tip_difficulty = latest.difficulty as u128;
-            let incoming_difficulty = block.difficulty as u128;
-
-            if incoming_difficulty > our_tip_difficulty {
-                // Incoming block represents more work — perform a 1-deep reorg.
-                tracing::warn!(
-                    "REORG: Incoming block has more PoW ({} > {}), switching to peer's chain at height {}",
-                    incoming_difficulty, our_tip_difficulty, block.index
-                );
-                return self.reorg_to_block(block, latest);
-            } else {
-                // Our tip has equal or greater work — keep our chain (first-seen rule).
-                tracing::info!(
-                    "Keeping our block at height {} (our difficulty {} >= incoming {})",
-                    latest.index, our_tip_difficulty, incoming_difficulty
-                );
-                return Ok(());
-            }
+            // FORK TIE-BREAK: In BFT, the first-seen rule applies. We never
+            // orphan a block in favour of a same-height competitor.
+            // A genuine double-proposal by two validators at the same height is
+            // a safety violation — log it and keep our current tip.
+            tracing::warn!(
+                "Double-proposal at height {}: keeping our block {} over incoming {}",
+                block.index, &latest.hash[..8], &block.hash[..8]
+            );
+            return Ok(());
         } else if block.index + 1 == latest.index && block.previous_hash != String::new() {
             // Block is 1 behind our tip — it might be the base of a competing fork.
             // Store in orphans so process_orphans can detect if a longer chain builds on it.
@@ -2041,7 +1864,6 @@ impl Blockchain {
         *self.account_state.write() = new_state;
 
         // Return old tip to orphan pool — it may still form a valid longer chain later.
-        let old_tip_difficulty = old_tip.difficulty; // save before move
         {
             let mut orphans = self.orphaned_blocks.write();
             if orphans.len() < MAX_ORPHAN_BLOCKS {
@@ -2070,13 +1892,7 @@ impl Blockchain {
         // Notify miners that the tip changed so they abort stale PoW immediately.
         let _ = self.new_block_tx.send(incoming.index + 1);
 
-        // Update cumulative_work: subtract old tip's difficulty, add incoming tip's.
-        {
-            let mut cw = self.cumulative_work.lock();
-            *cw = cw.saturating_sub(old_tip_difficulty as u128)
-                     .saturating_add(incoming.difficulty as u128);
-            let _ = self.storage.set_cumulative_work(*cw);
-        }
+        // Update cumulative_work: subtract old tip's weight (1), add incoming tip's (1). No-op for BFT.
 
         tracing::info!("Reorg complete: replaced tip at height {} with block {}",
             incoming.index, &incoming.hash[..8]);
@@ -2246,7 +2062,7 @@ impl Blockchain {
         // Update cumulative work (O(1) — add this block's difficulty to running total).
         let new_work = {
             let mut cw = self.cumulative_work.lock();
-            *cw = cw.saturating_add(block.difficulty as u128);
+            *cw = cw.saturating_add(1u128); // BFT v2: each block = 1 work unit
             *cw
         };
         let _ = self.storage.set_cumulative_work(new_work);
@@ -2595,10 +2411,10 @@ impl Blockchain {
         // rollback_to consistently equals sorted[0].index for all downstream logic.
         let rollback_to = effective_rollback;
 
-        // Verify PoW on all incoming blocks before we commit to anything.
+        // Verify BFT certificate on all incoming blocks before we commit to anything.
         for b in &sorted {
-            if b.difficulty < MIN_DIFFICULTY || !b.has_valid_hash() {
-                tracing::warn!("Deep reorg: incoming block {} failed PoW check", b.index);
+            if b.index > 0 && b.bft_signatures.is_empty() {
+                tracing::warn!("Deep reorg: incoming block {} missing BFT certificate", b.index);
                 return Err(BlockchainError::InvalidBlock);
             }
             // Check checkpoint for each new block
@@ -2721,7 +2537,7 @@ pub struct AddressTransaction {
 pub struct BlockchainStats {
     pub chain_length: usize,
     pub total_transactions: usize,
-    pub current_difficulty: u32,
+    pub current_epoch: u64,
     pub mining_reward: u64,      // microunits
     pub total_supply: u64,       // microunits
     pub pending_transactions: usize,

@@ -37,7 +37,7 @@ pub fn run(iterations: usize, _full_pow_solve: bool) -> BenchmarkSection {
 
     // ── Block hash computation ──────────────────────────────────────────────────
     {
-        let genesis = Block::genesis_v2();
+        let genesis = Block::genesis();
         let n = iterations;
         let mut samples = Vec::with_capacity(n);
         for _ in 0..n {
@@ -122,7 +122,7 @@ pub fn run(iterations: usize, _full_pow_solve: bool) -> BenchmarkSection {
     {
         println!("        BFT precommit signing benchmark...");
         let kp = FalconKeypair::generate();
-        let genesis = Block::genesis_v2();
+        let genesis = Block::genesis();
         let payload = genesis.bft_signing_payload();
 
         let n = iterations.min(50); // Falcon-512 signing is slow
