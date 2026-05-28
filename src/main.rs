@@ -434,7 +434,7 @@ async fn main() {
             };
             
             // Start BFT Proposer if a validator wallet is provided
-            if cfg.consensus_engine.to_lowercase() == "bft" {
+            if cfg.consensus_engine == crate::config::types::ConsensusEngine::Bft {
                 if let Some(wallet_file) = validator_wallet {
                     let password = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
                         p
