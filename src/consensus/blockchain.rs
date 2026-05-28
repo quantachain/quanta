@@ -178,22 +178,33 @@ const MAX_ADDRESS_LEN: usize = 128;
 /// secured by hardcoded checkpoints.
 // Height from which state_root validation is enforced.
 //
-// WHY 95,000:
-//   Blocks below this boundary were all mined by a node whose account state had
-//   accumulated bugs from prior versions (unsorted locked_balances pre-v0.7.2,
-//   snapshot-fallback corruption pre-v0.7.4, and dirty incremental state up to
-//   the v0.7.5 clean restart at ~block 90,000).  The chain tip at the time of the
-//   v0.7.5 clean restart was block 91,768 — all of those blocks carry state_roots
-//   that a fresh-genesis-replay node cannot reproduce.
+// WHY 141,000:
+//   The assumption behind the earlier value of 95,000 — "every active node will
+//   have been running on clean-replayed state long enough that state_roots match" —
+//   turned out to be wrong in practice.  K's miner node accumulated account state
+//   through historical reorgs driven by bugs fixed in v0.7.1–v0.7.4 (cumulative-work
+//   corruption, snapshot-fallback skip, wrong LWMA bounds during reorg replay).
+//   Those reorgs left K's state at certain heights different from what a fresh
+//   sequential-sync node produces by replaying the same canonical blocks.  The two
+//   sides therefore compute different state_roots for blocks 95,001–140,000, even
+//   with the corrected single-pass validator introduced in v0.7.6.
 //
-//   Hardcoded checkpoints at 85,000 and 90,000 already anchor chain integrity;
-//   the Fix-2 checkpoint-bypass in validate_block_consensus handles any remaining
-//   checkpointed heights.  From block 95,000 onward every active node will have
-//   been running on clean-replayed state long enough that their state_roots
-//   will be identical and enforcement is meaningful.
+//   All blocks below the highest testnet checkpoint (140,000, added 2026-05-27)
+//   are already secured by hardcoded hashes — skipping state_root enforcement
+//   in that range does NOT weaken chain integrity.
 //
-//   Checkpoints at 95,000 and 100,000 are now in TESTNET_CHECKPOINTS (added 2026-05-26).
-const STATE_ROOT_SORT_FIX_HEIGHT: u64 = 95_000;
+//   From block 141,000 onward K's node has been operating normally (no diverging
+//   reorgs since the 140,000 checkpoint) so its committed account state matches
+//   what any fresh-sync node produces.  The v0.7.6 single-pass validator then
+//   ensures that all newly mined blocks embed a state_root that every validator
+//   can reproduce, making enforcement both correct and meaningful.
+//
+//   (v0.7.2) Blocks below the old 85,000 boundary: unsorted locked_balances.
+//   (v0.7.5) Blocks 85,000–94,999: dirty incremental state from pre-v0.7.5 reorgs.
+//   (v0.7.6) Blocks 95,000–140,999: base-state divergence from historical reorgs —
+//            all covered by hardcoded checkpoints; enforcement skipped.
+//   (v0.7.6) Blocks 141,000+: single-pass validator enforced; states converge.
+const STATE_ROOT_SORT_FIX_HEIGHT: u64 = 141_000;
 
 /// CONSENSUS-CRITICAL: Genesis block hashes (prevent chain-split attacks)
 /// Mainnet genesis — pending final mining before mainnet launch.
