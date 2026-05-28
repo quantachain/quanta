@@ -1,9 +1,9 @@
 # ============================================================
 # Dockerfile — QUANTA Blockchain Node
 # ============================================================
-# Alpha — Release for testnet testing (v0.7.5)
+# V2 Alpha — BFT Release for testnet testing (v2.0.0)
 #
-# Image : xd637/quanta-node:v0.7.5-alpha
+# Image : xd637/quanta-node:v2.0.0-alpha
 # Repo  : https://hub.docker.com/r/xd637/quanta-node
 #
 # Quick start (single node):
@@ -20,8 +20,8 @@ FROM rust:latest AS builder
 
 # Image metadata (OCI standard)
 LABEL org.opencontainers.image.title="quanta-node" \
-      org.opencontainers.image.description="QuantaChain node — post-quantum PoW, Falcon-512 signatures. v0.7.5: state root fix (unlock_mature_coinbase alignment), stale-mining abort-on-new-block, reorg nonce clear, 90k checkpoint, Falcon signing unified under falcon-rust." \
-      org.opencontainers.image.version="0.7.5" \
+      org.opencontainers.image.description="QuantaChain V2 node — post-quantum BFT, Falcon-512 signatures, zero-mining. v2.0.0-alpha." \
+      org.opencontainers.image.version="2.0.0" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="Apache-2.0"
@@ -59,7 +59,6 @@ WORKDIR /home/quanta
 # Copy all binaries from builder
 COPY --from=builder /app/target/release/quanta        /usr/local/bin/quanta
 COPY --from=builder /app/target/release/quanta-wallet /usr/local/bin/quanta-wallet
-COPY --from=builder /app/target/release/quanta-miner  /usr/local/bin/quanta-miner
 COPY --chown=quanta:quanta quanta.toml /home/quanta/quanta.toml
 
 # Create data directories and set permissions
