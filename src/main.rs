@@ -81,6 +81,10 @@ enum Commands {
         #[arg(long = "no-network")]
         no_network: bool,
         
+        /// Validator wallet file to enable BFT block production
+        #[arg(long = "validator-wallet")]
+        validator_wallet: Option<String>,
+        
         // --detach (daemon mode) is commented out for now — Unix-only, not needed yet
         // /// Run in background as daemon
         // #[arg(long)]
@@ -311,7 +315,7 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Start { config, network, port, network_port, rpc_port, db, bootstrap, no_network } => {
+        Commands::Start { config, network, port, network_port, rpc_port, db, bootstrap, no_network, validator_wallet } => {
             // Load configuration with RPC port override
             let cfg = QuantaConfig::load_with_overrides(
                 config,
@@ -428,6 +432,36 @@ async fn main() {
                 println!("Running in single-node mode (P2P disabled)");
                 None
             };
+            
+            // Start BFT Proposer if a validator wallet is provided
+            if cfg.consensus_engine.to_lowercase() == "bft" {
+                if let Some(wallet_file) = validator_wallet {
+                    let password = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
+                        p
+                    } else {
+                        println!("Enter password for validator wallet '{}':", wallet_file);
+                        rpassword::read_password().expect("Failed to read password")
+                    };
+                    
+                    match crate::crypto::wallet::QuantumWallet::load_quantum_safe(&wallet_file, &password) {
+                        Ok(w) => {
+                            let wallet = Arc::new(w);
+                            tracing::info!("Starting BFT Proposer for validator {}", wallet.address);
+                            let rx = blockchain.read().await.subscribe_new_blocks();
+                            let bc_clone = Arc::clone(&blockchain);
+                            let net_clone = network.clone();
+                            tokio::spawn(async move {
+                                crate::consensus::bft_proposer::run_bft_proposer(bc_clone, wallet, net_clone, rx).await;
+                            });
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to load validator wallet: {}. Node will run without proposing blocks.", e);
+                        }
+                    }
+                } else {
+                    tracing::warn!("BFT Consensus is active but NO --validator-wallet was provided. This node will only sync and observe!");
+                }
+            }
             
             // Start metrics updater
             let metrics_clone = Arc::clone(&metrics);
