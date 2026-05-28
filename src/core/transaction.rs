@@ -83,13 +83,39 @@ pub struct Transaction {
 }
 
 /// Transaction types supported by the protocol.
+///
+/// FROZEN VALUES — do not reorder or delete; only append.
+///   0 = Transfer
+///   1 = TimeLockTransfer
+///   2 = MultiSigTransfer
+///   3 = Stake          (v2 — register as BFT validator)
+///   4 = Unstake        (v2 — deregister, begin unbonding)
+///   5 = ContractDeploy (v2 — deploy a named contract template)
+///   6 = ContractCall   (v2 — invoke a deployed contract)
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum TransactionType {
+    /// Standard value transfer.
     Transfer,
+    /// Value transfer locked until a specific block height.
     TimeLockTransfer { unlock_height: u64 },
+    /// Multi-signature transfer requiring M-of-N signers.
     MultiSigTransfer { signers_required: u8 },
-    /// Quanta 2.0 PQ-BFT Validator Stake Registration
+    /// v2: Register as a BFT validator by staking QUA and providing
+    /// a Falcon-512 public key (897 bytes) that will be used to sign
+    /// BFT prevote / precommit messages.
     Stake { validator_pubkey: Vec<u8> },
+    /// v2: Deregister as validator and begin the unbonding period.
+    /// Staked QUA is locked for UNBONDING_EPOCHS epochs before release.
+    Unstake,
+    /// v2: Deploy a named smart contract template.
+    /// `template_id` identifies which built-in template to instantiate.
+    /// `init_args` is a JSON-encoded initialisation argument map.
+    ContractDeploy { template_id: u8, init_args: Vec<u8> },
+    /// v2: Invoke a method on a deployed contract.
+    /// `contract_address` is the on-chain address of the contract.
+    /// `method` is the UTF-8 method name.
+    /// `call_args` is a JSON-encoded argument map.
+    ContractCall { contract_address: String, method: String, call_args: Vec<u8> },
 }
 
 impl Transaction {
@@ -187,6 +213,18 @@ impl Transaction {
                 buf.push(3u8);
                 buf.extend_from_slice(validator_pubkey);
             }
+            TransactionType::Unstake => buf.push(4u8),
+            TransactionType::ContractDeploy { template_id, init_args } => {
+                buf.push(5u8);
+                buf.push(*template_id);
+                buf.extend_from_slice(init_args);
+            }
+            TransactionType::ContractCall { contract_address, method, call_args } => {
+                buf.push(6u8);
+                buf.extend_from_slice(contract_address.as_bytes());
+                buf.extend_from_slice(method.as_bytes());
+                buf.extend_from_slice(call_args);
+            }
         }
 
         buf
@@ -244,6 +282,17 @@ impl Transaction {
             TransactionType::Stake { validator_pubkey } => {
                 hasher.update(&[3u8]);
                 hasher.update(validator_pubkey);
+            }
+            TransactionType::Unstake => hasher.update(&[4u8]),
+            TransactionType::ContractDeploy { template_id, init_args } => {
+                hasher.update(&[5u8, *template_id]);
+                hasher.update(init_args);
+            }
+            TransactionType::ContractCall { contract_address, method, call_args } => {
+                hasher.update(&[6u8]);
+                hasher.update(contract_address.as_bytes());
+                hasher.update(method.as_bytes());
+                hasher.update(call_args);
             }
         }
 
@@ -319,24 +368,45 @@ impl Transaction {
     }
 
     /// Returns `true` if this is a genesis premine credit.
-    /// Genesis premine funds are immediately spendable (no coinbase maturity lock).
     pub fn is_genesis_premine(&self) -> bool {
         self.sender == "GENESIS"
     }
-}
+
+    /// Returns `true` if this is a v2 `Stake` (validator registration) transaction.
+    pub fn is_stake(&self) -> bool {
+        matches!(self.tx_type, TransactionType::Stake { .. })
+    }
+
+    /// Returns `true` if this is a v2 `Unstake` (validator deregistration) transaction.
+    pub fn is_unstake(&self) -> bool {
+        matches!(self.tx_type, TransactionType::Unstake)
+    }
+
+    /// Returns `true` if this is a v2 `ContractDeploy` transaction.
+    pub fn is_contract_deploy(&self) -> bool {
+        matches!(self.tx_type, TransactionType::ContractDeploy { .. })
+    }
+
+    /// Returns `true` if this is a v2 `ContractCall` transaction.
+    pub fn is_contract_call(&self) -> bool {
+        matches!(self.tx_type, TransactionType::ContractCall { .. })
+    }
+
+
+} // impl Transaction
 
 // ---------------------------------------------------------------------------
 // Account state types
 // ---------------------------------------------------------------------------
 
-/// A single locked balance entry (e.g., coinbase maturity, vesting).
+/// A single locked balance entry (e.g., coinbase maturity, unbonding stake).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LockedBalance {
     pub amount: u64,
     pub unlock_height: u64,
 }
 
-/// Per-address account record (account-based model, not UTXO).
+/// Per-address account record.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AccountBalance {
     pub address: String,
@@ -345,20 +415,53 @@ pub struct AccountBalance {
     pub locked_balances: Vec<LockedBalance>,
 }
 
-/// In-memory account state database.
+/// BFT validator registration record.
+///
+/// Stored in `AccountState::validators` keyed by the validator's address.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ValidatorInfo {
+    /// Falcon-512 public key (897 bytes) used for BFT signing.
+    pub falcon_pk: Vec<u8>,
+    /// Staked QUA (microunits) locked while registered.
+    pub stake: u64,
+    /// Epoch in which this validator registered.
+    pub registered_epoch: u64,
+    /// Whether this validator is in the active set for the current epoch.
+    pub active: bool,
+}
+
+/// Minimal deployed-contract state.
+/// Full contract storage lives inside the `storage` map.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ContractState {
+    /// Address of the account that deployed this contract.
+    pub owner: String,
+    /// Template ID (matches `ContractDeploy::template_id`).
+    pub template_id: u8,
+    /// Block height at which the contract was deployed.
+    pub deployed_at: u64,
+    /// Contract-specific key-value storage.
+    pub storage: HashMap<String, String>,
+}
+
+/// In-memory global state — accounts, validators, contracts.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AccountState {
     accounts: HashMap<String, AccountBalance>,
-    /// Active BFT validators (Address -> Falcon Public Key)
+    /// Registered BFT validators (address → ValidatorInfo).
     #[serde(default)]
-    validators: HashMap<String, Vec<u8>>,
+    validators: HashMap<String, ValidatorInfo>,
+    /// Deployed smart contracts (contract address → ContractState).
+    #[serde(default)]
+    contracts: HashMap<String, ContractState>,
 }
 
 impl AccountState {
     pub fn new() -> Self {
-        Self { 
+        Self {
             accounts: HashMap::new(),
             validators: HashMap::new(),
+            contracts: HashMap::new(),
         }
     }
 
@@ -545,16 +648,90 @@ impl AccountState {
         self.accounts.get(address)
     }
 
-    /// Register a new validator in the state
-    pub fn register_validator(&mut self, address: &str, public_key: Vec<u8>) {
-        self.validators.insert(address.to_string(), public_key);
+    /// Register a new BFT validator.
+    ///
+    /// The caller must have already debited `stake` from the sender's balance.
+    pub fn register_validator(
+        &mut self,
+        address: &str,
+        falcon_pk: Vec<u8>,
+        stake: u64,
+        current_epoch: u64,
+    ) {
+        self.validators.insert(address.to_string(), ValidatorInfo {
+            falcon_pk,
+            stake,
+            registered_epoch: current_epoch,
+            active: true,
+        });
     }
 
-    /// Get all active validators
-    pub fn get_validators(&self) -> &HashMap<String, Vec<u8>> {
+    /// Deregister a validator (Unstake transaction).
+    ///
+    /// Sets `active = false`; staked QUA is locked until unbonding expires.
+    pub fn deregister_validator(&mut self, address: &str) {
+        if let Some(info) = self.validators.get_mut(address) {
+            info.active = false;
+        }
+    }
+
+    /// Remove a fully-unbonded validator record after unbonding expires.
+    pub fn remove_validator(&mut self, address: &str) {
+        self.validators.remove(address);
+    }
+
+    /// Return info for a specific validator.
+    pub fn get_validator_info(&self, address: &str) -> Option<&ValidatorInfo> {
+        self.validators.get(address)
+    }
+
+    /// Return the full validators map (for authority module / epoch rotation).
+    pub fn get_validators(&self) -> &HashMap<String, ValidatorInfo> {
         &self.validators
     }
+
+    /// Compute the epoch committee: top-N active validators by stake,
+    /// sorted deterministically by address for tie-breaking.
+    ///
+    /// `max_committee_size` is typically 21.
+    pub fn compute_epoch_committee(&self, max_committee_size: usize) -> Vec<String> {
+        let mut active: Vec<(&String, &ValidatorInfo)> = self
+            .validators
+            .iter()
+            .filter(|(_, v)| v.active)
+            .collect();
+
+        // Primary sort: stake descending. Secondary sort: address ascending (tie-break).
+        active.sort_by(|(addr_a, info_a), (addr_b, info_b)| {
+            info_b.stake.cmp(&info_a.stake)
+                .then_with(|| addr_a.cmp(addr_b))
+        });
+
+        active
+            .into_iter()
+            .take(max_committee_size)
+            .map(|(addr, _)| addr.clone())
+            .collect()
+    }
+
+    // ---- Contract helpers --------------------------------------------------
+
+    /// Store a deployed contract state.
+    pub fn deploy_contract(&mut self, address: String, state: ContractState) {
+        self.contracts.insert(address, state);
+    }
+
+    /// Retrieve mutable contract state for execution.
+    pub fn get_contract_mut(&mut self, address: &str) -> Option<&mut ContractState> {
+        self.contracts.get_mut(address)
+    }
+
+    /// Retrieve immutable contract state for reads.
+    pub fn get_contract(&self, address: &str) -> Option<&ContractState> {
+        self.contracts.get(address)
+    }
 }
+
 
 // ---------------------------------------------------------------------------
 // Unit tests

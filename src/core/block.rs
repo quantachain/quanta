@@ -1,93 +1,140 @@
 use serde::{Serialize, Deserialize};
 use crate::core::transaction::Transaction;
-use crate::crypto::double_sha3;
+use crate::crypto::{double_sha3, FALCON512_SIG_MAX_BYTES, FALCON512_SIG_MIN_BYTES};
 use crate::core::merkle::MerkleTree;
 use chrono::Utc;
 
-/// Block structure
+// ---------------------------------------------------------------------------
+// BFT Block — Quanta v2
+//
+// No proof-of-work. Every block is proposed by a validator in the current
+// epoch committee and committed when ≥ ⌈2/3⌉ of the committee has signed.
+// ---------------------------------------------------------------------------
+
+/// A Quanta v2 block.
+///
+/// Consensus is BFT (Tendermint-style) from genesis.
+/// All integrity is provided by Falcon-512 signatures from the epoch committee,
+/// NOT by hash-puzzle PoW.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Block {
+    // ---- Chain structure ----
+    /// Block height (0 = genesis).
     pub index: u64,
+    /// Unix timestamp (seconds) when block was proposed.
     pub timestamp: i64,
+    /// Transactions included in this block.
     pub transactions: Vec<Transaction>,
+    /// Hash of the previous block (links the chain).
     pub previous_hash: String,
-    pub nonce: u64,
+    /// SHA3-256 double-hash over all block fields.
     pub hash: String,
-    pub difficulty: u32,
+    /// SHA3-256 Merkle root of `transactions`.
     pub merkle_root: String,
-    /// Cryptographic commitment to the global account state after this block
-    #[serde(default)]
+    /// SHA3-256 commitment to the global account state after applying this block.
     pub state_root: String,
-    
-    // --- QUANTA 2.0 BFT Consensus Fields ---
-    /// The BFT Round this block was committed in. 0 for PoW blocks.
-    #[serde(default)]
+
+    // ---- BFT consensus ----
+    /// Epoch number this block belongs to. Epoch N covers heights
+    /// [N * EPOCH_SIZE, (N+1) * EPOCH_SIZE).
+    pub epoch: u64,
+    /// Tendermint voting round in which 2/3+ agreement was reached (0-indexed).
     pub bft_round: u32,
-    /// The BFT Certificate (collection of Falcon-512 signatures from validators).
-    #[serde(default)]
+    /// Address of the validator that proposed this block.
+    pub proposer: String,
+    /// Falcon-512 BFT certificate: one `raw_sig || hash` blob per signing
+    /// committee member. Format matches `verify_signature_strict()`.
+    /// Must contain ≥ ⌈2/3 * committee_size⌉ valid entries.
     pub bft_signatures: Vec<Vec<u8>>,
+    /// Addresses of the validators whose signatures are in `bft_signatures`,
+    /// in the same order. Stored explicitly so verifiers don't need to brute-
+    /// force which key belongs to which signature.
+    pub bft_signers: Vec<String>,
 }
 
 impl Block {
-    /// Create a new block (unmined)
-    pub fn new(
+    // -----------------------------------------------------------------------
+    // Constructors
+    // -----------------------------------------------------------------------
+
+    /// Create an unsigned, uncommitted BFT block template.
+    ///
+    /// The caller must:
+    /// 1. Set `state_root` after applying transactions.
+    /// 2. Collect `bft_signatures` + `bft_signers` via the voting round.
+    /// 3. Call `finalize_hash()` once all fields are set.
+    pub fn new_bft(
         index: u64,
         transactions: Vec<Transaction>,
         previous_hash: String,
-        difficulty: u32,
+        epoch: u64,
+        bft_round: u32,
+        proposer: String,
     ) -> Self {
         let timestamp = Utc::now().timestamp();
-        
-        // Calculate Merkle root
         let merkle_tree = MerkleTree::from_transactions(&transactions);
         let merkle_root = merkle_tree.root_hash().unwrap_or_else(|| "0".repeat(64));
-        
+
         let mut block = Self {
             index,
             timestamp,
             transactions,
             previous_hash,
-            nonce: 0,
             hash: String::new(),
-            difficulty,
             merkle_root,
-            state_root: String::new(), // Will be set by create_block_template
-            bft_round: 0,
+            state_root: String::new(),
+            epoch,
+            bft_round,
+            proposer,
             bft_signatures: vec![],
+            bft_signers: vec![],
         };
         block.hash = block.calculate_hash();
         block
     }
 
-    /// Create the genesis block (first block in chain)
-    pub fn genesis(network: crate::core::ChainNetwork) -> Self {
-        // CONSENSUS-CRITICAL: Genesis block parameters
-        // Timestamp: January 1, 2026 00:00:00 UTC (Quanta Launch)
-        // All nodes must use identical genesis parameters
-        
-        let (timestamp, difficulty, nonce) = match network {
-            crate::core::ChainNetwork::Mainnet => (1774051200, 16_777_216, 0), // Pending actual mining before Mainnet launch
-            crate::core::ChainNetwork::Testnet  => (1775001600, 8304130, 9921538), // Alpha Testnet — ~30s block time
-        };
-        
+    /// Create the Quanta v2 genesis block.
+    ///
+    /// The genesis block has no proposer, no BFT signatures (it is
+    /// hardcoded and trusted by all nodes), and an empty state.
+    ///
+    /// CONSENSUS-CRITICAL: The genesis hash is hardcoded in blockchain.rs.
+    /// Any change to these fields requires a new hash to be computed and
+    /// burned into the code.
+    pub fn genesis_v2() -> Self {
+        // 2026-06-01 00:00:00 UTC — Quanta v2 genesis
+        let timestamp = 1748736000i64;
+
         let mut genesis = Self {
             index: 0,
-            timestamp, // Set based on network type
+            timestamp,
             transactions: vec![],
             previous_hash: "0".repeat(64),
-            nonce,
             hash: String::new(),
-            difficulty,
             merkle_root: "0".repeat(64),
-            state_root: "0".repeat(64), // Empty state root for genesis
+            state_root: "0".repeat(64),
+            epoch: 0,
             bft_round: 0,
+            proposer: "GENESIS".to_string(),
             bft_signatures: vec![],
+            bft_signers: vec![],
         };
         genesis.hash = genesis.calculate_hash();
         genesis
     }
 
-    /// Calculate block hash using SHA3-256
+    // -----------------------------------------------------------------------
+    // Hashing
+    // -----------------------------------------------------------------------
+
+    /// Compute the canonical block hash.
+    ///
+    /// CONSENSUS RULES (FROZEN):
+    /// - All integers little-endian.
+    /// - Transactions represented by their individual hashes, comma-joined.
+    /// - BFT signatures hex-encoded, comma-joined (in order).
+    /// - BFT signers comma-joined (in order, same order as signatures).
+    /// - `proposer`, `epoch`, `bft_round`, `state_root` all included.
     pub fn calculate_hash(&self) -> String {
         let transactions_str = self
             .transactions
@@ -96,155 +143,53 @@ impl Block {
             .collect::<Vec<String>>()
             .join(",");
 
-        let signatures_str = self.bft_signatures
+        let signatures_str = self
+            .bft_signatures
             .iter()
             .map(|sig| hex::encode(sig))
             .collect::<Vec<String>>()
             .join(",");
-            
+
+        let signers_str = self.bft_signers.join(",");
+
         let data = format!(
-            "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+            "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
             self.index,
             self.timestamp,
             transactions_str,
             self.previous_hash,
-            self.nonce,
-            self.difficulty,
             self.merkle_root,
             self.state_root,
+            self.epoch,
             self.bft_round,
-            signatures_str
+            self.proposer,
+            signatures_str,
+            signers_str,
         );
 
         double_sha3(data.as_bytes())
     }
 
-    /// Check if block hash meets difficulty target
-    pub fn has_valid_hash(&self) -> bool {
-        if self.hash.len() < 16 {
-            return false;
-        }
-
-        // Parse the first 16 hex characters (64 bits) of the hash
-        let hash_prefix = match u64::from_str_radix(&self.hash[..16], 16) {
-            Ok(v) => v,
-            Err(_) => return false,
-        };
-
-        // Target = u64::MAX / expected_hashes
-        // Where difficulty IS the expected_hashes (e.g., difficulty 16 = target starts with '0')
-        // We use u64::MAX to provide perfectly smooth difficulty adjustments
-        let difficulty_u64 = self.difficulty as u64;
-        let target = if difficulty_u64 == 0 {
-            u64::MAX
-        } else {
-            u64::MAX / difficulty_u64
-        };
-
-        hash_prefix <= target
+    /// Recompute and store `self.hash` after all fields are finalised.
+    pub fn finalize_hash(&mut self) {
+        self.hash = self.calculate_hash();
     }
 
-    /// Mine the block by finding a valid nonce
-    pub fn mine(&mut self) {
-        tracing::info!(
-            "Mining block {} with difficulty {}...",
-            self.index, self.difficulty
-        );
-        
-        let start = std::time::Instant::now();
-        let mut hash_count = 0u64;
-        
-        loop {
-            self.hash = self.calculate_hash();
-            hash_count += 1;
-            
-            if self.has_valid_hash() {
-                let elapsed = start.elapsed().as_secs_f64();
-                let hashrate = if elapsed > 0.0 { hash_count as f64 / elapsed } else { f64::INFINITY };
-                tracing::info!(
-                    "Block mined! Nonce: {}, Hashes: {}, Time: {:.2}s, Hashrate: {:.0} H/s",
-                    self.nonce, hash_count, elapsed, hashrate
-                );
-                break;
-            }
-            
-            self.nonce += 1;
-            
-            // Progress indicator every 100k hashes
-            if hash_count % 100_000 == 0 {
-                tracing::debug!("Mining progress: {}k hashes (block {})", hash_count / 1000, self.index);
-            }
-        }
-    }
+    // -----------------------------------------------------------------------
+    // Validation
+    // -----------------------------------------------------------------------
 
-    /// Mine the block — but abort immediately if `cancel` is set to `true`.
+    /// Validate block structure (NOT BFT certificate).
     ///
-    /// Returns `true` if a valid nonce was found, `false` if cancelled.
+    /// This checks:
+    /// 1. Hash integrity — `self.hash` matches recalculated value.
+    /// 2. Merkle root integrity.
+    /// 3. Chain linkage (previous_hash, index, timestamp).
+    /// 4. Signature blob sizes are within Falcon-512 bounds.
     ///
-    /// STALE-BLOCK FIX: The normal `mine()` runs until it finds a nonce, which
-    /// can take up to 30 s. If a peer announces a new block during that window,
-    /// the result is stale. This variant polls `cancel` every 10,000 hashes
-    /// (~10 ms at typical hashrate) so the mining loop can abort promptly.
-    ///
-    /// Usage in the RPC server:
-    /// ```ignore
-    /// let cancel = Arc::new(AtomicBool::new(false));
-    /// let cancel_clone = cancel.clone();
-    /// tokio::select! {
-    ///     _ = new_block_rx.changed() => { cancel.store(true, Ordering::Relaxed); }
-    ///     result = spawn_blocking(move || block.mine_with_cancel(&cancel_clone)) => { ... }
-    /// }
-    /// ```
-    pub fn mine_with_cancel(&mut self, cancel: &std::sync::atomic::AtomicBool) -> bool {
-        use std::sync::atomic::Ordering;
-        tracing::info!(
-            "Mining block {} with difficulty {} (cancellable)...",
-            self.index, self.difficulty
-        );
-
-        let start = std::time::Instant::now();
-        let mut hash_count = 0u64;
-
-        loop {
-            self.hash = self.calculate_hash();
-            hash_count += 1;
-
-            if self.has_valid_hash() {
-                let elapsed = start.elapsed().as_secs_f64();
-                let hashrate = if elapsed > 0.0 { hash_count as f64 / elapsed } else { f64::INFINITY };
-                tracing::info!(
-                    "Block mined! Nonce: {}, Hashes: {}, Time: {:.2}s, Hashrate: {:.0} H/s",
-                    self.nonce, hash_count, elapsed, hashrate
-                );
-                return true;
-            }
-
-            self.nonce += 1;
-
-            // Check cancel flag every 10,000 hashes (~10 ms) — low overhead,
-            // fast enough to catch a new-block notification before next hash batch.
-            if hash_count % 10_000 == 0 {
-                if cancel.load(Ordering::Relaxed) {
-                    tracing::info!(
-                        "Mining cancelled at {} hashes (block {} — chain moved)",
-                        hash_count, self.index
-                    );
-                    return false;
-                }
-                if hash_count % 100_000 == 0 {
-                    tracing::debug!("Mining progress: {}k hashes (block {})", hash_count / 1000, self.index);
-                }
-            }
-        }
-    }
-
-    /// Validate block structure and PoW.
-    ///
-    /// Checks: hash integrity, proof-of-work, Merkle root, and previous-block
-    /// linkage. Transaction signature verification is intentionally NOT done
-    /// here — it is performed in parallel by Rayon inside
-    /// `Blockchain::validate_block_consensus()`. Running it here as well would
-    /// double the Falcon-512 verification work (~1800 ms per block).
+    /// BFT certificate verification (2/3 majority check) is done separately
+    /// in `Blockchain::validate_bft_certificate()` because it requires access
+    /// to the epoch committee which is not stored on the block itself.
     pub fn is_valid(&self, previous_block: Option<&Block>) -> bool {
         // 1. Hash integrity
         if self.hash != self.calculate_hash() {
@@ -252,26 +197,7 @@ impl Block {
             return false;
         }
 
-        // 2. Proof-of-work OR BFT Consensus
-        // QUANTA 2.0 FORK: If this block has BFT signatures, we skip the PoW difficulty check.
-        // The actual BFT majority math will be validated by the AlephBFT integration.
-        if self.bft_signatures.is_empty() {
-            if !self.has_valid_hash() {
-                tracing::warn!("Block {}: hash does not meet declared difficulty {}", self.index, self.difficulty);
-                return false;
-            }
-        } else {
-            tracing::debug!("Block {}: BFT Consensus Block - skipping PoW check", self.index);
-            // Verify each signature is the correct length (666 bytes for Falcon-512)
-            for (i, sig) in self.bft_signatures.iter().enumerate() {
-                if sig.len() != 666 {
-                    tracing::warn!("Block {}: Invalid Falcon-512 signature length at index {} (must be 666 bytes)", self.index, i);
-                    return false;
-                }
-            }
-        }
-
-        // 3. Merkle root integrity
+        // 2. Merkle root integrity
         let tree = MerkleTree::from_transactions(&self.transactions);
         let computed_root = tree.root_hash().unwrap_or_else(|| "0".repeat(64));
         if self.merkle_root != computed_root {
@@ -282,23 +208,58 @@ impl Block {
             return false;
         }
 
-        // 4. Chain linkage and timestamp
+        // 3. BFT signature blob size pre-check.
+        // Full cryptographic verification is in validate_bft_certificate().
+        // We just confirm each blob is within the legal Falcon-512 bounds so
+        // that downstream parsing can never panic.
+        for (i, sig) in self.bft_signatures.iter().enumerate() {
+            if sig.len() < FALCON512_SIG_MIN_BYTES || sig.len() > FALCON512_SIG_MAX_BYTES {
+                tracing::warn!(
+                    "Block {}: bft_signatures[{}] length {} is outside Falcon-512 bounds [{}, {}]",
+                    self.index, i, sig.len(), FALCON512_SIG_MIN_BYTES, FALCON512_SIG_MAX_BYTES
+                );
+                return false;
+            }
+        }
+
+        // 4. Signer list length must match signature list length.
+        if self.bft_signatures.len() != self.bft_signers.len() {
+            tracing::warn!(
+                "Block {}: bft_signatures.len() ({}) != bft_signers.len() ({})",
+                self.index, self.bft_signatures.len(), self.bft_signers.len()
+            );
+            return false;
+        }
+
+        // 5. Chain linkage and timestamp checks (skip for genesis).
         if let Some(prev) = previous_block {
             if self.previous_hash != prev.hash {
-                tracing::warn!("Block {}: previous_hash does not match parent {}", self.index, prev.index);
+                tracing::warn!(
+                    "Block {}: previous_hash mismatch (expected {})",
+                    self.index, prev.hash
+                );
                 return false;
             }
             if self.index != prev.index + 1 {
-                tracing::warn!("Block {}: index {} is not parent index {} + 1", self.index, self.index, prev.index);
+                tracing::warn!(
+                    "Block {}: index {} is not parent {} + 1",
+                    self.index, self.index, prev.index
+                );
                 return false;
             }
             if self.timestamp <= prev.timestamp {
-                tracing::warn!("Block {}: timestamp {} is not after parent timestamp {}", self.index, self.timestamp, prev.timestamp);
+                tracing::warn!(
+                    "Block {}: timestamp {} not after parent timestamp {}",
+                    self.index, self.timestamp, prev.timestamp
+                );
                 return false;
             }
-            let current_time = chrono::Utc::now().timestamp();
-            if self.timestamp > current_time + 7200 {
-                tracing::warn!("Block {}: timestamp {} is more than 2 hours in the future", self.index, self.timestamp);
+            let now = Utc::now().timestamp();
+            if self.timestamp > now + 7200 {
+                tracing::warn!(
+                    "Block {}: timestamp {} is more than 2 hours in the future",
+                    self.index, self.timestamp
+                );
                 return false;
             }
         }
@@ -306,8 +267,28 @@ impl Block {
         true
     }
 
-    /// Get total transaction fees in block (u64 microunits)
-    #[allow(dead_code)]
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    /// Payload that validators sign during the BFT voting round.
+    ///
+    /// CONSENSUS RULE: every validator signs exactly this 32-byte hash.
+    /// Format: SHA3-256("QUANTA_BFT_V2:" || block_hash || epoch_le || round_le)
+    pub fn bft_signing_payload(&self) -> [u8; 32] {
+        use sha3::{Digest, Sha3_256};
+        let mut hasher = Sha3_256::new();
+        hasher.update(b"QUANTA_BFT_V2:");
+        hasher.update(self.hash.as_bytes());
+        hasher.update(&self.epoch.to_le_bytes());
+        hasher.update(&self.bft_round.to_le_bytes());
+        let result = hasher.finalize();
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&result);
+        out
+    }
+
+    /// Total transaction fees in this block (microunits).
     pub fn get_total_fees(&self) -> u64 {
         self.transactions
             .iter()
@@ -317,41 +298,74 @@ impl Block {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    #[ignore] // TODO: Update expected genesis parameters/hashes before Mainnet
-    fn verify_genesis_hash() {
-        let genesis = Block::genesis(crate::core::ChainNetwork::Mainnet);
-        
-        // CONSENSUS-CRITICAL: Genesis block must have these exact parameters
-        assert_eq!(genesis.index, 0);
-        assert_eq!(genesis.timestamp, 1774051200); // 2026-03-21 00:00:00 UTC
-        assert_eq!(genesis.difficulty, 6);
-        assert_eq!(genesis.previous_hash, "0".repeat(64));
-        assert_eq!(genesis.merkle_root, "0".repeat(64));
-        assert_eq!(genesis.state_root, "0".repeat(64));
-        assert_eq!(genesis.transactions.len(), 0);
-        
-        // CRITICAL: Hash must match hardcoded value in blockchain.rs
-        assert_eq!(
-            genesis.hash,
-            "d0f8e765c51672695069e6b91b989eb9d7646e362fbfb0948f5d3ab74ba88edf",
-            "Genesis hash mismatch! This will cause chain splits."
+    fn genesis_v2_hash_is_deterministic() {
+        let g1 = Block::genesis_v2();
+        let g2 = Block::genesis_v2();
+        assert_eq!(g1.hash, g2.hash, "Genesis hash must be deterministic");
+        assert!(!g1.hash.is_empty());
+    }
+
+    #[test]
+    fn genesis_v2_is_valid() {
+        let genesis = Block::genesis_v2();
+        assert!(genesis.is_valid(None), "Genesis block must pass is_valid(None)");
+    }
+
+    #[test]
+    fn bft_block_chain_linkage() {
+        let genesis = Block::genesis_v2();
+        let mut block1 = Block::new_bft(
+            1,
+            vec![],
+            genesis.hash.clone(),
+            0,
+            0,
+            "0xproposer".to_string(),
+        );
+        block1.state_root = "0".repeat(64);
+        block1.finalize_hash();
+
+        assert!(block1.is_valid(Some(&genesis)));
+    }
+
+    #[test]
+    fn tampered_block_fails_validation() {
+        let genesis = Block::genesis_v2();
+        let mut block1 = Block::new_bft(
+            1,
+            vec![],
+            genesis.hash.clone(),
+            0,
+            0,
+            "0xproposer".to_string(),
+        );
+        block1.state_root = "0".repeat(64);
+        block1.finalize_hash();
+
+        // Tamper after hashing
+        block1.epoch = 99;
+        assert!(
+            !block1.is_valid(Some(&genesis)),
+            "Tampered block must fail is_valid()"
         );
     }
 
     #[test]
-    #[ignore] // TODO: Update expected genesis parameters/hashes before Mainnet
-    fn genesis_hash_recalculation() {
-        let genesis = Block::genesis(crate::core::ChainNetwork::Mainnet);
-        let recalculated = genesis.calculate_hash();
-        
+    fn bft_signing_payload_is_deterministic() {
+        let genesis = Block::genesis_v2();
         assert_eq!(
-            genesis.hash, recalculated,
-            "Genesis hash calculation must be deterministic"
+            genesis.bft_signing_payload(),
+            genesis.bft_signing_payload(),
+            "BFT signing payload must be deterministic"
         );
     }
 }

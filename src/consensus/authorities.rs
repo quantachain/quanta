@@ -1,44 +1,74 @@
-/// Quanta 2.0 BFT Authority Registry
+/// Quanta v2 — BFT Authority Helpers
 ///
-/// During the PoW→BFT transition the authority set is entirely DYNAMIC —
-/// validators register by submitting a `Stake` transaction on-chain and their
-/// Falcon-512 public keys are stored in `AccountState::validators`.
+/// Thin wrappers over `AccountState` that the BFT engine uses to build
+/// the per-epoch committee and resolve Falcon-512 public keys for
+/// signature verification.
 ///
-/// This module provides helpers that load the live authority set from an
-/// `AccountState` snapshot.  The old approach of hardcoding placeholder hex
-/// strings is intentionally removed; no off-chain static keys are trusted.
-///
-/// Usage (inside `validate_block_consensus`):
-/// ```rust
-/// let authorities_map = base_state.get_validators();
-/// let threshold = (authorities_map.len() * 2) / 3 + 1;
-/// ```
-/// That is already the approach taken in blockchain.rs; this module is kept
-/// as a documentation anchor and may house helper types in the future.
+/// Validators register via `Stake` transactions; the committee for each
+/// epoch is derived deterministically from the on-chain state — no static
+/// key list is needed.
 
 use crate::core::transaction::AccountState;
 use falcon_rust::falcon512::PublicKey;
 
-/// Return all currently-registered Falcon-512 public keys from `state`.
-///
-/// The order is deterministic (sorted by validator address) so that every node
-/// builds the same `validator_pks` vec when constructing a `FalconKeychain`.
-pub fn get_authority_pks_from_state(state: &AccountState) -> Vec<PublicKey> {
-    let mut entries: Vec<_> = state.get_validators().iter().collect();
-    entries.sort_by_key(|(addr, _)| addr.as_str());
+/// Maximum active validators per epoch committee.
+pub const MAX_COMMITTEE_SIZE: usize = 21;
 
-    entries
-        .iter()
-        .filter_map(|(_, pk_bytes)| {
-            PublicKey::from_bytes(pk_bytes).ok()
-        })
-        .collect()
+/// Epochs a deregistered validator must wait before staked QUA is returned.
+pub const UNBONDING_EPOCHS: u64 = 2;
+
+/// Number of blocks per epoch.
+pub const EPOCH_SIZE: u64 = 1000;
+
+/// Return the epoch number for a given block height.
+#[inline]
+pub fn epoch_for_height(height: u64) -> u64 {
+    height / EPOCH_SIZE
 }
 
-/// Return the addresses in the same sorted order as `get_authority_pks_from_state`.
-/// Used to build the `FalconKeychain` index ↔ address mapping.
-pub fn get_authority_addresses_sorted(state: &AccountState) -> Vec<String> {
-    let mut entries: Vec<_> = state.get_validators().keys().cloned().collect();
-    entries.sort();
-    entries
+/// Return the first block height of an epoch.
+#[inline]
+pub fn epoch_start(epoch: u64) -> u64 {
+    epoch * EPOCH_SIZE
+}
+
+/// Compute the deterministic proposer address for a given slot within an epoch.
+///
+/// Rotation: `slot = height - epoch_start(epoch)`, then round-robin over
+/// the sorted committee.  Consistent across all nodes because the committee
+/// list is sorted by address (secondary key after stake).
+pub fn get_proposer(epoch: u64, height: u64, committee: &[String]) -> Option<String> {
+    if committee.is_empty() {
+        return None;
+    }
+    let epoch_start = epoch_start(epoch);
+    let slot = (height - epoch_start) as usize;
+    Some(committee[slot % committee.len()].clone())
+}
+
+/// Compute the epoch committee from the current `AccountState`.
+///
+/// Returns a sorted list of up to `MAX_COMMITTEE_SIZE` validator addresses.
+/// The list is deterministic: top validators by stake, tie-broken by address.
+pub fn compute_committee(state: &AccountState) -> Vec<String> {
+    state.compute_epoch_committee(MAX_COMMITTEE_SIZE)
+}
+
+/// Resolve the Falcon-512 public keys for a list of committee addresses.
+///
+/// Addresses whose validator record is missing or whose key is malformed
+/// are silently skipped. The returned vec is parallel to `committee`
+/// (same index = same validator).
+pub fn resolve_committee_keys(
+    committee: &[String],
+    state: &AccountState,
+) -> Vec<(String, PublicKey)> {
+    committee
+        .iter()
+        .filter_map(|addr| {
+            let info = state.get_validator_info(addr)?;
+            let pk = PublicKey::from_bytes(&info.falcon_pk).ok()?;
+            Some((addr.clone(), pk))
+        })
+        .collect()
 }
