@@ -80,6 +80,14 @@ enum Commands {
         file: String,
     },
 
+    /// Export your Address and Falcon-512 Public Key to a genesis JSON file.
+    ExportValidator {
+        #[arg(short, long, default_value = "wallet.qua")]
+        wallet: String,
+        #[arg(short, long, default_value = "validator.json")]
+        out: String,
+    },
+
     /// Show wallet balance and info (requires a running node).
     Info {
         #[arg(short, long, default_value = "wallet.json")]
@@ -348,6 +356,23 @@ async fn main() {
                 WalletKind::Raw(w) => println!("{}", w.address),
                 WalletKind::None(e) => die(&e),
             }
+        }
+
+        Commands::ExportValidator { wallet, out } => {
+            let kp = load_keypair_for_signing(&wallet);
+            let public_key_hex = hex::encode(&kp.keypair.public_key);
+            
+            // Generate a simple JSON object string
+            let json = format!(
+                "{{\n  \"address\": \"{}\",\n  \"public_key\": \"{}\"\n}}",
+                kp.address, public_key_hex
+            );
+            
+            std::fs::write(&out, json).unwrap_or_else(|e| die(&format!("Failed to write {}: {}", out, e)));
+            println!("\n Validator keys exported successfully!");
+            println!("  File      : {}", out);
+            println!("  Address   : {}", kp.address);
+            println!("\n Send {} to the network coordinator to be included in the Genesis Block.", out);
         }
 
         Commands::Info { file, node } => {
@@ -731,7 +756,7 @@ fn load_keypair_for_signing(file: &str) -> SigningWallet {
     }
     // Fall back to raw wallet
     let w = QuantumWallet::load_quantum_safe(file, &pwd)
-        .unwrap_or_else(|e| { die(&format!("Failed to load wallet: {}", e)); unreachable!() });
+        .unwrap_or_else(|e| { die(&format!("Failed to load wallet: {}", e)) });
     SigningWallet { address: w.address.clone(), keypair: w.keypair }
 }
 

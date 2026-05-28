@@ -16,7 +16,7 @@ use quanta::crypto::{
 
 // Import falcon-rust directly (same lib WASM uses)
 use falcon_rust::falcon512::{
-    SecretKey, PublicKey, keygen, sign as falcon_sign, verify as falcon_verify,
+    PublicKey, keygen, sign as falcon_sign, verify as falcon_verify,
 };
 use sha3::{Sha3_256, Digest};
 

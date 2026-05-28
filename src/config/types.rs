@@ -16,14 +16,14 @@ pub enum NodeMode {
 }
 
 /// Consensus engine selection
-/// PoS is a planned future upgrade — currently only PoW is implemented.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum ConsensusEngine {
-    /// Proof-of-Work (SHA3-256) — current production consensus
+    /// Proof-of-Work (SHA3-256) — V1 consensus (deprecated)
     ProofOfWork,
-    /// Proof-of-Stake — PLANNED, not yet implemented
-    /// Setting this will cause the node to refuse to start with a clear error.
+    /// Asynchronous Byzantine Fault Tolerance — V2 consensus
+    Bft,
+    /// Proof-of-Stake — Alias for Bft
     ProofOfStake,
 }
 
@@ -41,7 +41,7 @@ pub struct QuantaConfig {
 }
 
 impl QuantaConfig {
-    fn default_engine() -> ConsensusEngine { ConsensusEngine::ProofOfWork }
+    fn default_engine() -> ConsensusEngine { ConsensusEngine::Bft }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,7 +132,7 @@ impl Default for QuantaConfig {
                 enabled: true,
                 port: 9090,
             },
-            consensus_engine: ConsensusEngine::ProofOfWork,
+            consensus_engine: ConsensusEngine::Bft,
         }
     }
 }
