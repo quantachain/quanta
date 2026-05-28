@@ -92,8 +92,8 @@ docker run -d \
   --name quanta-node \
   --restart always \
   --network host \
-  -v quanta-data:/home/quanta/quanta_data \
-  -v quanta-logs:/home/quanta/logs \
+  -v ~/quanta_data:/home/quanta/quanta_data \
+  -v ~/quanta_logs:/home/quanta/logs \
   xd637/quanta-node:latest
 
 docker logs quanta-node --tail 50 -f
@@ -112,8 +112,9 @@ with a wire-format incompatibility (v0.7.0 was the last reset).
 docker stop quanta-node
 docker rm quanta-node
 
-# 2. Delete the chain data volume
-docker volume rm quanta-data
+# 2. Delete the chain data
+rm -rf ~/quanta_data && mkdir -p ~/quanta_data
+rm -rf ~/quanta_logs && mkdir -p ~/quanta_logs
 
 # 3. Pull latest image and start fresh
 docker pull xd637/quanta-node:latest
@@ -121,8 +122,8 @@ docker run -d \
   --name quanta-node \
   --restart always \
   --network host \
-  -v quanta-data:/home/quanta/quanta_data \
-  -v quanta-logs:/home/quanta/logs \
+  -v ~/quanta_data:/home/quanta/quanta_data \
+  -v ~/quanta_logs:/home/quanta/logs \
   xd637/quanta-node:latest
 
 # 4. Watch sync progress
