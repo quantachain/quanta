@@ -1,166 +1,132 @@
-/// Quanta 2.0 BFT Block Proposer
+/// Quanta v2 — BFT Block Proposer Loop
 ///
-/// Replaces PoW mining after `QUANTA_V2_FORK_HEIGHT`.  Each validator node
-/// runs this loop:
+/// Each validator node runs this task in the background.
 ///
-///   1. Wait until our slot starts (slot = (now - genesis_ts) / SLOT_SECONDS).
-///   2. Propose a block by building a template and broadcasting it.
-///   3. Collect `VoteMsg` from ≥ 2f+1 validators (each a Falcon-512 sig over the
-///      block hash).
-///   4. Assemble the `bft_signatures` vec and call `Blockchain::add_bft_block`.
-///   5. Broadcast the finalised block to the network.
+/// # Protocol (per slot)
 ///
-/// The design intentionally keeps AlephBFT as an optional async layer that can
-/// be added later; for the initial production release the simpler single-leader
-/// per-slot model below is sufficient for the small validator set.
+///   1. Determine if we are the proposer for this block height.
+///   2. Build a block template from the mempool.
+///   3. Broadcast `BftProposal` to all peers.
+///   4. Wait up to 2/3 of the slot window for `BftPrecommit` messages.
+///   5. Once ≥ ⌈2/3⌉ committee members have signed, assemble the BFT
+///      certificate and call `Blockchain::add_network_block()`.
+///   6. Broadcast the certified block to all peers.
+///
+/// Non-proposer validators verify incoming proposals and broadcast their
+/// own precommit via the `handle_bft_proposal()` function.
+
 use std::sync::Arc;
 use tokio::sync::{watch, RwLock};
-use sha3::{Digest, Sha3_256};
-use chrono::Utc;
 use tracing::{info, warn, error};
+use chrono::Utc;
 
-use crate::consensus::blockchain::{Blockchain, BlockchainError, QUANTA_V2_FORK_HEIGHT};
+use crate::consensus::authorities::{
+    compute_committee, epoch_for_height, epoch_start, get_proposer, EPOCH_SIZE, MAX_COMMITTEE_SIZE,
+};
+use crate::consensus::bft::{verify_bft_certificate, BftVoteCollector, sign_bft_vote};
+use crate::consensus::Blockchain;
+use crate::core::block::Block;
 use crate::crypto::wallet::QuantumWallet;
 use crate::network::Network;
 
-/// Duration of a single BFT slot in seconds.
-/// Validators propose one block per slot; unused slots are skipped.
-pub const SLOT_SECONDS: u64 = 30;
+/// Duration of a single BFT slot (= one block target time).
+pub const SLOT_SECONDS: u64 = 6;
 
-/// Unix timestamp of block 0 on Testnet (used for slot calculation).
-/// Must match Block::genesis(Testnet).timestamp.
-const TESTNET_GENESIS_TS: i64 = 1_775_001_600;
+/// How long the proposer waits for votes before giving up (2/3 of slot time).
+const VOTE_COLLECTION_MS: u64 = (SLOT_SECONDS * 1000 * 2) / 3;
 
-/// A vote message from one validator: their Falcon-512 signature over the
-/// canonical "QUANTA_BFT_V1:" || chain_id || block_hash bytes.
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct VoteMsg {
-    pub block_hash: String,
-    pub height: u64,
-    pub validator_address: String,
-    pub signature: Vec<u8>,
+// ---------------------------------------------------------------------------
+// Non-proposer: handle an incoming block proposal
+// ---------------------------------------------------------------------------
+
+/// Called by a validator node when it receives a `BftProposal` from the
+/// current proposer.
+///
+/// Validates the proposal and — if valid — broadcasts a `BftPrecommit`
+/// signed with the local wallet key.
+///
+/// Returns `Some(sig)` if we signed and it should be broadcast, `None`
+/// if the proposal was rejected.
+pub async fn handle_bft_proposal(
+    block: &Block,
+    blockchain: &Arc<RwLock<Blockchain>>,
+    wallet: &QuantumWallet,
+) -> Option<Vec<u8>> {
+    let bc = blockchain.read().await;
+
+    // Basic structural validation.
+    let prev = bc.get_block_by_index(block.index.saturating_sub(1));
+    if !block.is_valid(prev.as_deref()) {
+        warn!("BFT: received invalid proposal for height {}", block.index);
+        return None;
+    }
+
+    // Committee check.
+    let state = bc.get_account_state_snapshot();
+    let committee = compute_committee(&state);
+    if !committee.contains(&block.proposer) {
+        warn!("BFT: proposer {} not in committee", block.proposer);
+        return None;
+    }
+
+    // Sign the BFT payload.
+    let payload = block.bft_signing_payload();
+    let sig = sign_bft_vote(&wallet.keypair, &payload);
+
+    info!(
+        "BFT: signed precommit for height {} (proposer={})",
+        block.index, block.proposer
+    );
+    Some(sig)
 }
 
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub enum BftProtocolMsg {
-    Vote(VoteMsg),
-    Proposal(crate::core::block::Block),
-}
+// ---------------------------------------------------------------------------
+// Proposer loop
+// ---------------------------------------------------------------------------
 
-/// Return the current BFT slot number relative to genesis.
-pub fn current_slot(genesis_ts: i64) -> u64 {
-    let elapsed = (Utc::now().timestamp() - genesis_ts).max(0) as u64;
-    elapsed / SLOT_SECONDS
-}
-
-/// Sign a block hash with the validator's Falcon-512 key, using the same
-/// domain prefix as `FalconKeychain::sign` in bft.rs.
-pub fn sign_block_hash(wallet: &QuantumWallet, block_hash: &str, chain_id: u32) -> Vec<u8> {
-    let mut hasher = Sha3_256::new();
-    hasher.update(b"QUANTA_BFT_V1:");
-    hasher.update(&chain_id.to_le_bytes());
-    hasher.update(block_hash.as_bytes());
-    let digest = hasher.finalize();
-    wallet.keypair.sign_transaction_canonical(&digest)
-}
-
-/// Verify a vote signature from a known validator public key.
-pub fn verify_vote(
-    block_hash: &str,
-    chain_id: u32,
-    sig_bytes: &[u8],
-    pk_bytes: &[u8],
-) -> bool {
-    let mut hasher = Sha3_256::new();
-    hasher.update(b"QUANTA_BFT_V1:");
-    hasher.update(&chain_id.to_le_bytes());
-    hasher.update(block_hash.as_bytes());
-    let digest = hasher.finalize();
-
-    let pk = match falcon_rust::falcon512::PublicKey::from_bytes(pk_bytes) {
-        Ok(pk) => pk,
-        Err(_) => return false,
-    };
-    let sig = match falcon_rust::falcon512::Signature::from_bytes(sig_bytes) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-    falcon_rust::falcon512::verify(&digest, &sig, &pk)
-}
-
-/// The main BFT proposer task.  Spawn this with `tokio::spawn` after the chain
-/// reaches `QUANTA_V2_FORK_HEIGHT - 1`.
+/// Main BFT proposer loop.  Spawn this with `tokio::spawn` for every
+/// validator node.  Observers (non-validators) do NOT run this.
 ///
 /// # Parameters
-/// - `blockchain` — shared blockchain state
-/// - `wallet`     — this validator's signing wallet
-/// - `network`    — P2P network handle for broadcasting
-/// - `chain_id`   — 1 = Mainnet, 0 = Testnet
-/// - `new_block_rx` — watch channel from `Blockchain::subscribe_new_blocks()`
+/// - `blockchain`   — shared chain state
+/// - `wallet`       — this validator's signing key
+/// - `network`      — P2P handle for broadcasting proposals and blocks
+/// - `new_block_rx` — notified whenever a new block is added to the chain
 pub async fn run_bft_proposer(
     blockchain: Arc<RwLock<Blockchain>>,
     wallet: Arc<QuantumWallet>,
     network: Option<Arc<Network>>,
-    chain_id: u32,
     mut new_block_rx: watch::Receiver<u64>,
 ) {
-    info!("BFT Proposer: starting (chain_id={})", chain_id);
-
-    // Derive genesis timestamp from the first block on disk.
-    let genesis_ts = {
-        let bc = blockchain.read().await;
-        let g = bc.get_latest_block(); // returns genesis when height == 1
-        // For robustness fall back to the hardcoded testnet constant.
-        if g.index == 0 { g.timestamp } else { TESTNET_GENESIS_TS }
-    };
+    info!("BFT Proposer: starting (validator={})", wallet.address);
 
     loop {
-        // ── Wait for our chain to be at or past the fork height ────────────
-        let height = blockchain.read().await.get_height();
-        if height < QUANTA_V2_FORK_HEIGHT {
-            let blocks_left = QUANTA_V2_FORK_HEIGHT - height;
-            info!(
-                "BFT Proposer: chain at {}, fork at {} ({} blocks remaining via PoW)",
-                height, QUANTA_V2_FORK_HEIGHT, blocks_left
-            );
-            // Sleep for one slot then re-check.
+        // ── Get current chain state ─────────────────────────────────────────
+        let (height, committee, state_snapshot) = {
+            let bc = blockchain.read().await;
+            let h = bc.get_height();
+            let snap = bc.get_account_state_snapshot();
+            let c = compute_committee(&snap);
+            (h, c, snap)
+        };
+
+        let next_height = height + 1;
+        let epoch = epoch_for_height(next_height);
+
+        // ── Are we the proposer for next_height? ────────────────────────────
+        let my_address = wallet.address.clone();
+        let proposer = get_proposer(epoch, next_height, &committee);
+
+        let am_proposer = proposer.as_deref() == Some(my_address.as_str());
+
+        if committee.is_empty() {
+            warn!("BFT Proposer: no active validators — waiting...");
             tokio::time::sleep(tokio::time::Duration::from_secs(SLOT_SECONDS)).await;
             continue;
         }
 
-        // ── Compute our slot and how long until it starts ──────────────────
-        let slot = current_slot(genesis_ts);
-        let slot_start_ts = genesis_ts + (slot as i64 * SLOT_SECONDS as i64);
-        let now = Utc::now().timestamp();
-        let wait_ms = ((slot_start_ts - now).max(0) as u64) * 1000;
-
-        if wait_ms > 0 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(wait_ms)).await;
-        }
-
-        // ── Am I the leader for this slot? ─────────────────────────────────
-        // Leader = validator_index % n_validators == slot % n_validators
-        // We determine our index from position in the sorted validator map.
-        let (am_leader, n_validators) = {
-            let bc = blockchain.read().await;
-            let validators = bc.get_account_state_read().get_validators().clone();
-            let n = validators.len();
-            if n == 0 {
-                warn!("BFT Proposer: no validators registered yet, skipping slot {}", slot);
-                (false, 0usize)
-            } else {
-                // Sort by address for deterministic ordering across all nodes.
-                let mut addrs: Vec<&String> = validators.keys().collect();
-                addrs.sort();
-                let my_idx = addrs.iter().position(|a| *a == &wallet.address);
-                let leader_idx = (slot as usize) % n;
-                (my_idx == Some(leader_idx), n)
-            }
-        };
-
-        if !am_leader {
-            // Not our slot — just wait for the next new_block notification
-            // or timeout after one slot.
+        if !am_proposer {
+            // Not our slot — wait for a new block or timeout.
             tokio::select! {
                 _ = new_block_rx.changed() => {}
                 _ = tokio::time::sleep(tokio::time::Duration::from_secs(SLOT_SECONDS)) => {}
@@ -168,10 +134,15 @@ pub async fn run_bft_proposer(
             continue;
         }
 
-        info!("BFT Proposer: I am leader for slot {} (height {})", slot, height);
+        info!(
+            "BFT Proposer: I am proposer for height {} (epoch={}, committee_size={})",
+            next_height, epoch, committee.len()
+        );
 
-        // ── Build block template ───────────────────────────────────────────
-        let mut block = match blockchain.read().await.create_block_template(wallet.address.clone()) {
+        // ── Build block template ────────────────────────────────────────────
+        let mut block = match blockchain.read().await
+            .create_bft_block_template(next_height, my_address.clone(), epoch, 0)
+        {
             Ok(b) => b,
             Err(e) => {
                 error!("BFT Proposer: failed to build block template: {}", e);
@@ -180,103 +151,82 @@ pub async fn run_bft_proposer(
             }
         };
 
-        // Recalculate the hash after template creation (nonce = 0, difficulty = 0 for BFT)
-        block.difficulty = 0; // BFT blocks carry no PoW difficulty
-        block.hash = block.calculate_hash();
+        // Self-sign (proposer also votes).
+        let payload = block.bft_signing_payload();
+        let my_sig = sign_bft_vote(&wallet.keypair, &payload);
 
-        // ── Self-sign the block (leader's own vote) ─────────────────────────
-        let my_sig = sign_block_hash(&wallet, &block.hash, chain_id);
-        block.bft_signatures.push(my_sig.clone());
-
-        // ── Broadcast the proposal and collect votes ────────────────────────
-        // In the full AlephBFT integration, this would call aleph_bft::run().
-        // For the initial production release, we broadcast a "BlockProposal"
-        // P2P message and collect VoteMsg replies within a 2/3 of slot_time window.
-        //
-        // For now we collect votes via the network gossip layer.
-        // Votes arrive as `VoteMsg` in the `VoteMessages` P2P channel.
-
-        let threshold = (n_validators * 2) / 3 + 1;
-        let collection_deadline = tokio::time::Instant::now()
-            + tokio::time::Duration::from_secs(SLOT_SECONDS * 2 / 3);
-
-        // Broadcast our proposal to peers so they can vote.
+        // ── Broadcast proposal ──────────────────────────────────────────────
         if let Some(ref net) = network {
             net.broadcast_bft_proposal(block.clone()).await;
         }
 
-        // Collect remote votes.  The P2P layer delivers them via a channel.
-        // We wait until we have a super-majority or the deadline passes.
-        // (The actual vote-collection channel will be wired in Network v2.)
-        // For now we finalize with just our own signature if no peers are present
-        // (single-validator testnet scenario).
+        // ── Collect votes (precommits) ──────────────────────────────────────
+        let mut collector = BftVoteCollector::new(
+            next_height,
+            0, // round 0
+            epoch,
+            committee.len(),
+        );
+        // Include our own vote.
+        collector.add_precommit(my_address.clone(), my_sig);
 
-        // Poll until deadline.
-        while tokio::time::Instant::now() < collection_deadline {
-            let current_sigs = block.bft_signatures.len();
-            if current_sigs >= threshold {
-                break;
-            }
+        let deadline = tokio::time::Instant::now()
+            + tokio::time::Duration::from_millis(VOTE_COLLECTION_MS);
 
-            // Try to get votes from the network layer (non-blocking peek)
+        while tokio::time::Instant::now() < deadline && !collector.has_precommit_quorum() {
             if let Some(ref net) = network {
                 let votes = net.drain_vote_messages(&block.hash).await;
                 for vote in votes {
-                    // Verify the vote is from a known validator with valid signature
-                    let bc = blockchain.read().await;
-                    let validators = bc.get_account_state_read().get_validators().clone();
-                    drop(bc);
+                    // Only accept votes from committee members with valid sigs.
+                    if !committee.contains(&vote.validator) {
+                        continue;
+                    }
+                    let pk_opt = state_snapshot
+                        .get_validator_info(&vote.validator)
+                        .map(|v| v.falcon_pk.clone());
 
-                    if let Some(pk_bytes) = validators.get(&vote.validator_address) {
-                        if verify_vote(&block.hash, chain_id, &vote.signature, pk_bytes) {
-                            // De-duplicate by checking we don't already have a sig
-                            // from this validator (compare the first 8 bytes as a cheap key)
-                            let already_seen = block.bft_signatures.iter().any(|s| {
-                                s.len() >= 8 && vote.signature.len() >= 8 && s[..8] == vote.signature[..8]
-                            });
-                            if !already_seen {
-                                block.bft_signatures.push(vote.signature);
-                            }
+                    if let Some(pk) = pk_opt {
+                        let vote_payload = block.bft_signing_payload();
+                        if crate::crypto::verify_signature_strict(&vote_payload, &vote.signature, &pk) {
+                            collector.add_precommit(vote.validator, vote.signature);
                         }
                     }
                 }
             }
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
 
-        let collected = block.bft_signatures.len();
-        if collected < threshold {
+        // ── Assemble certificate or bail ────────────────────────────────────
+        if !collector.has_precommit_quorum() {
             warn!(
-                "BFT Proposer: slot {} timed out with only {}/{} signatures — skipping block",
-                slot, collected, threshold
+                "BFT Proposer: height {} — timed out without quorum, skipping",
+                next_height
             );
             continue;
         }
 
-        info!(
-            "BFT Proposer: slot {} — assembled certificate with {}/{} signatures",
-            slot, collected, n_validators
-        );
+        let (sigs, signers) = collector.extract_certificate();
+        block.bft_signatures = sigs;
+        block.bft_signers = signers;
+        block.finalize_hash(); // rehash after adding certificate
 
-        // ── Submit the finalised BFT block ─────────────────────────────────
+        // ── Submit ──────────────────────────────────────────────────────────
         match blockchain.write().await.add_network_block(block.clone()) {
             Ok(_) => {
                 info!(
-                    "✓ BFT block {} finalised at slot {} ({} validator signatures)",
-                    block.index, slot, block.bft_signatures.len()
+                    "✓ BFT block {} finalised ({} sigs)",
+                    block.index, block.bft_signatures.len()
                 );
-                // Broadcast the fully-certified block to peers.
                 if let Some(ref net) = network {
-                    net.broadcast_block(block.clone()).await;
+                    net.broadcast_block(block).await;
                 }
             }
             Err(e) => {
-                error!("BFT Proposer: failed to add BFT block {}: {}", block.index, e);
+                error!("BFT Proposer: failed to add block {}: {}", block.index, e);
             }
         }
 
-        // Brief pause before next slot calculation
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        // Yield briefly so the chain state can update before the next slot.
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 }
