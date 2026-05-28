@@ -62,15 +62,21 @@ pub struct NetworkMessage {
     pub message: P2PMessage,
 }
 
-/// Simplified block header for efficient sync
+/// Simplified block header for efficient sync (v2 BFT)
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BlockHeader {
     pub index: u64,
     pub timestamp: i64,
     pub previous_hash: String,
     pub hash: String,
-    pub nonce: u64,
-    pub difficulty: u32,
+    /// BFT epoch this block belongs to.
+    pub epoch: u64,
+    /// Tendermint round in which this block was committed.
+    pub bft_round: u32,
+    /// Address of the proposer.
+    pub proposer: String,
+    /// Number of BFT signatures in the certificate.
+    pub sig_count: usize,
     pub cumulative_work: u128,
     #[serde(default)]
     pub state_root: String,
@@ -83,16 +89,18 @@ impl From<&Block> for BlockHeader {
             timestamp: block.timestamp,
             previous_hash: block.previous_hash.clone(),
             hash: block.hash.clone(),
-            nonce: block.nonce,
-            difficulty: block.difficulty,
-            cumulative_work: 0, // Should be populated by the sender using block context
+            epoch: block.epoch,
+            bft_round: block.bft_round,
+            proposer: block.proposer.clone(),
+            sig_count: block.bft_signatures.len(),
+            cumulative_work: 0, // Populated by sender
             state_root: block.state_root.clone(),
         }
     }
 }
 
 /// Protocol constants
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2; // v2: BFT from genesis
 pub const MAX_MESSAGE_SIZE: usize = 4 * 1024 * 1024; // 4MB (Increased for Falcon signatures)
 pub const PING_INTERVAL_SECS: u64 = 60;
 pub const PEER_TIMEOUT_SECS: u64 = 180;

@@ -1,32 +1,30 @@
-/// Quanta PQC Benchmark — Block Construction & Compression
+/// Quanta v2 BFT Benchmark — Block Construction & Compression
 ///
 /// Measures:
 ///   - Block hash computation time (`calculate_hash`)
 ///   - Merkle tree construction (1 / 10 / 100 / 500 / 1200 transactions)
 ///   - Block serialization speed (bincode)
 ///   - zstd compression ratio and throughput (Level 3 = production default)
-///   - Block decompression throughput
-///   - PoW hashrate (10-second timed run + extrapolation)
-///   - PoW full solve at current difficulty (optional, may take minutes)
+///   - BFT signing latency (Falcon-512 precommit signature)
+///
+/// NOTE: PoW hashrate benchmarks removed in v2. Quanta v2 uses BFT consensus
+/// from genesis. There is no mining or PoW difficulty.
 
-use std::time::{Instant, Duration};
+use std::time::Instant;
 use std::hint::black_box;
 use crate::core::block::Block;
 use crate::core::transaction::Transaction;
-use crate::core::ChainNetwork;
 use crate::crypto::signatures::FalconKeypair;
 use crate::core::merkle::MerkleTree;
 use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
 use crate::benchmark::crypto_bench::{stat, stat_us};
 use crate::benchmark::tx_bench::make_signed_tx;
-use crate::consensus::blockchain::MIN_DIFFICULTY;
-use chrono::Utc;
 
 /// Tx counts to test for Merkle / block construction
 const TX_COUNTS: &[usize] = &[1, 10, 100, 500, 1200];
 
-pub fn run(iterations: usize, full_pow_solve: bool) -> BenchmarkSection {
-    println!("  [4/6] Block Construction & Compression...");
+pub fn run(iterations: usize, _full_pow_solve: bool) -> BenchmarkSection {
+    println!("  [4/6] Block Construction & Compression (v2 BFT)...");
 
     let mut stats = Vec::new();
 
@@ -37,9 +35,9 @@ pub fn run(iterations: usize, full_pow_solve: bool) -> BenchmarkSection {
         .map(|i| make_signed_tx(&wallets[i % wallets.len()], (i / wallets.len() + 1) as u64))
         .collect();
 
-    // ── Block hash computation ────────────────────────────────────────────────────────────
+    // ── Block hash computation ──────────────────────────────────────────────────
     {
-        let genesis = Block::genesis(ChainNetwork::Testnet);
+        let genesis = Block::genesis_v2();
         let n = iterations;
         let mut samples = Vec::with_capacity(n);
         for _ in 0..n {
@@ -47,9 +45,8 @@ pub fn run(iterations: usize, full_pow_solve: bool) -> BenchmarkSection {
             let _h = black_box(genesis.calculate_hash());
             samples.push(t.elapsed().as_secs_f64() * 1_000_000.0); // µs
         }
-        // stat_us: throughput = 1_000_000 / mean_µs = ops/sec
         let mut s = stat_us("Block Hash Computation (SHA3-256 double)", "µs/op", &samples);
-        s.note = Some("SHA3-256(SHA3-256(header)) — used for PoW mining".to_string());
+        s.note = Some("SHA3-256(SHA3-256(header)) — used for BFT block ID".to_string());
         stats.push(s);
     }
 
@@ -71,11 +68,13 @@ pub fn run(iterations: usize, full_pow_solve: bool) -> BenchmarkSection {
     // ── Block serialization + compression ─────────────────────────────────────
     for &n_tx in TX_COUNTS {
         let txs = &signed_txs[..n_tx.min(signed_txs.len())];
-        let block = Block::new(
+        let block = Block::new_bft(
             1,
             txs.to_vec(),
             "0".repeat(64),
-            MIN_DIFFICULTY,
+            0,
+            0,
+            "0xbenchmarkproposer".to_string(),
         );
 
         // Raw serialization
@@ -119,104 +118,33 @@ pub fn run(iterations: usize, full_pow_solve: bool) -> BenchmarkSection {
             n_tx, raw_bytes / 1024, compressed_size / 1024, ratio);
     }
 
-    // ── PoW Hashrate: 10-second timed run ─────────────────────────────────────
+    // ── BFT Precommit Signing ─────────────────────────────────────────────────
     {
-        println!("        Mining hashrate test (10 sec)...");
-        let mut block = Block::new(
-            99999,
-            vec![],
-            "0".repeat(64),
-            MIN_DIFFICULTY,
-        );
-        // Temporarily set a very easy target so we can measure raw hash rate
-        block.difficulty = 1; // accept any hash
-        let mut hash_count = 0u64;
-        let start = Instant::now();
-        let deadline = Duration::from_secs(10);
-        while start.elapsed() < deadline {
-            block.hash = block.calculate_hash();
-            block.nonce = block.nonce.wrapping_add(1);
-            hash_count += 1;
+        println!("        BFT precommit signing benchmark...");
+        let kp = FalconKeypair::generate();
+        let genesis = Block::genesis_v2();
+        let payload = genesis.bft_signing_payload();
+
+        let n = iterations.min(50); // Falcon-512 signing is slow
+        let mut samples = Vec::with_capacity(n);
+        for _ in 0..n {
+            let t = Instant::now();
+            let _sig = black_box(kp.sign_hash(&payload));
+            samples.push(t.elapsed().as_secs_f64() * 1000.0);
         }
-        let elapsed = start.elapsed().as_secs_f64();
-        let hashrate = hash_count as f64 / elapsed;
-        let hashrate_kh = hashrate / 1000.0;
-
-        stats.push(BenchmarkStat {
-            name: "PoW Hashrate (10-sec timed run)".to_string(),
-            unit: "kH/s".to_string(),
-            iterations: hash_count as usize,
-            mean_ms: (elapsed * 1000.0) / hash_count as f64,
-            stddev_ms: 0.0,
-            min: (elapsed * 1000.0) / hash_count as f64,
-            max: (elapsed * 1000.0) / hash_count as f64,
-            p50: (elapsed * 1000.0) / hash_count as f64,
-            p95: (elapsed * 1000.0) / hash_count as f64,
-            p99: (elapsed * 1000.0) / hash_count as f64,
-            throughput: Some(hashrate),
-            note: Some(format!(
-                "{:.1} kH/s  ({} hashes in {:.1}s)  Current network difficulty: {} → avg solve time: {:.1}s",
-                hashrate_kh,
-                hash_count,
-                elapsed,
-                MIN_DIFFICULTY,
-                MIN_DIFFICULTY as f64 / hashrate
-            )),
-        });
-        println!("        Hashrate: {:.1} kH/s  (est. solve time at diff {}: {:.1}s)",
-            hashrate_kh, MIN_DIFFICULTY, MIN_DIFFICULTY as f64 / hashrate);
-    }
-
-    // ── PoW Full Difficulty Solve ──────────────────────────────────────────────
-    if full_pow_solve {
-        println!("        Full PoW solve at difficulty {} (may take minutes)...", MIN_DIFFICULTY);
-        let mut block = Block::new(
-            100000,
-            vec![],
-            "0".repeat(64),
-            MIN_DIFFICULTY,
-        );
-        let t = Instant::now();
-        let mut hash_count = 0u64;
-        loop {
-            block.hash = block.calculate_hash();
-            hash_count += 1;
-            if block.has_valid_hash() { break; }
-            block.nonce = block.nonce.wrapping_add(1);
-        }
-        let elapsed_s = t.elapsed().as_secs_f64();
-        let hashrate = hash_count as f64 / elapsed_s;
-
-        stats.push(BenchmarkStat {
-            name: "PoW Full Solve (actual difficulty)".to_string(),
-            unit: "s".to_string(),
-            iterations: 1, // single solve — not an iterated benchmark
-            mean_ms: elapsed_s,
-            stddev_ms: 0.0,
-            min: elapsed_s,
-            max: elapsed_s,
-            p50: elapsed_s,
-            p95: elapsed_s,
-            p99: elapsed_s,
-            throughput: Some(hashrate),
-            note: Some(format!(
-                "Solved in {:.2}s | Difficulty={} | Nonce={} | Hashes={} | Hash={:.16}...",
-                elapsed_s, MIN_DIFFICULTY, block.nonce, hash_count, &block.hash[..16]
-            )),
-        });
-        println!("        Solved in {:.2}s  nonce={}  hash={}...",
-            elapsed_s, block.nonce, &block.hash[..16]);
+        let mut s = stat("BFT Precommit Sign (Falcon-512)", "ms", &samples);
+        s.note = Some("Signs 32-byte bft_signing_payload() with Falcon-512".to_string());
+        stats.push(s);
     }
 
     BenchmarkSection {
-        name: "Block Construction & Mining".to_string(),
+        name: "Block Construction & BFT Signing".to_string(),
         description: format!(
-            "Block construction, Merkle tree, zstd compression (level 3), and PoW mining.\n\
+            "Block construction, Merkle tree, zstd compression (level 3), and BFT signing.\n\
              Max block size: 2 MB. Max transactions per block: 1200 (Falcon-512 size constraint).\n\
              Compression saves ~{:.1}× bandwidth on average for production blocks.\n\
-             Full PoW solve: {}",
+             PoW mining REMOVED in v2 — Quanta v2 uses Tendermint-style BFT from genesis.",
             3.5_f64,
-            if full_pow_solve { "YES (included)" } else { "SKIPPED (use --full-pow to enable)" }
         ),
         stats,
     }
