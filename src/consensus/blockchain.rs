@@ -335,7 +335,7 @@ impl Blockchain {
         // Note: Mainnet hash is hardcoded constant. Testnet hash should be calculated or hardcoded once known.
         // For now, we trust the generated testnet genesis if it's testnet.
         
-        let (chain, mut account_state) = if height == 0 {
+        let (chain, account_state) = if height == 0 {
             // Create genesis block
             tracing::info!("Creating new blockchain with genesis block for {:?}", network);
             let genesis = Block::genesis();
@@ -403,6 +403,7 @@ impl Blockchain {
                     tx_type: crate::core::transaction::TransactionType::Transfer,
                     sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
                     network_id: 0, // Testnet; system tx bypasses sig check
+                    payload: vec![],
                 };
                 // Pass coinbase_maturity=0: premine coins unlock at height 0 (immediately).
                 // COINBASE_MATURITY (100) only applies to block-reward coinbase outputs.
@@ -467,6 +468,7 @@ impl Blockchain {
                         tx_type: crate::core::transaction::TransactionType::Transfer,
                         sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
                         network_id: 0,
+                        payload: vec![],
                     };
                     healed_state.credit_account(&gtx, 0, 0);
                 }
@@ -514,7 +516,7 @@ impl Blockchain {
                 tracing::info!("[Migration] Computing cumulative work for {} blocks (one-time)…", height);
                 let mut work = 0u128;
                 for h in 0..height {
-                    if let Ok(b) = storage.load_block(h) {
+                    if let Ok(_b) = storage.load_block(h) {
                         work = work.saturating_add(1u128); // BFT: 1 unit per block
                     }
                 }
@@ -711,7 +713,7 @@ impl Blockchain {
 
     /// Create a block template for mining (does not mine or save)
     pub fn create_block_template(&self, miner_address: String) -> Result<Block, BlockchainError> {
-        let reward = self.get_mining_reward();
+        let reward = self.get_block_reward();
         
         let current_height = self.get_height();
         
@@ -804,6 +806,7 @@ impl Blockchain {
             tx_type: crate::core::transaction::TransactionType::Transfer,
             sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
             network_id: self.network.network_id(),
+            payload: vec![],
         };
         
         // Treasury allocation transaction (if any)
@@ -823,6 +826,7 @@ impl Blockchain {
                 tx_type: crate::core::transaction::TransactionType::Transfer,
                 sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
                 network_id: self.network.network_id(),
+                payload: vec![],
             };
             all_transactions.push(treasury_tx);
         }
@@ -953,6 +957,7 @@ impl Blockchain {
             tx_type: crate::core::transaction::TransactionType::Transfer,
             sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
             network_id: self.network.network_id(),
+            payload: vec![],
         };
 
         let mut all_transactions = vec![coinbase_tx];
@@ -970,6 +975,7 @@ impl Blockchain {
                 tx_type: crate::core::transaction::TransactionType::Transfer,
                 sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
                 network_id: self.network.network_id(),
+                payload: vec![],
             };
             all_transactions.push(treasury_tx);
         }
@@ -1580,7 +1586,7 @@ impl Blockchain {
             chain_length: height as usize,
             total_transactions,
             current_epoch,
-            mining_reward: self.get_mining_reward(),
+            mining_reward: self.get_block_reward(),
             total_supply: self.calculate_total_supply(),
             pending_transactions: pending.len(),
         }
@@ -2007,6 +2013,7 @@ impl Blockchain {
                 tx_type:   crate::core::transaction::TransactionType::Transfer,
                 sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
                 network_id: 0,
+                payload: vec![],
             };
             state.credit_account(&genesis_tx, 0, 0); // maturity=0 → immediately spendable
         }

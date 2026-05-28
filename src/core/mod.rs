@@ -1,6 +1,7 @@
 pub mod block;
 pub mod transaction;
 pub mod merkle;
+pub mod contracts;
 
 #[allow(unused_imports)]
 pub use block::Block;

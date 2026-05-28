@@ -241,6 +241,7 @@ fn build_account_state(n: usize) -> AccountState {
             tx_type: crate::core::transaction::TransactionType::Transfer,
             sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
             network_id: 0,
+            payload: vec![],
         };
         state.credit_account(&tx, 0, 0);
     }

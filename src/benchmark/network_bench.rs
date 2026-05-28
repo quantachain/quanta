@@ -321,6 +321,7 @@ fn build_test_tx(pk_bytes: &[u8], sk_bytes: &[u8], sender: &str, nonce: u64) -> 
         tx_type: TransactionType::Transfer,
         sig_scheme: SignatureScheme::Falcon512,
         network_id: TESTNET_NETWORK_ID,
+        payload: vec![],
     };
     // Sign with falcon-rust (NOT pqcrypto) to match verify_signature_strict()
     tx.signature = sign_with_falcon_rust(sk_bytes, &tx.get_signing_bytes());

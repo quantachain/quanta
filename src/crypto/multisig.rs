@@ -181,6 +181,7 @@ impl TreasuryMultisig {
             tx_type:    crate::core::transaction::TransactionType::Transfer,
             sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
             network_id: 0, // Default Testnet; caller should set to config.network_type.network_id()
+            payload: vec![],
         };
         MultiSigTransaction {
             base_tx,
@@ -354,6 +355,7 @@ impl TreasuryMultisigV2 {
             tx_type:    crate::core::transaction::TransactionType::Transfer,
             sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
             network_id: 0, // Default Testnet; caller should set to config.network_type.network_id()
+            payload: vec![],
         };
         MultiSigTransaction {
             base_tx,

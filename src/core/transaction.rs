@@ -80,8 +80,10 @@ pub struct Transaction {
     /// before signing.
     #[serde(default)]
     pub network_id: u32,
+    /// Arbitrary metadata payload (e.g. for AI agent data provenance or contract arguments).
+    #[serde(default)]
+    pub payload: Vec<u8>,
 }
-
 /// Transaction types supported by the protocol.
 ///
 /// FROZEN VALUES — do not reorder or delete; only append.
@@ -136,6 +138,7 @@ impl Transaction {
             // Default to Testnet (0). The caller must override with
             // `tx.network_id = config.network_type.network_id()` before signing.
             network_id: TESTNET_NETWORK_ID,
+            payload: vec![],
         }
     }
 
@@ -161,6 +164,7 @@ impl Transaction {
             tx_type: TransactionType::TimeLockTransfer { unlock_height },
             sig_scheme: SignatureScheme::Falcon512,
             network_id: TESTNET_NETWORK_ID,
+            payload: vec![],
         }
     }
 
@@ -198,6 +202,9 @@ impl Transaction {
         // Include network_id so that cross-chain replay attacks fail.
         // A Testnet signature (network_id=0) is invalid on Mainnet (1).
         buf.extend_from_slice(&self.network_id.to_le_bytes());
+        // Include payload (length prefix + bytes)
+        buf.extend_from_slice(&(self.payload.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&self.payload);
 
         match &self.tx_type {
             TransactionType::Transfer => buf.push(0u8),
@@ -453,7 +460,7 @@ pub struct AccountState {
     validators: HashMap<String, ValidatorInfo>,
     /// Deployed smart contracts (contract address → ContractState).
     #[serde(default)]
-    contracts: HashMap<String, ContractState>,
+    pub contracts: HashMap<String, ContractState>,
 }
 
 impl AccountState {
@@ -503,6 +510,9 @@ impl AccountState {
     ///   - Coinbase credits are locked until `current_height + coinbase_maturity`.
     ///   - Regular credits are immediately spendable.
     pub fn credit_account(&mut self, tx: &Transaction, current_height: u64, coinbase_maturity: u64) {
+        // Automatically route any ContractDeploy/ContractCall logic
+        crate::core::contracts::NativeContracts::execute(self, tx, current_height);
+
         if tx.amount == 0 {
             return;
         }
@@ -548,6 +558,21 @@ impl AccountState {
         } else {
             false
         }
+    }
+
+    /// Directly credit an account with a specific amount (spendable immediately).
+    /// Useful for internal contract transfers (e.g. Escrow unlocking).
+    pub fn credit_account_direct(&mut self, address: &str, amount: u64) {
+        if amount == 0 {
+            return;
+        }
+        let account = self.accounts.entry(address.to_string()).or_insert(AccountBalance {
+            address: address.to_string(),
+            balance: 0,
+            nonce: 0,
+            locked_balances: Vec::new(),
+        });
+        account.balance = account.balance.saturating_add(amount);
     }
 
     /// Move mature coinbase balances into the spendable pool.
@@ -879,6 +904,7 @@ mod tests {
             tx_type: TransactionType::Transfer,
             sig_scheme: SignatureScheme::Falcon512,
             network_id: 0,
+            payload: vec![],
         };
         assert!(tx.verify(), "Coinbase must bypass signature verification");
     }
@@ -900,5 +926,31 @@ mod tests {
             !tx.verify(),
             "Testnet-signed tx must NOT verify on Mainnet (cross-chain replay rejected)"
         );
+    }
+
+    /// An AI Payload must be included in the cryptographic signature.
+    /// Tampering with the payload after signing must invalidate the transaction.
+    #[test]
+    fn test_ai_payload_signature() {
+        let kp = FalconKeypair::generate();
+        let mut tx = Transaction::new(
+            kp.get_address(),
+            "0xrecipient".to_string(),
+            1_000_000,
+            chrono::Utc::now().timestamp(),
+        );
+        tx.public_key = kp.public_key.clone();
+        tx.fee = 1_000;
+        tx.nonce = 1;
+        tx.payload = b"{\"ai_agent\":\"alpha\",\"task\":\"fetch_data\"}".to_vec();
+        
+        let signing_data = tx.get_signing_data();
+        tx.signature = kp.sign_transaction_canonical(&signing_data);
+
+        assert!(tx.verify(), "AI Payload transaction should verify correctly");
+
+        // Tamper with the payload — signature must become invalid
+        tx.payload = b"{\"ai_agent\":\"alpha\",\"task\":\"fetch_data_modified\"}".to_vec();
+        assert!(!tx.verify(), "Tampered AI Payload must fail verification");
     }
 }

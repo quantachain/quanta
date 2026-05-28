@@ -927,6 +927,7 @@ async fn main() {
                 tx_type: TransactionType::Transfer,
                 sig_scheme: SignatureScheme::Falcon512,
                 network_id: 0,
+                payload: vec![],
             };
             
             // Sign transaction — pass raw signing BYTES (not the hash) to sign_transaction_canonical
@@ -1135,6 +1136,7 @@ async fn run_demo(db_path: &str) {
         tx_type: TransactionType::Transfer,
         sig_scheme: SignatureScheme::Falcon512,
         network_id: 0,
+        payload: vec![],
     };
     let signing_data1 = tx1.get_signing_data();
     tx1.signature = wallet1.keypair.sign_transaction_canonical(&signing_data1);
@@ -1164,6 +1166,7 @@ async fn run_demo(db_path: &str) {
         tx_type: TransactionType::Transfer,
         sig_scheme: SignatureScheme::Falcon512,
         network_id: 0,
+        payload: vec![],
     };
     let signing_data2 = tx2.get_signing_data();
     tx2.signature = wallet1.keypair.sign_transaction_canonical(&signing_data2);
