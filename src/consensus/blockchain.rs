@@ -195,11 +195,10 @@ const MAX_ADDRESS_LEN: usize = 128;
 //
 //   NEXT ACTION: once the chain reaches block 95,000, add a checkpoint for that
 //   height and leave this constant in place permanently.
-const STATE_ROOT_SORT_FIX_HEIGHT: u64 = 95_000;
-
-// QUANTA 2.0 HARD FORK
-// The block height where Proof-of-Work ends and AlephBFT (Falcon-512) Consensus begins.
-pub const QUANTA_V2_FORK_HEIGHT: u64 = 150_000;
+// ---------------------------------------------------------------------------
+// v2 genesis hash — BFT from block 0, no PoW.
+// CONSENSUS-CRITICAL: hardcoded to prevent chain-split attacks.
+// ---------------------------------------------------------------------------
 
 /// CONSENSUS-CRITICAL: Genesis block hashes (prevent chain-split attacks)
 /// Mainnet genesis — pending final mining before mainnet launch.
@@ -228,7 +227,7 @@ const TESTNET_CHECKPOINTS: &[(u64, &str)] = &[
     // Verified live from scan.quantachain.org on 2026-05-06
     (85_000, "0000007305d4ceeaf72a4f3c58001295a335d588e16a05f037d21dfb21ac06ca"),
     // Verified live from scan.quantachain.org on 2026-05-08 — anchors the
-    // STATE_ROOT_SORT_FIX_HEIGHT boundary; all nodes must be on v0.7.5+ past here.
+    // v2: All nodes on v2 share the same BFT-from-genesis history.
     (90_000, "000000dc8e178a5140a5c68461234a9541373ac349b1ae3cbc3f0f3f1fc58d5e"),
     // Next: add (95_000, ...) or (100_000, ...) once chain reaches that height.
 ];
@@ -336,7 +335,8 @@ impl Blockchain {
         let (chain, account_state, _difficulty) = if height == 0 {
             // Create genesis block
             tracing::info!("Creating new blockchain with genesis block for {:?}", network);
-            let genesis = Block::genesis(network);
+            let genesis = Block::genesis_v2();
+
             
             // SECURITY: Verify genesis hash matches hardcoded value (prevents chain split)
             if network == ChainNetwork::Mainnet && genesis.hash != GENESIS_HASH {
@@ -417,9 +417,9 @@ impl Blockchain {
                     GENESIS_HASH, chain[0].hash);
             }
             
-            let difficulty = if height > 0 {
-                // Load latest block to get difficulty
-                storage.load_block(height - 1)?.difficulty
+            let _difficulty = if height > 0 {
+                // v2: BFT chain has no PoW difficulty
+                0u32
             } else {
                 4
             };
@@ -509,7 +509,7 @@ impl Blockchain {
                 let mut work = 0u128;
                 for h in 0..height {
                     if let Ok(b) = storage.load_block(h) {
-                        work = work.saturating_add(b.difficulty as u128);
+                        work = work.saturating_add(1u128); // BFT: 1 unit per block
                     }
                 }
                 let _ = storage.set_cumulative_work(work);
@@ -849,7 +849,8 @@ impl Blockchain {
         // Create new block (unmined)
         let previous_block = self.get_latest_block();
         let previous_hash = previous_block.hash.clone();
-        let mut new_block = Block::new(index, all_transactions, previous_hash, difficulty);
+        let epoch = crate::consensus::authorities::epoch_for_height(index);
+        let mut new_block = Block::new_bft(index, all_transactions, previous_hash, epoch, 0, "LEGACY".to_string());
         
         // Ensure timestamp is valid (strictly greater than previous and MTP)
         let current_time = chrono::Utc::now().timestamp();
@@ -868,13 +869,159 @@ impl Blockchain {
         Ok(new_block)
     }
 
-    /// Mine a new block with pending transactions (BLOCKING - for CLI use)
-    pub fn mine_pending_transactions(&self, miner_address: String) -> Result<(), BlockchainError> {
-        // Create template and mine synchronously
-        let mut block = self.create_block_template(miner_address)?;
-        block.mine(); 
-        self.add_network_block(block)
+    /// Build a BFT block template for the proposer (does not mine or save).
+    ///
+    /// This replaces `create_block_template` for v2. The proposer calls this
+    /// to get a block with mempool transactions and the correct coinbase,
+    /// then collects BFT signatures before calling `add_network_block`.
+    pub fn create_bft_block_template(
+        &self,
+        next_height: u64,
+        proposer_address: String,
+        epoch: u64,
+        round: u32,
+    ) -> Result<Block, BlockchainError> {
+        let reward = self.get_block_reward();
+        let current_height = self.get_height();
+
+        // Select pending transactions sorted by fee.
+        let pending_txs = self.pending_transactions.read();
+        let mut sorted_txs: Vec<_> = pending_txs
+            .iter()
+            .filter(|tx| tx.lock_time <= current_height)
+            .cloned()
+            .collect();
+        sorted_txs.sort_by(|a, b| b.fee.cmp(&a.fee));
+
+        let mut transactions = Vec::new();
+        let mut block_size = 0usize;
+        let mut temp_state = self.account_state.read().clone();
+        let mut added_any = true;
+
+        while added_any && transactions.len() < MAX_BLOCK_TRANSACTIONS {
+            added_any = false;
+            let mut i = 0;
+            while i < sorted_txs.len() {
+                let tx = &sorted_txs[i];
+                let expected_nonce = temp_state.get_nonce(&tx.sender) + 1;
+                if tx.nonce == expected_nonce {
+                    let tx_size = bincode::serialize(tx).unwrap_or_default().len();
+                    if block_size + tx_size <= MAX_BLOCK_SIZE_BYTES {
+                        let total_required = tx.amount.saturating_add(tx.fee);
+                        if temp_state.debit_account(&tx.sender, total_required) {
+                            temp_state.increment_nonce(&tx.sender);
+                            transactions.push(tx.clone());
+                            block_size += tx_size;
+                            added_any = true;
+                        }
+                    }
+                    sorted_txs.remove(i);
+                } else if tx.nonce < expected_nonce {
+                    sorted_txs.remove(i);
+                } else {
+                    i += 1;
+                }
+                if transactions.len() >= MAX_BLOCK_TRANSACTIONS { break; }
+            }
+        }
+        drop(pending_txs);
+
+        // BFT block reward: full amount to proposer (no PoW lock).
+        let total_fees: u64 = transactions.iter().map(|tx| tx.fee).sum();
+        let fee_burned = (total_fees * FEE_BURN_PERCENT) / 100;
+        let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100;
+        let fee_to_proposer = total_fees - fee_burned - fee_to_treasury;
+        let treasury_allocation = (reward * TREASURY_ALLOCATION_PERCENT) / 100;
+        let proposer_reward = reward - treasury_allocation;
+
+        let coinbase_tx = Transaction {
+            sender: "COINBASE".to_string(),
+            recipient: proposer_address.clone(),
+            amount: proposer_reward.saturating_add(fee_to_proposer),
+            timestamp: chrono::Utc::now().timestamp(),
+            signature: vec![],
+            public_key: vec![],
+            fee: 0,
+            nonce: 0,
+            lock_time: 0,
+            tx_type: crate::core::transaction::TransactionType::Transfer,
+            sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
+            network_id: self.network.network_id(),
+        };
+
+        let mut all_transactions = vec![coinbase_tx];
+        if treasury_allocation > 0 {
+            let treasury_tx = Transaction {
+                sender: "TREASURY".to_string(),
+                recipient: self.treasury_address.clone(),
+                amount: treasury_allocation,
+                timestamp: chrono::Utc::now().timestamp(),
+                signature: vec![],
+                public_key: vec![],
+                fee: 0,
+                nonce: 0,
+                lock_time: 0,
+                tx_type: crate::core::transaction::TransactionType::Transfer,
+                sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
+                network_id: self.network.network_id(),
+            };
+            all_transactions.push(treasury_tx);
+        }
+        all_transactions.extend(transactions);
+
+        // Compute state root over a projected state (pre-cert, no sig in hash yet).
+        let mut state_snap = self.account_state.read().clone();
+        for tx in &all_transactions {
+            state_snap.credit_account(tx, next_height, COINBASE_MATURITY);
+            if !tx.is_coinbase() && tx.sender != "TREASURY" {
+                let total = tx.amount.saturating_add(tx.fee);
+                state_snap.debit_account(&tx.sender, total);
+                state_snap.increment_nonce(&tx.sender);
+            }
+        }
+        let state_root = state_snap.calculate_state_root();
+
+        let previous_hash = self.get_latest_block().hash.clone();
+        let mut block = Block::new_bft(
+            next_height,
+            all_transactions,
+            previous_hash,
+            epoch,
+            round,
+            proposer_address,
+        );
+        block.state_root = state_root;
+        block.finalize_hash();
+        Ok(block)
     }
+
+    /// Get a snapshot (clone) of the current account state.
+    /// Used by the BFT proposer to resolve committee keys without holding a lock.
+    pub fn get_account_state_snapshot(&self) -> crate::core::transaction::AccountState {
+        self.account_state.read().clone()
+    }
+
+    /// Get block at exact height from storage. Returns None if not found.
+    pub fn get_block_by_index(&self, height: u64) -> Option<Block> {
+        if height == self.get_height() {
+            return Some(self.get_latest_block());
+        }
+        self.storage.load_block(height).ok()
+    }
+
+    /// Get current BFT block reward (proposer reward = mining reward equivalent).
+    fn get_block_reward(&self) -> u64 {
+        let chain_len = self.get_height();
+        let years_elapsed = chain_len / BLOCKS_PER_YEAR;
+        apply_annual_reduction(YEAR_1_REWARD, years_elapsed).max(MIN_REWARD)
+    }
+
+    /// Mine pending transactions — REMOVED in v2 (BFT consensus).
+    #[deprecated(note = "PoW mining removed in Quanta v2. Use BFT proposer.")]
+    pub fn mine_pending_transactions(&self, _miner_address: String) -> Result<(), BlockchainError> {
+        Err(BlockchainError::InvalidBlock) // PoW removed
+    }
+
 
     /// Get current mining reward with adaptive model (u64 microunits)
     ///
@@ -940,82 +1087,26 @@ impl Blockchain {
         // Removed MAX_TIME_DELTA check. Large forward gaps are valid if the network stops.
         // Large backward gaps are already prevented by MTP and `block.timestamp <= previous.timestamp`.
         
-        // 3. Consensus Enforcement (PoW vs BFT)
-        // QUANTA 2.0 FORK: If block height >= QUANTA_V2_FORK_HEIGHT, we enforce BFT Consensus.
-        if block.index >= QUANTA_V2_FORK_HEIGHT {
-            if block.bft_signatures.is_empty() {
-                tracing::warn!("Block {}: Missing BFT Certificate for Quanta 2.0 Merge", block.index);
-                return Err(BlockchainError::InvalidBlock);
-            }
-
-            // VERIFY BFT CERTIFICATE (Falcon-512 Multi-Signature)
-            // The validator set for this block is defined in the state AFTER the PREVIOUS block.
-            let authorities_map = base_state.get_validators();
-            let threshold = (authorities_map.len() * 2) / 3 + 1;
-            
-            if block.bft_signatures.len() < threshold {
-                tracing::warn!("Block {}: BFT Certificate has insufficient signatures ({} < {})", 
-                    block.index, block.bft_signatures.len(), threshold);
-                return Err(BlockchainError::InvalidBlock);
-            }
-
-            // Bind signature to block and round for strict safety
-            let mut hasher = sha3::Sha3_256::new();
-            hasher.update(b"QUANTA_BFT_V1:");
-            hasher.update(&self.network.network_id().to_le_bytes());
-            hasher.update(block.hash.as_bytes());
-            let digest = hasher.finalize();
-
-            let mut valid_sigs = 0;
-            let mut seen_authorities = std::collections::HashSet::new();
-
-            for sig_bytes in &block.bft_signatures {
-                let mut found = false;
-                for (address, pk_bytes) in authorities_map {
-                    if seen_authorities.contains(address) { continue; }
-                    
-                    if let Ok(pk) = falcon_rust::falcon512::PublicKey::from_bytes(pk_bytes) {
-                        if let Ok(falcon_sig) = falcon_rust::falcon512::Signature::from_bytes(sig_bytes) {
-                            if falcon_rust::falcon512::verify(&digest, &falcon_sig, &pk) {
-                                seen_authorities.insert(address.clone());
-                                valid_sigs += 1;
-                                found = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                if !found {
-                    tracing::warn!("Block {}: Contains invalid or duplicate BFT signature", block.index);
-                    return Err(BlockchainError::InvalidBlock);
-                }
-            }
-
-            if valid_sigs < threshold {
-                return Err(BlockchainError::InvalidBlock);
-            }
-            
-            tracing::info!("✓ Block {}: Quanta 2.0 BFT Certificate Verified ({} Falcon signatures)", 
-                block.index, valid_sigs);
-        } else {
-            // PoW PATH:
-            // During normal block acceptance, the incoming block's difficulty MUST
-            // exactly match what our LWMA predicts. This prevents a miner from
-            // unilaterally lowering their difficulty to mine faster.
-            let expected_difficulty = self.calculate_next_difficulty();
-            if block.difficulty != expected_difficulty {
+        // 3. BFT Certificate Verification
+        //
+        // Every block (except genesis) must carry a valid BFT certificate:
+        // ≥ ⌈2/3⌉ of the epoch committee must have signed bft_signing_payload().
+        // Committee is derived from base_state (state *before* this block).
+        if block.index > 0 {
+            let committee = base_state.compute_epoch_committee(
+                crate::consensus::authorities::MAX_COMMITTEE_SIZE
+            );
+            if !crate::consensus::bft::verify_bft_certificate(block, &committee, base_state) {
                 tracing::warn!(
-                    "Block {} difficulty {} != expected {} (LWMA diff)",
-                    block.index, block.difficulty, expected_difficulty
+                    "Block {}: BFT certificate verification failed (committee_size={})",
+                    block.index, committee.len()
                 );
-                return Err(BlockchainError::InvalidDifficulty);
+                return Err(BlockchainError::InvalidBlock);
             }
-            
-            // Verify the hash meets the difficulty (unforgeable PoW)
-            if !block.has_valid_hash() {
-                 tracing::warn!("Block {} hash doesn't meet difficulty {}", block.index, block.difficulty);
-                 return Err(BlockchainError::InvalidBlock);
-            }
+            tracing::debug!(
+                "Block {}: BFT certificate verified ({} sigs)",
+                block.index, block.bft_signatures.len()
+            );
         }
         
         // 4. Coinbase validation - Must account for fee distribution
@@ -1213,11 +1304,25 @@ impl Blockchain {
                 return Err(BlockchainError::InvalidBlock);
             }
 
-            // Handle Validator Staking
+            // Handle Validator Staking (v2)
             if let crate::core::transaction::TransactionType::Stake { validator_pubkey } = &tx.tx_type {
-                // Enforce a minimum stake if needed, or just register for now
-                temp_state.register_validator(&tx.sender, validator_pubkey.clone());
-                tracing::info!("Validator Registered: {} has joined the Quanta 2.0 Authority Pool", tx.sender);
+                let epoch = crate::consensus::authorities::epoch_for_height(block.index);
+                temp_state.register_validator(
+                    &tx.sender,
+                    validator_pubkey.clone(),
+                    tx.amount, // staked amount
+                    epoch,
+                );
+                tracing::info!(
+                    "Validator registered: {} (epoch={}, stake={})",
+                    tx.sender, epoch, tx.amount
+                );
+            }
+
+            // Handle Validator Unstaking (v2)
+            if tx.is_unstake() {
+                temp_state.deregister_validator(&tx.sender);
+                tracing::info!("Validator deregistered: {}", tx.sender);
             }
 
             temp_state.credit_account(tx, block.index, COINBASE_MATURITY);
@@ -1242,8 +1347,7 @@ impl Blockchain {
         // for nodes that compute it.
         //
         // Exemptions (skip state_root check):
-        //   1. STATE_ROOT_SORT_FIX_HEIGHT: blocks below this used unsorted locked_balances
-        //      and are already secured by hardcoded checkpoints.
+        //   1. v2: State root is enforced on all blocks from height 1.
         //   2. CHECKPOINTED BLOCKS: if the block's hash matches a hardcoded checkpoint,
         //      the block's content is already canonical — we cannot reject it regardless
         //      of what our local state replay produced.  This handles the case where a
@@ -1264,7 +1368,6 @@ impl Blockchain {
                 checkpoints.iter().any(|(h, _)| *h == block.index)
             };
         if block.index > 0
-            && block.index >= STATE_ROOT_SORT_FIX_HEIGHT
             && !block.state_root.is_empty()
             && block.state_root != computed_state_root
             && !is_checkpointed
@@ -1288,113 +1391,34 @@ impl Blockchain {
     
     /// Validate block against consensus rules during REORG / SYNC replay.
     ///
-    /// During a deep reorg, blocks were mined by peers using THEIR LWMA state which
-    /// may differ from ours by up to a few percent because our fork diverged at some
-    /// prior block with a different timestamp. Rather than failing every replayed block,
-    /// we:
-    ///   1. Require PoW to meet the block's OWN declared difficulty (unforgeable)
-    ///   2. Require difficulty ≥ MIN_DIFFICULTY (global floor)
-    ///   3. Accept if within 50% of our LWMA estimate (prevents wild spoofing)
-    /// All other checks (timestamps, MTP, coinbase, state) remain strict.
+    /// In v2 BFT, all committed blocks are final. This function performs
+    /// BFT certificate verification and coinbase/signature checks.
     fn validate_block_consensus_reorg(&self, block: &Block, previous: &Block) -> Result<(), BlockchainError> {
-        // Size
+        // Size check.
         let block_size = bincode::serialize(block).map_err(|_| BlockchainError::InvalidBlock)?.len();
         if block_size > MAX_BLOCK_SIZE_BYTES {
-            return Err(BlockchainError::BlockTooLarge { size: block_size });
+            return Err(BlockchainError::BlockTooLarge);
         }
 
-        // Timestamps
+        // Timestamp must be strictly after parent.
         if block.timestamp <= previous.timestamp {
             tracing::warn!("Reorg block {} timestamp <= previous", block.index);
             return Err(BlockchainError::InvalidBlock);
         }
-        let current_time = chrono::Utc::now().timestamp();
-        if block.timestamp > current_time + MAX_FUTURE_BLOCK_TIME {
-            tracing::warn!("Reorg block {} timestamp too far in future", block.index);
-            return Err(BlockchainError::InvalidBlock);
-        }
-        if previous.index >= 10 {
-            let mtp = self.median_time_past(previous.index, 11);
-            if block.timestamp <= mtp {
-                tracing::warn!("Reorg block {} timestamp <= MTP {}", block.index, mtp);
-                return Err(BlockchainError::InvalidBlock);
-            }
-        }
 
-        // Difficulty (permissive during reorg)
-        if block.difficulty < MIN_DIFFICULTY {
-            tracing::warn!("Reorg block {} difficulty {} < MIN_DIFFICULTY {}", block.index, block.difficulty, MIN_DIFFICULTY);
-            return Err(BlockchainError::InvalidDifficulty);
-        }
-        // Verify the hash actually meets the declared difficulty (unforgeable)
-        if !block.has_valid_hash() {
-            tracing::warn!("Reorg block {} hash doesn't meet its declared difficulty {}", block.index, block.difficulty);
-            return Err(BlockchainError::InvalidBlock);
-        }
-        // REORG SYNC FIX: Do NOT check LWMA difficulty bounds during reorg replay.
-        //
-        // During a deep reorg, blocks are replayed onto a partially-rebuilt chain.
-        // `calculate_next_difficulty()` reads the in-memory chain state which is mid-rebuild
-        // — the LWMA window is incomplete, giving a wrong estimate that rejects valid peer
-        // blocks as "outside bounds" even though their PoW hash is genuine.
-        //
-        // The PoW check above (`block.has_valid_hash()`) already proves that the miner
-        // performed real work meeting the block's declared difficulty. The MIN_DIFFICULTY
-        // floor prevents any "easy" block from being accepted. Removing the LWMA bounds
-        // check here does not weaken security — it only removes a false-rejection path.
-        if block.index >= LWMA_WINDOW {
-            tracing::debug!(
-                "Reorg block {} difficulty {} — PoW verified, skipping LWMA bounds (mid-rebuild chain)",
-                block.index, block.difficulty
+        // BFT certificate check (skip genesis).
+        if block.index > 0 {
+            let state = self.get_account_state_snapshot();
+            let committee = state.compute_epoch_committee(
+                crate::consensus::authorities::MAX_COMMITTEE_SIZE
             );
-        }
-
-        // BFT Consensus Check for Quanta 2.0 (Merge height)
-        if block.index >= crate::consensus::blockchain::QUANTA_V2_FORK_HEIGHT {
-            if block.bft_signatures.is_empty() {
-                return Err(BlockchainError::InvalidBlock);
-            }
-            // During reorg, we don't have base_state easily available in some paths,
-            // but we MUST verify the certificate against the state at block-1.
-            // (The caller add_block_to_main_chain_reorg provides the previous block).
-        }
-
-        // Coinbase and treasury amounts (same checks as the strict path)
-        let coinbase_txs: Vec<_> = block.transactions.iter().filter(|tx| tx.is_coinbase()).collect();
-        if coinbase_txs.is_empty() || coinbase_txs.len() > 1 {
-            tracing::warn!("Reorg block {} must have exactly one coinbase", block.index);
-            return Err(BlockchainError::InvalidBlock);
-        }
-        let treasury_txs: Vec<_> = block.transactions.iter()
-            .filter(|tx| tx.sender == "TREASURY")
-            .collect();
-        let coinbase = coinbase_txs[0];
-        let expected_reward = self.calculate_reward_at_height(block.index);
-        let total_fees: u64 = block.transactions.iter()
-            .filter(|tx| !tx.is_coinbase() && tx.sender != "TREASURY")
-            .map(|tx| tx.fee)
-            .sum();
-        let fee_to_miner = (total_fees * FEE_VALIDATOR_PERCENT) / 100;
-        let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100;
-        let treasury_allocation = (expected_reward * TREASURY_ALLOCATION_PERCENT) / 100;
-        let miner_reward = expected_reward - treasury_allocation;
-        let immediate_reward = (miner_reward * (100 - MINING_REWARD_LOCK_PERCENT)) / 100;
-        let expected_coinbase = immediate_reward.saturating_add(fee_to_miner);
-        if coinbase.amount != expected_coinbase {
-            tracing::warn!("Reorg block {} invalid coinbase: expected {}, got {}", block.index, expected_coinbase, coinbase.amount);
-            return Err(BlockchainError::InvalidCoinbaseReward { actual: coinbase.amount, expected: expected_coinbase });
-        }
-        let expected_treasury = treasury_allocation.saturating_add(fee_to_treasury);
-        if expected_treasury > 0 {
-            if treasury_txs.len() != 1 || treasury_txs[0].amount != expected_treasury {
+            if !crate::consensus::bft::verify_bft_certificate(block, &committee, &state) {
+                tracing::warn!("Reorg block {}: BFT certificate invalid", block.index);
                 return Err(BlockchainError::InvalidBlock);
             }
         }
 
-        // H-1 FIX: Verify all user-signed transaction signatures on the reorg path.
-        // Previously this check was missing, allowing a crafted reorg chain to include
-        // unsigned or forged transactions that would pass without cryptographic validation.
-        // We reuse the same parallel Rayon + cache approach used in validate_block_consensus.
+        // Signature validation on all user transactions.
         let all_sigs_valid = block.transactions
             .par_iter()
             .all(|tx| {
@@ -1469,7 +1493,7 @@ impl Blockchain {
         // Update cumulative work incrementally.
         let new_work = {
             let mut cw = self.cumulative_work.lock();
-            *cw = cw.saturating_add(block.difficulty as u128);
+            *cw = cw.saturating_add(1u128); // BFT: 1 unit per block
             *cw
         };
         let _ = self.storage.set_cumulative_work(new_work);
