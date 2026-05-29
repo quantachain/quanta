@@ -21,6 +21,10 @@ path = "src/bin/gen_faucet_wallets.rs"
 name = "quanta-benchmark"
 path = "src/bin/benchmark.rs"
 
+[[bin]]
+name = "bridge_indexer"
+path = "src/bin/bridge_indexer.rs"
+
 
 [dependencies]
 # Post-Quantum Cryptography - Falcon signatures

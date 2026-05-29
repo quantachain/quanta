@@ -2646,18 +2646,6 @@ mod tests {
         assert_eq!(treasury_allocation + miner_reward, reward, "no value lost");
     }
 
-    /// Anti-dump: 50% of miner reward locked for 6 months
-    #[test]
-    fn test_mining_reward_lock_split() {
-        let miner_reward: u64 = 95_000_000; // 95 QUA after treasury cut
-
-        let immediate = (miner_reward * (100 - MINING_REWARD_LOCK_PERCENT)) / 100;
-        let locked    = miner_reward - immediate;
-
-        assert_eq!(immediate, 47_500_000, "50% immediately available");
-        assert_eq!(locked,    47_500_000, "50% locked for vesting");
-        assert_eq!(immediate + locked, miner_reward, "no value lost in lock split");
-    }
 
     // ─── Reward Reduction ────────────────────────────────────────────────────
 

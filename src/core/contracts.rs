@@ -3,6 +3,7 @@ use sha3::{Sha3_256, Digest};
 use crate::core::transaction::{AccountState, ContractState, Transaction};
 
 pub const TEMPLATE_ESCROW: u8 = 1;
+pub const TEMPLATE_AGENT_JOB: u8 = 2;
 
 #[derive(Serialize, Deserialize)]
 pub struct EscrowInitArgs {
@@ -13,6 +14,17 @@ pub struct EscrowInitArgs {
 #[derive(Serialize, Deserialize)]
 pub struct EscrowClaimArgs {
     pub preimage: String, // Hex string of the pre-image
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AgentJobInitArgs {
+    pub worker: String, // The agent authorized to execute the job
+    pub task_hash: String, // IPFS/SHA3 hash of the task prompt/requirements
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AgentJobClaimArgs {
+    pub result_hash: String, // IPFS/SHA3 hash of the inference result
 }
 
 /// Routes ContractDeploy and ContractCall to the appropriate Native Template.
@@ -30,7 +42,7 @@ impl NativeContracts {
                 }
             }
             crate::core::transaction::TransactionType::ContractCall { contract_address, method, call_args } => {
-                if let Err(e) = Self::call(state, contract_address, method, call_args) {
+                if let Err(e) = Self::call(state, tx, contract_address, method, call_args) {
                     tracing::warn!("Contract call failed: {}", e);
                 }
             }
@@ -65,6 +77,14 @@ impl NativeContracts {
                 storage.insert("secret_hash".to_string(), args.secret_hash);
                 storage.insert("status".to_string(), "locked".to_string());
             }
+            TEMPLATE_AGENT_JOB => {
+                let args: AgentJobInitArgs = serde_json::from_slice(init_args)
+                    .map_err(|e| format!("Failed to parse AgentJobInitArgs: {}", e))?;
+                
+                storage.insert("worker".to_string(), args.worker);
+                storage.insert("task_hash".to_string(), args.task_hash);
+                storage.insert("status".to_string(), "open".to_string());
+            }
             _ => return Err(format!("Unknown template_id: {}", template_id)),
         }
 
@@ -85,6 +105,7 @@ impl NativeContracts {
     /// Handles a ContractCall transaction.
     pub fn call(
         state: &mut AccountState,
+        tx: &Transaction,
         contract_address: &str,
         method: &str,
         call_args: &[u8],
@@ -138,6 +159,40 @@ impl NativeContracts {
                 }
 
                 contract.storage.insert("status".to_string(), "claimed".to_string());
+            }
+            TEMPLATE_AGENT_JOB => {
+                if method != "claim" {
+                    return Err(format!("Unknown method for AgentJob: {}", method));
+                }
+                
+                if contract.storage.get("status").map(|s| s.as_str()) != Some("open") {
+                    return Err("Agent job is not open".to_string());
+                }
+
+                let args: AgentJobClaimArgs = serde_json::from_slice(call_args)
+                    .map_err(|e| format!("Failed to parse AgentJobClaimArgs: {}", e))?;
+                
+                // Only the designated worker can claim
+                let expected_worker = contract.storage.get("worker")
+                    .ok_or_else(|| "Missing worker in storage".to_string())?
+                    .clone();
+                
+                if tx.sender != expected_worker {
+                    return Err("Caller is not the designated worker".to_string());
+                }
+
+                // Record the result hash
+                contract.storage.insert("result_hash".to_string(), args.result_hash);
+                contract.storage.insert("status".to_string(), "claimed".to_string());
+
+                // Pay out any locked QUA gas to the worker
+                let amount = state.get_balance(contract_address);
+                if amount > 0 {
+                    if !state.debit_account(contract_address, amount) {
+                        return Err("Failed to debit contract".to_string());
+                    }
+                    state.credit_account_direct(&expected_worker, amount);
+                }
             }
             _ => return Err("Unknown template_id during call".to_string()),
         }
@@ -235,5 +290,81 @@ mod tests {
         
         let contract_after = state.contracts.get(&contract_address).unwrap();
         assert_eq!(contract_after.storage.get("status").unwrap(), "claimed");
+    }
+
+    #[test]
+    fn test_native_agent_job_template() {
+        let mut state = AccountState::new();
+        
+        let init_args = serde_json::to_vec(&AgentJobInitArgs {
+            worker: "0xworker".to_string(),
+            task_hash: "abcd1234taskhash".to_string(),
+        }).unwrap();
+
+        // 1. Deploy Contract
+        let mut deploy_tx = Transaction {
+            sender: "0xemployer".to_string(),
+            recipient: "".to_string(),
+            amount: 10_000,
+            timestamp: 0,
+            signature: vec![],
+            public_key: vec![],
+            fee: 100,
+            nonce: 1,
+            lock_time: 0,
+            tx_type: TransactionType::ContractDeploy {
+                template_id: TEMPLATE_AGENT_JOB,
+                init_args,
+            },
+            sig_scheme: SignatureScheme::Falcon512,
+            network_id: 0,
+            payload: vec![],
+        };
+
+        let tx_hash = deploy_tx.hash();
+        let contract_address = NativeContracts::generate_address(&tx_hash);
+        deploy_tx.recipient = contract_address.clone();
+
+        state.credit_account(&deploy_tx, 100, 0);
+
+        let contract = state.contracts.get(&contract_address).expect("Contract must exist");
+        assert_eq!(contract.template_id, TEMPLATE_AGENT_JOB);
+        assert_eq!(contract.storage.get("status").unwrap(), "open");
+        assert_eq!(state.get_balance(&contract_address), 10_000);
+
+        // 2. Claim Funds
+        let claim_args = serde_json::to_vec(&AgentJobClaimArgs {
+            result_hash: "deadbeefresult".to_string(),
+        }).unwrap();
+
+        let claim_tx = Transaction {
+            sender: "0xworker".to_string(), // MUST be the worker
+            recipient: contract_address.clone(),
+            amount: 0,
+            timestamp: 0,
+            signature: vec![],
+            public_key: vec![],
+            fee: 100,
+            nonce: 2,
+            lock_time: 0,
+            tx_type: TransactionType::ContractCall {
+                contract_address: contract_address.clone(),
+                method: "claim".to_string(),
+                call_args: claim_args,
+            },
+            sig_scheme: SignatureScheme::Falcon512,
+            network_id: 0,
+            payload: vec![],
+        };
+
+        state.credit_account(&claim_tx, 101, 0);
+
+        // Verify funds transferred
+        assert_eq!(state.get_balance(&contract_address), 0, "Contract should be drained");
+        assert_eq!(state.get_balance("0xworker"), 10_000, "Worker should receive gas funds");
+        
+        let contract_after = state.contracts.get(&contract_address).unwrap();
+        assert_eq!(contract_after.storage.get("status").unwrap(), "claimed");
+        assert_eq!(contract_after.storage.get("result_hash").unwrap(), "deadbeefresult");
     }
 }

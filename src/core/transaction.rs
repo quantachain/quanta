@@ -120,6 +120,37 @@ pub enum TransactionType {
     ContractCall { contract_address: String, method: String, call_args: Vec<u8> },
 }
 
+// ---------------------------------------------------------------------------
+// Stablecoin Bridge Intent
+// ---------------------------------------------------------------------------
+
+/// Represents a stablecoin execution intent embedded in a transaction's payload.
+/// This allows an AI agent to signal a bridge to execute an off-chain stablecoin transfer
+/// upon successful on-chain transaction execution.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct StablecoinIntent {
+    /// Token symbol (e.g., "USDC", "USDT")
+    pub token: String,
+    /// Amount in token's base units (e.g., 6 decimals for USDC)
+    pub amount: u64,
+    /// Destination chain (e.g., "ETH", "SOL")
+    pub dest_chain: String,
+    /// Destination address on the target chain
+    pub recipient: String,
+}
+
+impl StablecoinIntent {
+    /// Serializes the intent to JSON bytes for the transaction payload
+    pub fn to_payload(&self) -> Result<Vec<u8>, serde_json::Error> {
+        serde_json::to_vec(self)
+    }
+
+    /// Attempts to deserialize an intent from a transaction payload
+    pub fn from_payload(payload: &[u8]) -> Result<Self, serde_json::Error> {
+        serde_json::from_slice(payload)
+    }
+}
+
 impl Transaction {
     /// Create a new unsigned Transfer transaction.
     pub fn new(sender: String, recipient: String, amount: u64, timestamp: i64) -> Self {
