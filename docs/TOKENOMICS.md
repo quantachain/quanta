@@ -1,8 +1,8 @@
 # QUANTA TOKENOMICS
 
-**Comprehensive Economic Model Specification**
+**Comprehensive Economic Model Specification — AI Agent Execution Layer Era**
 
-Version 2.0 — March 2026
+Version 3.0 — May 2026
 
 **Founder**: Kishore K — [admin@quantachain.org](mailto:admin@quantachain.org) — [quantachain.org](https://quantachain.org)
 
@@ -30,35 +30,38 @@ Version 2.0 — March 2026
 
 The QUANTA economic model achieves:
 
-1. **Long-term Sustainability**: Mining rewards remain attractive for decades, never reaching zero
-2. **Fair Distribution**: No pre-mine, no ICO, no team allocation — 100% through proof-of-work mining
-3. **Deflationary Pressure**: Fee burning creates permanent supply reduction
-4. **Anti-Dump Protection**: 50% of mining rewards locked for ~54.75 days — prevents launch-day sell cascades
-5. **Development Funding**: Two transparent treasury streams (block reward allocation + fee share) for ongoing development
+1. **Long-term Sustainability**: Validator rewards remain attractive for decades, never reaching zero
+2. **Fair Distribution**: No ICO, no VC allocation — genesis allocation to founding validators, public emission via block rewards
+3. **Deflationary Pressure**: 50% fee burning creates permanent supply reduction at scale
+4. **Validator Incentive**: 35% of fees + 92% of block rewards flow to the BFT proposer committee
+5. **AI Agent Native**: Sub-cent gas fees by design — QUA is execution fuel, not settlement currency
+6. **Ecosystem Funding**: 8% block allocation + 15% fee share fund the Quanta Ecosystem Fund (QEF)
 
-### 1.2 Key Parameters (Source: `src/consensus/blockchain.rs`)
+### 1.2 Key Parameters (Source: `src/consensus/blockchain.rs` + `bft_proposer.rs`)
 
 | Parameter | Value | Code Constant |
 |---|---|---|
 | 1 QUA denomination | 1,000,000 microunits | `MICROUNITS_PER_QUA = 1_000_000` |
-| Initial Block Reward | 100 QUA | `YEAR_1_REWARD = 100_000_000` |
+| Initial Block Reward | **50 QUA** | `YEAR_1_REWARD = 50_000_000` |
 | Annual Reduction | 15% | `ANNUAL_REDUCTION_PERCENT = 15` |
-| Minimum Reward Floor | 5 QUA | `MIN_REWARD = 5_000_000` |
-| Block Time Target | 30 seconds | `TARGET_BLOCK_TIME = 30` |
-| Blocks Per Year | 1,051,200 | `BLOCKS_PER_YEAR = 1_051_200` |
-| Fee Burn Rate | **70%** | `FEE_BURN_PERCENT = 70` |
-| Fee to Treasury | **20%** | `FEE_TREASURY_PERCENT = 20` |
-| Fee to Miner | **10%** | `FEE_VALIDATOR_PERCENT = 10` |
-| Block Reward to Treasury | **5%** | `TREASURY_ALLOCATION_PERCENT = 5` |
-| Mining Reward Lock | **50% for ~54.75 days** | `MINING_REWARD_LOCK_PERCENT = 50` |
-| Lock Duration | 157,680 blocks | `MINING_REWARD_LOCK_BLOCKS = 157_680` |
-| Coinbase Maturity | 100 blocks | `COINBASE_MATURITY = 100` |
+| Minimum Reward Floor | **2 QUA** | `MIN_REWARD = 2_000_000` |
+| BFT Slot Time | **6 seconds** | `SLOT_SECONDS = 6` (bft_proposer.rs) |
+| Blocks Per Year | **5,256,000** | `BLOCKS_PER_YEAR = 5_256_000` |
+| Fee Burn Rate | **50%** | `FEE_BURN_PERCENT = 50` |
+| Fee to Ecosystem Fund | **15%** | `FEE_TREASURY_PERCENT = 15` |
+| Fee to Validator | **35%** | `FEE_VALIDATOR_PERCENT = 35` |
+| Block Reward to QEF | **8%** | `TREASURY_ALLOCATION_PERCENT = 8` |
+| Validator Reward | 92% of block reward (full, no lock) | BFT proposer receives immediately |
+| Coinbase Maturity | **500 blocks (~50 min)** | `COINBASE_MATURITY = 500` |
+| Unbonding Period | **60 epochs (~4.2 days)** | `UNBONDING_EPOCHS = 60` |
+| Committee (Testnet) | **7 validators** | `MAX_COMMITTEE_SIZE = 7` |
+| Committee (Mainnet) | **21 validators** | Change at mainnet genesis |
 | Min Transaction Fee | 100 microunits (0.0001 QUA) | `MIN_TRANSACTION_FEE = 100` |
 | Mempool Limit | 5,000 transactions | `MAX_MEMPOOL_SIZE = 5000` |
 | Max Block Size | 2 MB (2,097,152 bytes) | `MAX_BLOCK_SIZE_BYTES = 2_097_152` |
 | Max Block Transactions | **1,200** | `MAX_BLOCK_TRANSACTIONS = 1200` |
 
-> **Note on Block TX Limit**: The limit was corrected from 2,000 to 1,200 in the production codebase. Falcon-512 transactions average ~1,713 bytes (666-byte signature + 897-byte public key + overhead). 1,200 × 1,713 = 2.06 MB, which fits within the 2 MB block size with minor overhead management.
+> **Note on Block TX Limit**: Falcon-512 transactions average ~1,713 bytes. 1,200 × 1,713 = 2.06 MB — fits within the 2 MB block with minor overhead management.
 
 ---
 
@@ -81,54 +84,56 @@ fn apply_annual_reduction(start: u64, years: u64) -> u64 {
     reward
 }
 
-fn get_mining_reward(block_height: u64) -> u64 {
-    let years_elapsed = block_height / BLOCKS_PER_YEAR;
+fn get_block_reward(block_height: u64) -> u64 {
+    let years_elapsed = block_height / BLOCKS_PER_YEAR; // 5,256,000 blocks/yr at 6s
     apply_annual_reduction(YEAR_1_REWARD, years_elapsed).max(MIN_REWARD)
 }
 ```
 
-Note: Integer division truncates. Over 20 years, the accumulated rounding error vs. an ideal `f64` computation is < 0.01 QUA — well within the 5 QUA floor.
+Note: Integer division truncates. Over 20 years, accumulated rounding error vs `f64` is < 0.01 QUA — well within the 2 QUA floor.
 
-### 2.2 Emission Schedule Table
+### 2.2 Emission Schedule Table (v3 — 6s BFT slots, 50 QUA start)
 
 | Year | Base Reward (QUA/block) | Blocks/Year | Annual Emission | Cumulative Supply |
 |---|---|---|---|---|
-| 1 | 100.00 | 3,153,600 | 315,360,000 | 315,360,000 |
-| 2 | 85.00 | 3,153,600 | 268,056,000 | 583,416,000 |
-| 3 | 72.25 | 3,153,600 | 227,847,600 | 811,263,600 |
-| 4 | 61.41 | 3,153,600 | 193,670,460 | 1,004,934,060 |
-| 5 | 52.20 | 3,153,600 | 164,619,891 | 1,169,553,951 |
-| 10 | 19.69 | 3,153,600 | 62,094,634 | 1,417,612,585 |
-| 15 | 7.43 | 3,153,600 | 23,431,238 | 1,482,043,823 |
-| 20 | 5.00 (floor) | 3,153,600 | 15,768,000 | 1,503,811,823 |
-| 50 | 5.00 (floor) | 3,153,600 | 15,768,000 | 1,977,051,823 |
+| 1 | 50.00 | 5,256,000 | 263,800,000 | 263,800,000 |
+| 2 | 42.50 | 5,256,000 | 223,380,000 | 487,180,000 |
+| 3 | 36.13 | 5,256,000 | 189,979,000 | 677,159,000 |
+| 4 | 30.70 | 5,256,000 | 161,413,200 | 838,572,200 |
+| 5 | 26.10 | 5,256,000 | 137,181,600 | 975,753,800 |
+| 10 | 9.85 | 5,256,000 | 51,771,600 | 1,242,000,000 |
+| 15 | 3.72 | 5,256,000 | 19,551,320 | 1,380,000,000 |
+| 20 | 2.00 (floor) | 5,256,000 | 10,512,000 | 1,430,000,000 |
+| 50 | 2.00 (floor) | 5,256,000 | 10,512,000 | 1,745,000,000 |
 
 ### 2.3 Asymptotic Maximum Supply
 
 ```
-Soft Maximum:   ~1.5 billion QUA (year 15–20, before floor kicks in)
-Practical Max:  ~2 billion QUA (year 50)
-True Maximum:   Infinite (due to 5 QUA perpetual floor)
+Soft Maximum:   ~1.38 billion QUA (year 15, before floor kicks in)
+Practical Max:  ~1.75 billion QUA (year 50)
+True Maximum:   Infinite (due to 2 QUA perpetual floor — perpetual validator incentive)
 ```
 
 This ensures:
-- No "final Bitcoin" problem — mining never stops
-- Perpetual security budget for miners
-- Predictable long-term inflation (~0.8% annually after year 20)
+- No "final reward" problem — validators always earn block rewards
+- Perpetual security budget for the BFT committee
+- Predictable long-term inflation (~0.6% annually after year 20)
+- Tighter supply than v2 (~1.75B vs ~2B) — better per-unit value dynamics
 
 ### 2.4 Effective Circulating Supply
 
-The anti-dump vesting mechanism means **not all mined QUA is immediately circulating**:
+In DPoS, the anti-dump mechanism is **validator staking + unbonding**, not a vesting lock:
 
-| Phase | Immediate (Circulating) | Locked (Vesting) |
+| Allocation | Status | Lock Mechanism |
 |---|---|---|
-| Per block | 47.5% of reward | 47.5% of reward (6-month lock) |
-| Treasury | 5% of reward | Controlled by multisig |
+| Validator staked QUA | Non-circulating while active | Staked — locked until unstake tx |
+| QEF multisig | Non-circulating until spent | 3-of-5 Falcon-512 multisig |
+| Block reward (proposer) | Spendable after maturity | 500-block coinbase maturity (~50 min) |
+| Unstaked QUA | Locked during unbonding | 60 epochs (~4.2 days) then released |
 
-Of 100 QUA mined per block in Year 1:
-- 47.5 QUA → miner wallet immediately spendable
-- 47.5 QUA → miner wallet locked for 52,560 blocks (~6 months)
-- 5.0 QUA → treasury (immediately spendable for operations)
+Of 50 QUA produced per block in Year 1:
+- 46 QUA → block proposer (spendable after 500-block maturity)
+- 4 QUA → Quanta Ecosystem Fund (QEF multisig)
 
 ---
 
@@ -137,8 +142,8 @@ Of 100 QUA mined per block in Year 1:
 ### 3.1 Standard Block Reward
 
 ```
-Block Reward = apply_annual_reduction(100 QUA, years_since_genesis)
-             = max(100 × (85/100)^year, 5 QUA)
+Block Reward = apply_annual_reduction(50 QUA, years_since_genesis)
+             = max(50 × (85/100)^year, 2 QUA)
 ```
 
 ### 3.2 Reward Distribution (Per Block)
@@ -146,48 +151,27 @@ Block Reward = apply_annual_reduction(100 QUA, years_since_genesis)
 The total block reward `R` is distributed as follows:
 
 ```
-Treasury Allocation:  R × 5%            → sent to treasury address
-Miner Base Reward:    R × 95%           → available to miner
+QEF Allocation:       R × 8%   → Quanta Ecosystem Fund (multisig)
+Proposer Reward:      R × 92%  → active BFT block proposer (full, no lock)
 
-  Of Miner Base Reward:
-    Immediate:        (R × 95%) × 50%   → credited to miner immediately (after 100-block coinbase maturity)
-    Locked:           (R × 95%) × 50%   → locked until height + 157,680 (~54.75 days)
-
-Example at R = 100 QUA:
-  Treasury:       5.0 QUA  (hardcoded address)
-  Miner gets now: 47.5 QUA (spendable after 100-block maturity)
-  Miner locked:   47.5 QUA (vests after ~54.75 days / 157,680 blocks)
+Example at R = 50 QUA (Year 1):
+  QEF:            4.0 QUA  (hardcoded QEF address)
+  Proposer now:  46.0 QUA  (spendable after 500-block coinbase maturity ~50 min)
 ```
 
-> ⚠️ **Note**: Earlier documentation described a 50%/50% miner split as if the full 100 QUA were split. The correct formula first subtracts the 5% treasury allocation, then applies 50%/50% to the remaining 95%. This yields 47.5% immediate / 47.5% locked of the total block reward — matching the production `blockchain.rs` implementation exactly.
+In DPoS+BFT, **there is no mining lock**. The proposer receives the full 92% immediately after coinbase maturity (500 blocks). Anti-dump is achieved through:
+- **Staking lock** — validator QUA locked while in active committee
+- **Unbonding** — 60 epochs (~4.2 days) after `Unstake` transaction
 
-### 3.3 Network Usage Multiplier (Bootstrap Phase)
+### 3.3 Validator Committee Earnings (Year 1 — 7 validators)
 
-**Duration**: First 315,360 blocks (~36 days — the bootstrap phase)
+| Period | Per-Validator Block Rewards | At $0.001/QUA | At $0.01/QUA |
+|---|---|---|---|
+| Per epoch (1,000 blocks) | ~6,571 QUA | ~$6.57 | ~$65.71 |
+| Per day (~14.4 epochs) | ~94,622 QUA | ~$94.62 | ~$946.22 |
+| Per year | ~34,537,000 QUA | ~$34,537 | ~$345,370 |
 
-**Range**: 1.0× to 2.0×
-
-During the bootstrap phase, block rewards are boosted based on real fee activity to reward early miners and network contributors. Fee-based measurement (not transaction count) resists spam manipulation.
-
-**Formula**:
-```python
-def usage_multiplier(block_height):
-    if block_height >= 315_360:
-        return 1.0  # No multiplier after bootstrap
-    
-    lookback = min(1000, block_height)
-    recent_blocks = blocks[block_height - lookback : block_height]
-    total_fees = sum(sum(tx.fee for tx in b.transactions) for b in recent_blocks)
-    
-    expected_minimum = 10_000_000  # 10 QUA in microunits (baseline activity)
-    multiplier = 1.0 + min(1.0, total_fees / expected_minimum)
-    return multiplier  # Range: [1.0, 2.0]
-```
-
-**Attack Resistance**:
-- Miners cannot profitably spam: fees cost 100% but reward gain is at most 100% (net zero)
-- 1000-block lookback averages out single-block manipulation
-- Fee burning makes sustained fake activity expensive (70% of fee cost is permanently destroyed)
+> **Note**: With 21 mainnet validators, per-validator rewards are ÷3 (~$11,512/yr at $0.001/QUA). Still economically viable given low 4GB-RAM node operating costs (~$480/yr).
 
 ---
 
@@ -205,98 +189,92 @@ def usage_multiplier(block_height):
 
 **Fee Market**: Transactions are sorted highest-fee-first for block inclusion. A natural fee market emerges as mempool fills (5,000 TX cap).
 
-### 4.2 Fee Distribution
+### 4.2 Fee Distribution (v3)
 
 Each block's total transaction fees (`F`) are split in fixed proportions:
 
 | Recipient | Percentage | Destination |
 |---|---|---|
-| **Burn (destroyed)** | **70%** | Sent to unspendable address — permanent deflation |
-| **Treasury** | **20%** | `ms69216b1d10425689704d5ae3b2a4aa17049f59b1` (3-of-5 multisig) |
-| **Block Miner** | **10%** | Miner's coinbase address (added to immediate reward) |
+| **Burn (destroyed)** | **50%** | Unspendable — permanent deflation |
+| **Block Proposer** | **35%** | BFT proposer's coinbase address |
+| **Ecosystem Fund (QEF)** | **15%** | `ms69216b1d10425689704d5ae3b2a4aa17049f59b1` (3-of-5 multisig) |
 
-> **Rounding**: `fee_burned + fee_to_treasury + fee_to_miner = total_fees` is guaranteed arithmetically. Any rounding remainder goes to the miner (preventing loss of microunits).
+> **Rounding**: `fee_burned + fee_to_proposer + fee_to_treasury = total_fees` — remainder goes to proposer.
 
-**Example (1,000 transactions × 0.001 QUA each)**:
+**Example (1,000 AI agent transactions × 0.001 QUA each)**:
 ```
 Total fees:     1,000,000 microunits (1 QUA)
-Burned:           700,000 microunits (0.70 QUA) — destroyed forever
-Treasury:         200,000 microunits (0.20 QUA) — development fund
-Miner:            100,000 microunits (0.10 QUA) — added to coinbase
+Burned:           500,000 microunits (0.50 QUA) — destroyed forever
+Proposer:         350,000 microunits (0.35 QUA) — validator income
+QEF:              150,000 microunits (0.15 QUA) — ecosystem fund
 ```
 
 ### 4.3 Burn Mechanism
 
-**Burn Implementation**: Fees tagged as "burned" are accounted for in token supply tracking but are never credited to any spendable address. The 70% burn fraction directly reduces circulating supply.
+**Burn Implementation**: 50% of all fees are never credited to any spendable address. As AI agent transaction volume grows, the burn rate accelerates supply reduction.
 
-**Deflationary Effect Estimates**:
+**Break-even burn** (net-zero inflation in Year 1):
+```
+New emission Year 1:  263,800,000 QUA
+Burn per tx (50%):    500 μQUA at 1,000 μQUA avg fee
+TX needed to offset:  263,800,000 ÷ 0.000500 = ~527,600,000 tx/yr
+                    = ~1.44 million transactions per day
+```
+Above ~1.44M tx/day the network becomes net-deflationary.
+
+**Deflationary Effect Estimates (v3)**:
 
 | Scenario | Annual TX | Avg Fee | Annual Burned | Annual Emission |
 |---|---|---|---|---|
-| Year 1, Low | 10M | 0.001 QUA | 7,000 QUA | 315,360,000 QUA |
-| Year 5, Medium | 50M | 0.002 QUA | 70,000 QUA | 164,619,891 QUA |
-| Year 10, High | 200M | 0.005 QUA | 700,000 QUA | 62,094,634 QUA |
-| Year 20, Mature | 1B | 0.01 QUA | 7,000,000 QUA | 15,768,000 QUA |
+| Year 1, Low | 10M | 0.001 QUA | 5,000 QUA | 263,800,000 QUA |
+| Year 5, Medium | 100M | 0.001 QUA | 50,000 QUA | 137,181,600 QUA |
+| Year 10, High | 500M | 0.002 QUA | 500,000 QUA | 51,771,600 QUA |
+| Year 15, Mature | 2B | 0.002 QUA | 2,000,000 QUA | 19,551,320 QUA |
 
-At high adoption (Year 20+), fee burning could **exceed new emission**, making QUANTA net deflationary.
+At 2B tx/year (Year 15+), fee burning could **exceed new emission**, making QUANTA net deflationary.
 
-### 4.4 Treasury Accumulation from Fees
+### 4.4 QEF Accumulation from Fees
 
-Treasury receives 20% of all transaction fees, creating a sustainable independent funding stream:
+QEF receives 15% of all fees — sustainable, independent funding:
 
-| Year | Est. Annual TX | Fee Revenue (20%) | Cumulative Treasury |
-|---|---|---|---|
-| 1 | 10M | ~2,000 QUA | ~2,000 QUA |
-| 5 | 50M | ~20,000 QUA | ~62,000 QUA |
-| 10 | 200M | ~140,000 QUA | ~500,000 QUA |
+| Year | Est. Annual TX | Fee Revenue (15%) | Annual QEF Block Alloc (8%) | Total QEF Inflow |
+|---|---|---|---|---|
+| 1 | 10M | ~1,500 QUA | ~21,024,000 QUA | ~21,025,500 QUA |
+| 5 | 100M | ~15,000 QUA | ~10,975,000 QUA | ~10,990,000 QUA |
+| 10 | 500M | ~75,000 QUA | ~4,142,000 QUA | ~4,217,000 QUA |
 
 ---
 
-## 5. Anti-Dump Mechanisms
+## 5. Anti-Dump Mechanisms (DPoS Era)
 
-### 5.1 Mining Reward Vesting
+### 5.1 Validator Staking Lock (Replaces PoW Mining Lock)
 
-**Purpose**: Prevent miners from immediately dumping all rewards on launch day, which would crash the price and undermine network confidence.
+In DPoS+BFT, there is no mining reward lock. Anti-dump is achieved through the validator lifecycle:
 
-**Parameters**:
-```
-MINING_REWARD_LOCK_PERCENT  = 50  (% of miner's share that is locked)
-MINING_REWARD_LOCK_BLOCKS   = 157,680  (≈54.75 days at 30-second blocks)
-```
+| Lock Type | Mechanism | Duration |
+|---|---|---|
+| **Staking lock** | Validator's staked QUA is frozen while in the active committee | Entire validator lifetime |
+| **Coinbase maturity** | Block rewards unspendable for 500 blocks after production | ~50 minutes |
+| **Unbonding period** | After `Unstake` tx, staked QUA locked for 60 epochs | ~4.2 days |
+| **QEF multisig** | Ecosystem fund behind 3-of-5 Falcon-512 threshold | Until governance vote to spend |
 
-**Mechanism** (as implemented in `blockchain.rs`):
-
+**Unbonding implementation** (`authorities.rs`):
 ```rust
-// Of the 95% miner reward:
-let immediate_reward = (miner_reward * (100 - MINING_REWARD_LOCK_PERCENT)) / 100;
-// = 95% × 50% = 47.5% of total block reward → credited after 100-block coinbase maturity
-
-let locked_reward    = miner_reward - immediate_reward;
-// = 95% × 50% = 47.5% of total block reward → locked balance
-
-// Locked balance is stored in account_state as LockedBalance {
-//     amount: locked_reward,
-//     unlock_height: current_height + 157_680  // ~54.75 days
-// }
+pub const UNBONDING_EPOCHS: u64 = 60; // 60,000 blocks ≈ 4.2 days at 6s
 ```
 
-**Unlock Behavior**:
-- Locked balance automatically becomes spendable at `block_height >= unlock_height`
-- Multiple concurrent locks possible (each mining event creates a new lock entry)
-- Wallet displays: Available Balance / Locked Balance / Total Balance
+This means a validator who wishes to exit cannot immediately dump their staked QUA — they must wait ~4.2 days from the `Unstake` transaction before the staked amount is released.
 
-**Coinbase Maturity**: All mining rewards (including the immediate 47.5%) are subject to a **100-block coinbase maturity** before they can be spent. This prevents spending rewards from orphaned blocks. The additional 157,680-block anti-dump lock applies on top of this.
+### 5.2 Circulating Supply Dynamics (v3)
 
-### 5.2 Economic Impact of Vesting
-
-| Phase | Total Mined | Circulating (Unlocked) | Locked | Burned |
+| Phase | Total Emitted | Validator Staked | QEF Locked | Circulating |
 |---|---|---|---|---|
-| Day 1 | 720,000 QUA | 342,000 QUA | 342,000 QUA | 0 QUA |
-| Month 1 | ~21.6M QUA | ~10.3M QUA | ~10.3M QUA | ~100 QUA |
-| Month 6 | ~130M QUA | ~97M QUA | ~33M QUA | ~7,000 QUA |
-| Year 1 | ~315M QUA | ~275M QUA | ~40M QUA | ~50,000 QUA |
+| Day 1 | 0 QUA | ~21M QUA (genesis) | ~50M QUA | ~0 QUA |
+| Week 1 | ~2.45M QUA | ~21M QUA | ~50M QUA | ~2.45M QUA |
+| Month 1 | ~21.9M QUA | ~21M QUA | ~50M QUA | ~21.9M QUA |
+| Year 1 | ~263.8M QUA | ~21M QUA | ~71M QUA | ~171.8M QUA |
 
-After 6 months, the 6-month rolling lock stabilizes at ~12–13% of total mined supply.
+Very low circulating supply at launch (validators' staked QUA locked, QEF multisig controlled) means minimal dump risk.
 
 ---
 
@@ -661,7 +639,7 @@ Full spending procedures: [GOVERNANCE.md](GOVERNANCE.md)
 
 ---
 
-**Document Version**: 2.2  
+**Document Version**: 3.0  
 **Last Updated**: May 2026  
 **Founder**: Kishore K (admin@quantachain.org)  
 **License**: CC BY 4.0

@@ -89,7 +89,7 @@ For VPS deployment with NGINX and HTTPS, see the [full deployment guide](https:/
 
 ---
 
-## Wallet & Mining (via Docker)
+## Wallet & Validator Setup (via Docker)
 
 ```bash
 # Create HD wallet (24-word recovery phrase — recommended)
@@ -98,14 +98,11 @@ docker exec -it quanta-node quanta new_hd_wallet --file hd_wallet.json
 # Show wallet address
 docker exec -it quanta-node quanta wallet_address --file hd_wallet.json
 
-# Start mining to your address
-docker exec -d quanta-node quanta start_mining YOUR_ADDRESS --rpc-port 7782
+# Stake QUA to become a BFT validator
+docker exec -it quanta-node quanta stake --wallet hd_wallet.json --amount 10000000
 
-# Check mining status
-docker exec -it quanta-node quanta mining_status --rpc-port 7782
-
-# Stop mining
-docker exec -it quanta-node quanta stop_mining --rpc-port 7782
+# Check validator status
+docker exec -it quanta-node quanta status --rpc-port 7782
 ```
 
 ---
@@ -155,12 +152,11 @@ quanta wallet_address    [--file wallet.qua]                     # Show address 
 quanta hd_wallet         [--file hd_wallet.json]                 # Show HD wallet info
 ```
 
-### Mining
+### Validator Management
 
 ```bash
-quanta start_mining <ADDRESS>    [--rpc-port 7782]   # Start mining
-quanta mining_status             [--rpc-port 7782]   # Hashrate & last block
-quanta stop_mining               [--rpc-port 7782]   # Stop mining
+quanta stake    --wallet W --amount QUA   # Register as BFT validator
+quanta unstake  --wallet W                # Begin unbonding (~4.2 day wait)
 ```
 
 ### Blockchain Operations
@@ -216,10 +212,12 @@ curl -X POST http://localhost:3000/transactions \
 - **Falcon-512 signatures** — NIST Level 1, 897-byte pubkey, stateless, unlimited reuse
 - **120+ TPS** — parallel Rayon verification, LRU sig cache (100k entries), bloom filter mempool
 - **Account model** — balance + nonce + locked_balances; not UTXO
-- **30-second block time** — 1,200 TX/block max, 2 MB limit
-- **Headers-first sync** — Bitcoin IBD style, cumulative work-based peer selection
+- **6-second BFT slot time** — `SLOT_SECONDS = 6`, 1,200 TX/block max, 2 MB limit
+- **DPoS + BFT finality** — `>2/3` committee signatures required; instant finality
+- **7-validator testnet** — permissioned bootstrap; 21 validators at mainnet genesis
 - **Checkpoint system** — hardcoded hashes prevent deep chain reorgs
 - **3-of-5 Treasury Multisig** — `ms69216b1d10425689704d5ae3b2a4aa17049f59b1`, consensus-enforced
+- **AI agent native** — `payload: Vec<u8>` in every tx; signed by Falcon-512; carries agent instructions or stablecoin intents
 
 ### Transaction Types
 
@@ -227,18 +225,22 @@ curl -X POST http://localhost:3000/transactions \
 Transfer                              — Standard value transfer
 TimeLockTransfer { unlock_height }    — Cryptographic escrow / vaulting
 MultiSigTransfer { signers_required } — Institutional M-of-N multisig
+Stake { validator_pubkey }            — Register as BFT validator
+Unstake                               — Deregister validator, begin unbonding
+ContractDeploy { template_id }        — Deploy native contract (Escrow, etc.)
+ContractCall { method, args }         — Invoke deployed contract
 ```
 
-### Mining Rewards (Year 1)
+### Validator Economics (Year 1 — 7 testnet validators)
 
 | Parameter | Value |
 |-----------|-------|
-| Block reward | 100 QUA |
-| Miner immediate (47.5%) | 47.5 QUA/block |
-| Miner locked ~54.75 days (47.5%) | 47.5 QUA/block |
-| Treasury (5%) | 5 QUA/block |
-| Fee burn | 70% of all fees |
-| Daily blocks | ~2,880 |
+| Block reward | **50 QUA** |
+| QEF allocation (8%) | 4 QUA/block |
+| Proposer reward (92%) | 46 QUA/block |
+| Fee split | 50% burn / 35% proposer / 15% QEF |
+| Daily blocks | ~14,400 (at 6s slots) |
+| Per-validator annual income | ~34,537,000 QUA (~$34,537 at $0.001/QUA) |
 
 ---
 
@@ -277,7 +279,7 @@ Genesis event, block explorer, production wallets, exchange integrations
 
 ### Phase 6: Expansion (2027+)
 
-Light client (SPV), hardware wallet support, PoW → PoS hybrid transition
+Light client (SPV), hardware wallet support, AI agent SDK v2, DEX bridge integrations
 
 ---
 
@@ -294,23 +296,26 @@ Light client (SPV), hardware wallet support, PoW → PoS hybrid transition
 
 ## Frequently Asked Questions
 
-**Q: What makes QUANTA different from QRL and QAN?**
-A: QUANTA uses NIST-standardized Falcon-512, delivers 120+ TPS, is written in production-grade Rust, and deliberately removes smart contracts to serve as a hyper-secure Institutional Settlement Vault.
+**Q: What makes QUANTA different from other PQC chains (QRL, QAN)?**
+A: QUANTA uses NIST-standardized Falcon-512, delivers 120+ TPS with 6-second BFT finality, and is purpose-built as an **AI agent execution layer** — not a general-purpose L1. QUA is gas for AI agents, not a speculative store-of-value.
 
 **Q: When is mainnet?**
 A: Planned Q1 2027, after public testnet (Q2 2026) and security hardening (Q3 2026).
 
 **Q: Is there a token sale or ICO?**
-A: No. 100% fair launch through mining. No pre-mine, no ICO, no insider allocation.
+A: No ICO. QUA is distributed via block rewards (BFT validators) and a genesis allocation to founding validators. No VC dump, no unlock cliff.
 
-**Q: Why Proof-of-Work?**
-A: PoW enables a fair launch, has 15+ years of proven security, and provides Sybil resistance without stake centralization. PoS is planned as a future upgrade — see [GOVERNANCE.md](GOVERNANCE.md).
+**Q: Why DPoS + BFT instead of Proof-of-Work?**
+A: AI agents cannot wait for 6-confirmation PoW finality. BFT provides **instant finality** in 6 seconds with `>2/3` validator quorum. DPoS enables energy-efficient staking with real validator accountability (unbonding period).
 
-**Q: What hardware do I need to mine?**
-A: 4-core CPU, 8 GB RAM. QUANTA's SHA3-256 PoW is CPU-friendly — no specialized ASICs required.
+**Q: What hardware do I need to validate?**
+A: 4-core CPU, 4 GB RAM. No ASICs, no GPUs — Falcon-512 BFT is CPU-friendly. VPS cost ~$20–40/month.
 
 **Q: Why Falcon-512 (Level 1) and not Falcon-1024?**
 A: Level 1 gives 64-bit post-quantum security. Falcon-1024 would roughly double transaction sizes, cutting throughput by half. The `sig_scheme` field enables a soft-fork upgrade if cryptanalysis improves.
+
+**Q: Can AI agents pay in USDC/USDT?**
+A: Yes — the `payload: Vec<u8>` field in every transaction is signed by Falcon-512 and can carry stablecoin settlement intents. QUA pays for execution (gas); USDC/USDT is the settlement currency embedded in the payload. No competition.
 
 ---
 

@@ -108,28 +108,30 @@ const MAX_DIFFICULTY: u32 = 2_147_483_647;
 #[allow(dead_code)]
 const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = LWMA_WINDOW;
 
-// MODERN ADAPTIVE TOKENOMICS (Option 3 - Solana-style)
-const YEAR_1_REWARD: u64 = 100_000_000; // 100 QUA in microunits
-const ANNUAL_REDUCTION_PERCENT: u64 = 15; // 15% reduction per year (faster value creation)
-const MIN_REWARD: u64 = 5_000_000; // 5 QUA floor (reached after ~20 years)
-const BLOCKS_PER_YEAR: u64 = 1_051_200; // 365.25 days * 86400 / 30 seconds
+// v3 TOKENOMICS — AI Agent Execution Layer Era
+// Block time: SLOT_SECONDS = 6 (bft_proposer.rs)
+const YEAR_1_REWARD: u64 = 50_000_000; // 50 QUA/block — tighter emission for AI era
+const ANNUAL_REDUCTION_PERCENT: u64 = 15; // 15% smooth decay (no halving shocks)
+const MIN_REWARD: u64 = 2_000_000; // 2 QUA floor — more deflationary long-term
+const BLOCKS_PER_YEAR: u64 = 5_256_000; // 365.25 days * 86400 / 6s (BFT SLOT_SECONDS)
 
 // UNIQUE FEATURES - Network Bootstrap
 #[allow(dead_code)]
-const BOOTSTRAP_PHASE_BLOCKS: u64 = 315_360; // First month gets network usage boost
+const BOOTSTRAP_PHASE_BLOCKS: u64 = 315_360; // First month bootstrap reference
 
-// SUSTAINABLE ECONOMICS - Fee Structure & Value Capture
+// v3 FEE STRUCTURE — DPoS validator-first split
+// Validators need real fee income; burn kept high for deflation; treasury funds AI SDK work.
 #[allow(dead_code)]
 const BASE_TRANSACTION_FEE: u64 = 1_000; // 0.001 QUA minimum (prevents spam)
-const FEE_BURN_PERCENT: u64 = 70; // 70% of fees burned (deflationary pressure)
-const FEE_TREASURY_PERCENT: u64 = 20; // 20% to development treasury
-const FEE_VALIDATOR_PERCENT: u64 = 10; // 10% to block validator (miner)
-// I-2 FIX: Compile-time guard — build fails if fee percentages don't add to 100.
+const FEE_BURN_PERCENT: u64 = 50;      // 50% burned — deflationary without punishing micro-tx
+const FEE_TREASURY_PERCENT: u64 = 15;  // 15% to Ecosystem Fund (QEF)
+const FEE_VALIDATOR_PERCENT: u64 = 35; // 35% to block proposer — DPoS validators need real yield
+// Compile-time guard — build fails if fee percentages don't add to 100.
 const _: () = assert!(FEE_BURN_PERCENT + FEE_TREASURY_PERCENT + FEE_VALIDATOR_PERCENT == 100,
     "Fee percentages must sum to 100");
 
-// TREASURY FUND - Development, Marketing, Listings
-const TREASURY_ALLOCATION_PERCENT: u64 = 5; // 5% of block rewards → treasury
+// ECOSYSTEM FUND (QEF) — AI SDK, security audits, exchange listings, community
+const TREASURY_ALLOCATION_PERCENT: u64 = 8; // 8% of block rewards → Quanta Ecosystem Fund
 
 // CONSENSUS-CRITICAL: Treasury multisig address (3-of-5 Falcon-512, generated 2026-03-14)
 // This address is hardcoded in consensus — it CANNOT be changed by editing quanta.toml.
@@ -138,10 +140,8 @@ const TREASURY_ALLOCATION_PERCENT: u64 = 5; // 5% of block rewards → treasury
 // Keyset: treasury_key0.qua … treasury_key4.qua — any 3 of 5 must sign.
 const TREASURY_ADDRESS: &str = "ms69216b1d10425689704d5ae3b2a4aa17049f59b1";
 
-// ANTI-DUMP MECHANISM - Mining Reward Lockup
-const MINING_REWARD_LOCK_PERCENT: u64 = 50; // 50% of mining rewards locked
-#[allow(dead_code)]
-const MINING_REWARD_LOCK_BLOCKS: u64 = 157_680; // ~54.75 days vesting (157,680 × 30s)
+// NOTE: PoW mining reward lock removed — replaced by DPoS unbonding period (UNBONDING_EPOCHS).
+// The BFT path (create_bft_block_template) always paid full proposer reward; this was dead code.
 
 // Security limits
 const MAX_MEMPOOL_SIZE: usize = 5000; // Maximum pending transactions
@@ -160,9 +160,9 @@ const MAX_BLOCK_TRANSACTIONS: usize = 1200; // Maximum transactions per block
 pub const MAX_BLOCK_SIZE_BYTES: usize = 2_097_152; // 2 MB max block size
 const MAX_ORPHAN_BLOCKS: usize = 2000; // Increased to hold full MAX_SYNC_BATCH out-of-order blocks
 const MAX_TRANSACTION_SIZE_BYTES: usize = 102400; // 100KB max per transaction (prevents DOS)
-const MIN_TRANSACTION_FEE: u64 = 100; // 0.0001 QUA in microunits
+const MIN_TRANSACTION_FEE: u64 = 100; // 0.0001 QUA in microunits — sub-cent for AI micro-tx
 const TRANSACTION_EXPIRY_SECONDS: i64 = 86400; // 24 hours
-const COINBASE_MATURITY: u64 = 100; // Blocks before coinbase can be spent
+const COINBASE_MATURITY: u64 = 500; // ~50 min at 6s BFT slots (matches old 100×30s window)
 const MAX_FUTURE_BLOCK_TIME: i64 = 7200; // 2 hours maximum future timestamp
 /// LOW-1 FIX: Bound address string length to prevent unbounded HashMap key allocations.
 const MAX_ADDRESS_LEN: usize = 128;
@@ -827,22 +827,18 @@ impl Blockchain {
         let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100;
         let fee_to_miner = total_fees - fee_burned - fee_to_treasury; // Remainder goes to miner
         
-        // TREASURY ALLOCATION (5% of block rewards)
+        // ECOSYSTEM FUND ALLOCATION (8% of block rewards → QEF multisig)
         let treasury_allocation = (reward * TREASURY_ALLOCATION_PERCENT) / 100;
-        let miner_reward = reward - treasury_allocation; // 95% to miner
-        
-        // ANTI-DUMP: 50% of mining rewards locked for 6 months
-        let immediate_reward = (miner_reward * (100 - MINING_REWARD_LOCK_PERCENT)) / 100;
-        let locked_reward = miner_reward - immediate_reward;
-        
+        let proposer_reward = reward - treasury_allocation; // 92% to block proposer
+
         tracing::info!(
-            "Mining Economics: Reward={} QUA, Treasury={} QUA, Fees Burned={} QUA, Locked={} QUA",
+            "Block Economics: Reward={} QUA, QEF={} QUA, Fees Burned={} QUA, Proposer={} QUA",
             reward / 1_000_000, treasury_allocation / 1_000_000,
-            fee_burned / 1_000_000, locked_reward / 1_000_000
+            fee_burned / 1_000_000, proposer_reward / 1_000_000
         );
         
-        // Coinbase transaction (immediate + fees to miner)
-        let coinbase_amount = immediate_reward.saturating_add(fee_to_miner);
+        // Coinbase transaction (full proposer reward + fee share)
+        let coinbase_amount = proposer_reward.saturating_add(fee_to_miner);
         let coinbase_tx = Transaction {
             sender: "COINBASE".to_string(),
             recipient: miner_address.clone(),
@@ -1164,17 +1160,16 @@ impl Blockchain {
         let fee_to_miner = (total_fees * FEE_VALIDATOR_PERCENT) / 100;
         let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100;
         
-        // REWARD DISTRIBUTION: 5% treasury, 95% to miner (50% locked)
+        // v3 REWARD DISTRIBUTION: 8% QEF, 92% to block proposer (no PoW lock in BFT)
         let treasury_allocation = (expected_reward * TREASURY_ALLOCATION_PERCENT) / 100;
-        let miner_reward = expected_reward - treasury_allocation;
-        let immediate_reward = (miner_reward * (100 - MINING_REWARD_LOCK_PERCENT)) / 100;
-        
-        // Coinbase should contain: immediate reward + miner's fee share
-        let expected_coinbase = immediate_reward.saturating_add(fee_to_miner);
+        let proposer_reward = expected_reward - treasury_allocation;
+
+        // Coinbase should contain: full proposer reward + validator fee share
+        let expected_coinbase = proposer_reward.saturating_add(fee_to_miner);
         if coinbase.amount != expected_coinbase {
             tracing::warn!(
                 "Invalid coinbase amount: expected {} (reward: {}, fees: {}), got {}",
-                expected_coinbase, immediate_reward, fee_to_miner, coinbase.amount
+                expected_coinbase, proposer_reward, fee_to_miner, coinbase.amount
             );
             return Err(BlockchainError::InvalidCoinbaseReward {
                 actual: coinbase.amount,

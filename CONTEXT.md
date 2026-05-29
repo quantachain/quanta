@@ -1,15 +1,17 @@
 # QUANTA — AI Handoff Context File
-> **Purpose:** Drop this file into any AI assistant to get it fully up to speed on the Quanta blockchain project in 2 minutes. Last updated: 2026-05-28.
+> **Purpose:** Drop this file into any AI assistant to get it fully up to speed on the Quanta blockchain project in 2 minutes. Last updated: 2026-05-29.
 
 ---
 
 ## 1. What Is Quanta?
 
-Quanta (`e:\temp\quanta`) is a **post-quantum blockchain written in Rust**, purpose-built as the financial settlement layer for autonomous AI agents. It is currently on testnet (QUA7), version `0.7.5`.
+Quanta (`e:\temp\quanta`) is a **post-quantum blockchain written in Rust**, purpose-built as the **AI agent execution layer** — a quantum-safe gas layer for autonomous AI agents. It is currently on testnet (QUA7), version `0.7.5`.
 
 **The core vision:** AI agents on the internet need to hire each other, pay for compute, buy datasets, etc. — all without humans in the loop. Every existing chain is too slow, too expensive, or uses classical (non-quantum-safe) cryptography. Quanta is purpose-built to fix all three.
 
-**The $1B path:** Own the AI-agent payment layer before anyone else does. The AI agent economy is projected to be a multi-trillion dollar market. Quanta provides trustless, quantum-safe, sub-cent micropayments natively on-chain.
+**QUA token role:** QUA is **execution fuel (gas)**, not settlement currency. Agents pay each other in USDC/USDT (inside the `payload` field), but pay QUA to execute transactions on-chain — exactly the ETH model. QUA never competes with stablecoins.
+
+**The $1B path:** Own the AI-agent gas layer before anyone else. The AI agent economy is projected to be a multi-trillion dollar market. Quanta provides trustless, quantum-safe, sub-cent execution gas natively on-chain.
 
 ---
 
@@ -35,7 +37,7 @@ This is **NOT Proof of Work**. The chain uses:
 
 ### DPoS (Delegated Proof of Stake)
 - Validators register by sending a `Stake` transaction containing their Falcon-512 pubkey + staked QUA.
-- Each epoch = 1000 blocks. Top 7 stakers form the **committee** (see `src/consensus/authorities.rs`).
+- Each epoch = 1000 blocks (~1.67 hours at 6s). Top **7 stakers** form the **committee** (testnet QUA7 — permissioned). **Mainnet will use 21 validators.** See `src/consensus/authorities.rs`.
 - Committee rotates deterministically via `get_proposer(epoch, height, committee)`.
 
 ### BFT (Tendermint-style finality)
@@ -49,7 +51,7 @@ This is **NOT Proof of Work**. The chain uses:
 PoW exists only in benchmarks (`--full-pow` flag). The live chain uses BFT+DPoS for:
 - **Instant finality** (no 6-confirmation wait) — AI agents can't wait.
 - **Energy efficiency** — no wasted hashing.
-- **Predictable block times** — 30s target via LWMA difficulty.
+- **Predictable block times** — **`SLOT_SECONDS = 6`** (see `bft_proposer.rs:33`) — 6-second BFT slots.
 
 ---
 
