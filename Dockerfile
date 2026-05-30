@@ -60,6 +60,7 @@ WORKDIR /home/quanta
 COPY --from=builder /app/target/release/quanta        /usr/local/bin/quanta
 COPY --from=builder /app/target/release/quanta-wallet /usr/local/bin/quanta-wallet
 COPY --chown=quanta:quanta quanta.toml /home/quanta/quanta.toml
+COPY --chown=quanta:quanta genesis.json /home/quanta/genesis.json
 
 # Create data directories and set permissions
 RUN mkdir -p /home/quanta/quanta_data \
