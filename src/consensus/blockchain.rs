@@ -446,6 +446,7 @@ impl Blockchain {
                     }
                 }
             }
+            storage.save_block(&genesis)?;
             storage.set_chain_height(1)?;
             storage.save_account_state(&account_state)?;
             
