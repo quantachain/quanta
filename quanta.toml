@@ -52,12 +52,12 @@ max_peers = 125
 # Bootstrap peer addresses - Initial peers to connect to on startup
 # Currently EMPTY as no bootstrap infrastructure exists yet
 # Add peer addresses here when available: ["ip:port", "ip:port"]
-bootstrap_nodes = ["node.quantachain.org:8333"]
+bootstrap_nodes = []
 
 # DNS seeds for peer discovery
 # Currently EMPTY as no DNS seed infrastructure exists yet
 # Add seed domains here when available: ["seed1.domain", "seed2.domain"]
-dns_seeds = ["seed.quantachain.org"]
+dns_seeds = []
 
 # ========================================
 # Security Settings (Node-local preferences)

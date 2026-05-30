@@ -215,21 +215,6 @@ const TESTNET_GENESIS_HASH: &str = "b75dc9fbbc02c7780db84f94811d02e442ec812294fd
 // Never add a checkpoint you haven't independently verified.
 const TESTNET_CHECKPOINTS: &[(u64, &str)] = &[
     (0,      TESTNET_GENESIS_HASH),
-    (10_000, "0000013b6f5f570de0605eac1e7c2fde87f8ce30ca26acc26a9a78d9c18374d5"),
-    (20_000, "00000008ac637f1cf3f891de979b1ed7debb8862e0bbc9fdb64e90a19d773885"),
-    (30_000, "000001743b0b76fe64b28631afd7c923cf6eca06377dabe9fc8ebbbf8725ac6e"),
-    (40_000, "00000059783ae9efeb043ac6b1fa254fa338ccc5631dd1b7f96f6a498df07c86"),
-    (50_000, "0000010309330cd86087a9133848f80fc82b056f63adc0749e83894f0a4de956"),
-    // Verified live from scan.quantachain.org on 2026-05-05
-    (60_000, "0000010ce22920660ba1e42423ea46e76dc7582963d6f9f220e3930031bd9bc9"),
-    (70_000, "000001fcb0637b06601b4f111b22070e856c8cabf2eaa545c41b938b4478d186"),
-    (80_000, "0000002d80e66bce37596616a9c9c3c1988da6e65811ad132926162c7e000a0e"),
-    // Verified live from scan.quantachain.org on 2026-05-06
-    (85_000, "0000007305d4ceeaf72a4f3c58001295a335d588e16a05f037d21dfb21ac06ca"),
-    // Verified live from scan.quantachain.org on 2026-05-08 — anchors the
-    // v2: All nodes on v2 share the same BFT-from-genesis history.
-    (90_000, "000000dc8e178a5140a5c68461234a9541373ac349b1ae3cbc3f0f3f1fc58d5e"),
-    // Next: add (95_000, ...) or (100_000, ...) once chain reaches that height.
 ];
 
 // MAINNET checkpoints — empty until mainnet launch
