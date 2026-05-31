@@ -41,12 +41,12 @@ pub fn epoch_start(epoch: u64) -> u64 {
 /// Rotation: `slot = height - epoch_start(epoch)`, then round-robin over
 /// the sorted committee.  Consistent across all nodes because the committee
 /// list is sorted by address (secondary key after stake).
-pub fn get_proposer(epoch: u64, height: u64, committee: &[String]) -> Option<String> {
+pub fn get_proposer(epoch: u64, height: u64, round: u32, committee: &[String]) -> Option<String> {
     if committee.is_empty() {
         return None;
     }
     let epoch_start = epoch_start(epoch);
-    let slot = (height - epoch_start) as usize;
+    let slot = (height - epoch_start) as usize + round as usize;
     Some(committee[slot % committee.len()].clone())
 }
 

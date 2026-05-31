@@ -126,6 +126,9 @@ pub async fn run_bft_proposer(
 ) {
     info!("BFT Proposer: starting (validator={})", wallet.address);
 
+    let mut current_round = 0;
+    let mut last_height = 0;
+
     loop {
         // ── Get current chain state ─────────────────────────────────────────
         let (height, committee, state_snapshot) = {
@@ -136,12 +139,17 @@ pub async fn run_bft_proposer(
             (h, c, snap)
         };
 
+        if height > last_height {
+            current_round = 0;
+            last_height = height;
+        }
+
         let next_height = height;
         let epoch = epoch_for_height(next_height);
 
         // ── Are we the proposer for next_height? ────────────────────────────
         let my_address = wallet.address.clone();
-        let proposer = get_proposer(epoch, next_height, &committee);
+        let proposer = get_proposer(epoch, next_height, current_round, &committee);
 
         let am_proposer = proposer.as_deref() == Some(my_address.as_str());
 
@@ -152,27 +160,69 @@ pub async fn run_bft_proposer(
         }
 
         if !am_proposer {
-            // Not our slot — wait for a new block or timeout.
-            tokio::select! {
-                _ = new_block_rx.changed() => {}
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(SLOT_SECONDS)) => {}
+            // Not our slot — wait for a new block, incoming proposals, or timeout.
+            let mut timeout = tokio::time::interval(tokio::time::Duration::from_millis(100));
+            let start = tokio::time::Instant::now();
+            let mut advanced_round = false;
+            
+            loop {
+                tokio::select! {
+                    _ = new_block_rx.changed() => {
+                        break; // Height changed, will reset round at top of loop
+                    }
+                    _ = timeout.tick() => {
+                        if start.elapsed().as_secs() >= SLOT_SECONDS {
+                            warn!("BFT Proposer: height {} round {} timed out. Advancing round.", next_height, current_round);
+                            current_round += 1;
+                            advanced_round = true;
+                            break;
+                        }
+                        
+                        // Check for proposals from the network
+                        if let Some(ref net) = network {
+                            let proposals = net.drain_bft_proposals(next_height).await;
+                            for proposal in proposals {
+                                // Must match the current round we are on!
+                                if proposal.bft_round == current_round {
+                                    if let Some(sig) = handle_bft_proposal(&proposal, &blockchain, &wallet).await {
+                                        let vote = VoteMsg {
+                                            height: proposal.index,
+                                            round: proposal.bft_round,
+                                            epoch: proposal.epoch,
+                                            block_hash: proposal.hash.clone(),
+                                            validator: wallet.address.clone(),
+                                            signature: sig,
+                                        };
+                                        net.broadcast_bft_vote(vote).await;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            continue;
+            
+            if advanced_round {
+                continue;
+            } else {
+                // If we broke because of a new block, just continue to reload state
+                continue;
+            }
         }
 
         info!(
-            "BFT Proposer: I am proposer for height {} (epoch={}, committee_size={})",
-            next_height, epoch, committee.len()
+            "BFT Proposer: I am proposer for height {} (round={}, epoch={}, committee_size={})",
+            next_height, current_round, epoch, committee.len()
         );
 
         // ── Build block template ────────────────────────────────────────────
         let mut block = match blockchain.read().await
-            .create_bft_block_template(next_height, my_address.clone(), epoch, 0)
+            .create_bft_block_template(next_height, my_address.clone(), epoch, current_round)
         {
             Ok(b) => b,
             Err(e) => {
                 error!("BFT Proposer: failed to build block template: {}", e);
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 continue;
             }
         };
@@ -189,7 +239,7 @@ pub async fn run_bft_proposer(
         // ── Collect votes (precommits) ──────────────────────────────────────
         let mut collector = BftVoteCollector::new(
             next_height,
-            0, // round 0
+            current_round,
             epoch,
             committee.len(),
         );
@@ -203,6 +253,10 @@ pub async fn run_bft_proposer(
             if let Some(ref net) = network {
                 let votes = net.drain_vote_messages(&block.hash).await;
                 for vote in votes {
+                    // Only accept votes for the current round
+                    if vote.round != current_round {
+                        continue;
+                    }
                     // Only accept votes from committee members with valid sigs.
                     if !committee.contains(&vote.validator) {
                         continue;
@@ -225,9 +279,10 @@ pub async fn run_bft_proposer(
         // ── Assemble certificate or bail ────────────────────────────────────
         if !collector.has_precommit_quorum() {
             warn!(
-                "BFT Proposer: height {} — timed out without quorum, skipping",
-                next_height
+                "BFT Proposer: height {} round {} — timed out without quorum, skipping",
+                next_height, current_round
             );
+            current_round += 1;
             continue;
         }
 
