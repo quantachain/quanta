@@ -4,6 +4,9 @@ pub mod bft;
 pub mod bft_proposer;
 pub mod mempool;
 pub mod performance;
+pub mod aleph_keychain;
+pub mod aleph_data;
+pub mod aleph_network;
 
 pub use blockchain::Blockchain;
 #[allow(unused_imports)]

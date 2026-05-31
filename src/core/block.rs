@@ -16,7 +16,7 @@ use chrono::Utc;
 /// Consensus is BFT (Tendermint-style) from genesis.
 /// All integrity is provided by Falcon-512 signatures from the epoch committee,
 /// NOT by hash-puzzle PoW.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, std::hash::Hash, codec::Encode, codec::Decode)]
 pub struct Block {
     // ---- Chain structure ----
     /// Block height (0 = genesis).

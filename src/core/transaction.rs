@@ -17,7 +17,7 @@ use std::collections::HashMap;
 /// FROZEN VALUES — do not reorder or delete:
 ///   0 = Falcon512  (current, post-quantum)
 ///   1 = Reserved   (placeholder; no implementation)
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Copy)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, std::hash::Hash, Copy, codec::Encode, codec::Decode)]
 #[repr(u8)]
 pub enum SignatureScheme {
     /// Falcon-512 (NIST PQC Round 3 — compact lattice signatures).
@@ -48,7 +48,7 @@ impl Default for SignatureScheme {
 /// CONSENSUS RULE:
 ///   Nodes must only call `verify()` inside consensus logic.
 ///   Signing (keypair operations) must never occur inside the consensus path.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, std::hash::Hash, codec::Encode, codec::Decode)]
 pub struct Transaction {
     pub sender: String,
     pub recipient: String,
@@ -94,7 +94,7 @@ pub struct Transaction {
 ///   4 = Unstake        (v2 — deregister, begin unbonding)
 ///   5 = ContractDeploy (v2 — deploy a named contract template)
 ///   6 = ContractCall   (v2 — invoke a deployed contract)
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, std::hash::Hash, codec::Encode, codec::Decode)]
 pub enum TransactionType {
     /// Standard value transfer.
     Transfer,

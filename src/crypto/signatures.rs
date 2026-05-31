@@ -47,36 +47,10 @@ struct SecretKeyBytes(Vec<u8>);
 // FalconKeypair
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FalconKeypair {
     pub public_key: Vec<u8>,
     secret_key: Vec<u8>,
-}
-
-#[derive(serde::Serialize)]
-struct FalconKeypairPublicView<'a> {
-    public_key: &'a Vec<u8>,
-}
-
-#[derive(serde::Deserialize)]
-struct FalconKeypairDeser {
-    public_key: Vec<u8>,
-}
-
-impl serde::Serialize for FalconKeypair {
-    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        FalconKeypairPublicView { public_key: &self.public_key }.serialize(s)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for FalconKeypair {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let view = FalconKeypairDeser::deserialize(d)?;
-        Ok(FalconKeypair {
-            public_key: view.public_key,
-            secret_key: Vec::new(),
-        })
-    }
 }
 
 impl Drop for FalconKeypair {
