@@ -136,7 +136,7 @@ pub async fn run_bft_proposer(
             (h, c, snap)
         };
 
-        let next_height = height + 1;
+        let next_height = height;
         let epoch = epoch_for_height(next_height);
 
         // ── Are we the proposer for next_height? ────────────────────────────

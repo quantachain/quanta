@@ -1046,11 +1046,11 @@ impl Blockchain {
     }
 
     /// Get block at exact height from storage. Returns None if not found.
-    pub fn get_block_by_index(&self, height: u64) -> Option<Block> {
-        if height == self.get_height() {
+    pub fn get_block_by_index(&self, index: u64) -> Option<Block> {
+        if index == self.get_height().saturating_sub(1) {
             return Some(self.get_latest_block());
         }
-        self.storage.load_block(height).ok()
+        self.storage.load_block(index).ok()
     }
 
     /// Get current BFT block reward (proposer reward = mining reward equivalent).
