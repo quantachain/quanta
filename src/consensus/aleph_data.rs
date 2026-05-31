@@ -30,7 +30,7 @@ impl DataProvider for QuantaDataProvider {
 
     async fn get_data(&mut self) -> Option<Self::Output> {
         // Throttle block creation to prevent spamming empty blocks in the DAG
-        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(6000)).await;
 
         let bc = self.blockchain.read().await;
 

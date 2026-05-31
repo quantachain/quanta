@@ -604,6 +604,53 @@ async fn get_peers(
     }
 }
 
+// -----------------------------------------------------------------------
+// Validators
+// -----------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct ValidatorInfoResponse {
+    pub address: String,
+    pub falcon_pk_hex: String,
+    pub stake_microunits: u64,
+    pub registered_epoch: u64,
+    pub active: bool,
+}
+
+#[derive(Serialize)]
+pub struct ValidatorsResponse {
+    pub active_count: usize,
+    pub validators: Vec<ValidatorInfoResponse>,
+}
+
+async fn get_validators(
+    State(state): State<Arc<ApiState>>,
+) -> Json<ValidatorsResponse> {
+    let blockchain = state.blockchain.read().await;
+    let account_state = blockchain.get_account_state_read();
+    let validators_map = account_state.get_validators();
+    
+    let mut validators: Vec<ValidatorInfoResponse> = validators_map.iter().map(|(addr, info)| {
+        ValidatorInfoResponse {
+            address: addr.clone(),
+            falcon_pk_hex: hex::encode(&info.falcon_pk),
+            stake_microunits: info.stake,
+            registered_epoch: info.registered_epoch,
+            active: info.active,
+        }
+    }).collect();
+    
+    // Sort by stake descending
+    validators.sort_by(|a, b| b.stake_microunits.cmp(&a.stake_microunits));
+    
+    let active_count = validators.iter().filter(|v| v.active).count();
+    
+    Json(ValidatorsResponse {
+        active_count,
+        validators,
+    })
+}
+
 /// Get node metrics (Prometheus format)
 async fn get_metrics(
     State(state): State<Arc<ApiState>>,
@@ -821,6 +868,7 @@ pub fn create_router(
         .route("/api/stats",        get(get_stats))
         .route("/api/validate",     get(validate_chain))
         .route("/api/peers",        get(get_peers))
+        .route("/api/validators",   get(get_validators))
         .route("/api/metrics",      get(get_metrics))
         // ── Blocks ──────────────────────────────────────────────────────
         .route("/api/block/:height",    get(get_block))
@@ -890,6 +938,7 @@ pub async fn start_server(
     tracing::info!("   POST /api/blocks/submit             - Submit solved block (pool use)");
     tracing::info!("   GET  /api/validate                  - Validate blockchain");
     tracing::info!("   GET  /api/peers                     - Connected peers");
+    tracing::info!("   GET  /api/validators                - Registered validators");
     tracing::info!("   GET  /api/metrics                   - Prometheus metrics");
     
     let listener = tokio::net::TcpListener::bind(&addr)
