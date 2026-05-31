@@ -304,9 +304,9 @@ fn is_routable_addr(addr: &SocketAddr) -> bool {
     // Reject private IPs (can be made configurable)
     match ip {
         std::net::IpAddr::V4(ipv4) => {
-            // Reject: 10.x.x.x, 172.16-31.x.x, 192.168.x.x
+            // Reject: 10.x.x.x, 192.168.x.x
+            // ALLOW 172.16-31.x.x to support Docker bridge networks for local testnets!
             !(ipv4.octets()[0] == 10
-                || (ipv4.octets()[0] == 172 && (16..=31).contains(&ipv4.octets()[1]))
                 || (ipv4.octets()[0] == 192 && ipv4.octets()[1] == 168))
         }
         std::net::IpAddr::V6(ipv6) => {
