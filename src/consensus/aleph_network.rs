@@ -29,7 +29,7 @@ impl<D> QuantaNetworkBridge<D> {
 }
 
 #[async_trait]
-impl<D: Encode + Decode + Send + 'static> AlephNetwork<D> for QuantaNetworkBridge<D> {
+impl<D: Encode + Decode + Send + std::fmt::Debug + 'static> AlephNetwork<D> for QuantaNetworkBridge<D> {
     fn send(&self, data: D, _recipient: Recipient) {
         // Encode the AlephBFT NetworkData
         let encoded = data.encode();
@@ -49,7 +49,7 @@ impl<D: Encode + Decode + Send + 'static> AlephNetwork<D> for QuantaNetworkBridg
             // Decode the data into D
             match D::decode(&mut &data[..]) {
                 Ok(decoded) => {
-                    tracing::info!("QuantaNetworkBridge: Successfully decoded {} bytes. Passing to AlephBFT.", data.len());
+                    tracing::info!("QuantaNetworkBridge: Successfully decoded {} bytes. Passing to AlephBFT: {:?}", data.len(), decoded);
                     return Some(decoded);
                 }
                 Err(e) => {
