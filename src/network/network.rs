@@ -386,7 +386,7 @@ impl Network {
                 self.peer_manager.remove_peer(addr).await;
             }
             P2PMessage::AlephBFTMessage(data) => {
-                debug!("Received AlephBFT message ({} bytes) from {}", data.len(), addr);
+                info!("Received AlephBFT message ({} bytes) from {}", data.len(), addr);
                 let tx_opt = self.aleph_bft_tx.read().await;
                 if let Some(tx) = &*tx_opt {
                     let _ = tx.send(data);
@@ -1061,7 +1061,7 @@ impl Network {
                         let peers = self.peer_manager.get_peers().await;
                         let mut connected = false;
                         for peer in peers {
-                            if peer.address().await == addr {
+                            if peer.address().await.ip() == addr.ip() {
                                 connected = true;
                                 break;
                             }

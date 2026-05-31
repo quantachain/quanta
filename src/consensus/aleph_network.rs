@@ -33,6 +33,7 @@ impl<D: Encode + Decode + Send + 'static> AlephNetwork<D> for QuantaNetworkBridg
     fn send(&self, data: D, _recipient: Recipient) {
         // Encode the AlephBFT NetworkData
         let encoded = data.encode();
+        tracing::info!("AlephBFT attempting to broadcast a {} byte message to {:?}", encoded.len(), _recipient);
         
         let network = Arc::clone(&self.network);
         tokio::spawn(async move {
