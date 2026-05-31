@@ -315,7 +315,9 @@ impl PeerManager {
                 match (info.address.ip(), peer_ip) {
                     // IPv4: compare first 3 octets (/24 subnet)
                     (IpAddr::V4(a), IpAddr::V4(b)) => {
-                        if a.octets()[0..3] == b.octets()[0..3] {
+                        // ALLOW Docker internal networks to bypass Sybil protection
+                        let is_docker = a.octets()[0] == 172 && (16..=31).contains(&a.octets()[1]);
+                        if !a.is_loopback() && !is_docker && a.octets()[0..3] == b.octets()[0..3] {
                             subnet_count += 1;
                         }
                     }
