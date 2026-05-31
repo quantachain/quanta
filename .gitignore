@@ -37,6 +37,8 @@ Thumbs.db
 
 # Remove emojis
 remove_emojis.py
+*.py
+*.sh
 
 #Faucet
 
