@@ -207,6 +207,7 @@ impl Network {
                     let message_tx = self.message_tx.clone();
                     let peer_manager = Arc::clone(&self.peer_manager);
                     let blockchain = Arc::clone(&self.blockchain);
+                    let discovery = Arc::clone(&self.discovery);
                     let node_id = self.config.node_id.clone();
 
                     tokio::spawn(async move {
@@ -221,6 +222,12 @@ impl Network {
 
                                 if let Ok(_) = peer.handshake(PROTOCOL_VERSION, height, cumulative_work, node_id).await {
                                     if peer_manager.add_peer(Arc::clone(&peer)).await.is_ok() {
+                                        // BETA FIX: Add the peer's IP to discovery with the default port
+                                        // so that other nodes can discover it and form a full mesh network.
+                                        let mut discovery_addr = addr;
+                                        discovery_addr.set_port(8333); // Assume default Quanta port
+                                        discovery.add_peer(discovery_addr).await;
+                                        
                                         Self::start_peer_receive_task(peer, message_tx, peer_manager).await;
                                     }
                                 }
