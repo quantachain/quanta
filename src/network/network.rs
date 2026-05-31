@@ -228,6 +228,9 @@ impl Network {
                                         discovery_addr.set_port(8333); // Assume default Quanta port
                                         discovery.add_peer(discovery_addr).await;
                                         
+                                        // Request known peers from this new connection to discover the rest of the network
+                                        let _ = peer.send_message(P2PMessage::GetAddr).await;
+                                        
                                         Self::start_peer_receive_task(peer, message_tx, peer_manager).await;
                                     }
                                 }
@@ -297,6 +300,9 @@ impl Network {
         
         // Add to peer manager
         self.peer_manager.add_peer(Arc::clone(&peer)).await?;
+        
+        // Request known peers from this new connection to discover the rest of the network
+        let _ = peer.send_message(P2PMessage::GetAddr).await;
         
         // Start single receive task
         Self::start_peer_receive_task(

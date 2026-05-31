@@ -307,9 +307,14 @@ impl PeerManager {
 
         for p in peers.iter() {
             if let Ok(info) = p.info.try_read() {
-                // 1. Check exact match
+                // 1. Check exact match (IP and Port)
                 if info.address == peer_addr {
                     return Err("Already connected to this peer".to_string());
+                }
+                
+                // 1.5 Check exact IP match to prevent duplicate connections
+                if info.address.ip() == peer_ip {
+                    return Err(format!("Already connected to this peer IP: {}", peer_ip));
                 }
 
                 match (info.address.ip(), peer_ip) {
