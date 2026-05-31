@@ -392,7 +392,7 @@ impl Network {
                 self.peer_manager.remove_peer(addr).await;
             }
             P2PMessage::AlephBFTMessage(data) => {
-                info!("Received AlephBFT message ({} bytes) from {}", data.len(), addr);
+                // tracing::debug!("Received AlephBFT message ({} bytes) from {}", data.len(), addr);
                 let tx_opt = self.aleph_bft_tx.read().await;
                 if let Some(tx) = &*tx_opt {
                     if let Err(e) = tx.send(data) {

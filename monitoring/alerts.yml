@@ -74,22 +74,12 @@ groups:
           summary: "High disk usage on {{ $labels.node }}"
           description: "Disk usage is above 85%."
 
-      # Block processing slow
-      - alert: SlowBlockProcessing
-        expr: rate(quanta_block_processing_duration_seconds[5m]) > 10
-        for: 10m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Slow block processing on {{ $labels.node }}"
-          description: "Average block processing time is above 10 seconds."
-
-      # Transaction validation errors
-      - alert: HighTransactionErrors
-        expr: rate(quanta_transaction_validation_errors[5m]) > 0.1
+      # Node restarts frequently
+      - alert: FrequentRestarts
+        expr: resets(quanta_node_uptime_seconds[15m]) > 2
         for: 5m
         labels:
           severity: warning
         annotations:
-          summary: "High transaction validation error rate on {{ $labels.node }}"
-          description: "Transaction validation errors are above 0.1 per second."
+          summary: "Node is crash-looping {{ $labels.node }}"
+          description: "Node has restarted more than twice in the last 15 minutes."

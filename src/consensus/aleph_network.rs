@@ -42,14 +42,14 @@ impl<D: Encode + Decode + Send + std::fmt::Debug + 'static> AlephNetwork<D> for 
     }
 
     async fn next_event(&mut self) -> Option<D> {
-        tracing::info!("QuantaNetworkBridge: next_event() called by AlephBFT");
+        // tracing::debug!("QuantaNetworkBridge: next_event() called by AlephBFT");
         let mut rx = self.aleph_rx.lock().await;
         while let Some(data) = rx.recv().await {
-            tracing::info!("QuantaNetworkBridge: Dequeued {} bytes from aleph_rx. Attempting decode.", data.len());
+            // tracing::debug!("QuantaNetworkBridge: Dequeued {} bytes from aleph_rx. Attempting decode.", data.len());
             // Decode the data into D
             match D::decode(&mut &data[..]) {
                 Ok(decoded) => {
-                    tracing::info!("QuantaNetworkBridge: Successfully decoded {} bytes. Passing to AlephBFT: {:?}", data.len(), decoded);
+                    // tracing::debug!("QuantaNetworkBridge: Successfully decoded {} bytes.", data.len());
                     return Some(decoded);
                 }
                 Err(e) => {
