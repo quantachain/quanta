@@ -1056,6 +1056,24 @@ impl Network {
                 }
 
                 for addr in target_peers {
+                    // Check if already connected before dialing
+                    let is_connected = {
+                        let peers = self.peer_manager.get_peers().await;
+                        let mut connected = false;
+                        for peer in peers {
+                            if peer.address().await == addr {
+                                connected = true;
+                                break;
+                            }
+                        }
+                        connected
+                    };
+
+                    if is_connected {
+                        self.discovery.update_peer_seen(addr).await;
+                        continue;
+                    }
+
                     let network = Arc::clone(&self);
                     tokio::spawn(async move {
                         match network.connect_to_peer(addr).await {
