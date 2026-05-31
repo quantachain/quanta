@@ -389,7 +389,11 @@ impl Network {
                 info!("Received AlephBFT message ({} bytes) from {}", data.len(), addr);
                 let tx_opt = self.aleph_bft_tx.read().await;
                 if let Some(tx) = &*tx_opt {
-                    let _ = tx.send(data);
+                    if let Err(e) = tx.send(data) {
+                        tracing::error!("Failed to send AlephBFT message to channel: {:?}", e);
+                    }
+                } else {
+                    tracing::warn!("AlephBFT channel not registered yet, dropping message.");
                 }
             }
             _ => {

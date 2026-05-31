@@ -42,11 +42,16 @@ impl<D: Encode + Decode + Send + 'static> AlephNetwork<D> for QuantaNetworkBridg
     }
 
     async fn next_event(&mut self) -> Option<D> {
+        tracing::info!("QuantaNetworkBridge: next_event() called by AlephBFT");
         let mut rx = self.aleph_rx.lock().await;
         while let Some(data) = rx.recv().await {
+            tracing::info!("QuantaNetworkBridge: Dequeued {} bytes from aleph_rx. Attempting decode.", data.len());
             // Decode the data into D
             match D::decode(&mut &data[..]) {
-                Ok(decoded) => return Some(decoded),
+                Ok(decoded) => {
+                    tracing::info!("QuantaNetworkBridge: Successfully decoded {} bytes. Passing to AlephBFT.", data.len());
+                    return Some(decoded);
+                }
                 Err(e) => {
                     tracing::warn!("Failed to decode incoming AlephBFT message: {}", e);
                     continue;

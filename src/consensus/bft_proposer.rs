@@ -29,7 +29,10 @@ impl SpawnHandle for QuantaSpawnHandle {
         });
         
         Box::pin(async move {
-            let _ = rx.await;
+            if rx.await.is_err() {
+                tracing::error!("AlephBFT essential task panicked or exited unexpectedly!");
+                return Err(());
+            }
             Ok(())
         })
     }
