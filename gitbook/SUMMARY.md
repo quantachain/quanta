@@ -4,27 +4,15 @@
 * [Introduction](README.md)
 * [Installation](installation.md)
 * [Quick Start](quick-start.md)
-* [Release Notes](release-notes.md)
 
 ## Running a Node
 * [Node Operator Guide](node-operator-guide.md)
-* [Docker Deployment](docker-deployment.md)
-* [Configuration](configuration.md)
 
-
-## Wallets
+## Wallets & Ecosystem
 * [Wallet Operations](wallet-operations.md)
+
+## Architecture
+* [AlephBFT Consensus](consensus-bft.md)
 
 ## Developer Reference
 * [API Reference](api-reference.md)
-* [SDK Integration](sdk-integration.md)
-* [Technical Specifications](technical-specs.md)
-
-## Protocol
-* [Quantum Resistance](quantum-resistance.md)
-* [Falcon Signing Internals](falcon-signing-internals.md)
-* [P2P Networking](p2p-networking.md)
-* [Security](security.md)
-
-## Community
-* [Contributing](contributing.md)
