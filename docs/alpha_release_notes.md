@@ -48,34 +48,33 @@ cargo build --release      # compile the new V2 binary
 
 ---
 
-## Server Setup (Ubuntu / VPS) for V2 Genesis Launch
+## Validator Setup (Docker)
 
-**1. Generate 7 HD/Raw Wallets for your Validators:**
+> **⚠️ ATTENTION:** For this Alpha Testnet, only known validators that have been selected can run the network. Unrecognized nodes will be rejected by the AlephBFT consensus committee.
+> To apply for validator early access, please email: **contact@quantachain.org**
+
+If you have been selected as a validator, follow these steps to run your node using Docker:
+
+**1. Create a Wallet and Get Your Key**
+You must generate a raw wallet and provide the public key to the core team to be whitelisted in the Genesis block.
 ```bash
-cargo run --bin quanta-wallet -- new-raw --file node1.qua
-# Repeat for node2 through node7. Save the passwords safely!
+docker run --rm -it xd637/quanta-node:latest quanta-wallet new-raw --file /tmp/validator.qua
 ```
 
-**2. Inject your Public Keys into the Source Code:**
-Use `cargo run --bin quanta-wallet -- --wallet node1.qua address` to get your Falcon-512 Public Keys and Addresses. Paste them into the `testnet_faucets` and `genesis_validators` array in `src/consensus/blockchain.rs`.
+**2. Start the Validator Node**
+Make sure to replace `<YOUR_PASSWORD>` with the password you used to create the wallet, and map your local wallet file into the container:
 
-**3. Update Genesis Hash:**
 ```bash
-cargo run --bin get_testnet_hash
+docker run -d \
+  --name quanta-validator \
+  --restart always \
+  -e QUANTA_WALLET_PASSWORD="<YOUR_PASSWORD>" \
+  -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
+  -v quanta-data:/home/quanta/quanta_data \
+  -v /absolute/path/to/validator.qua:/home/quanta/validator.qua \
+  xd637/quanta-node:latest \
+  quanta start --validator /home/quanta/validator.qua
 ```
-Copy the output and update `TESTNET_GENESIS_HASH` in `src/consensus/blockchain.rs`.
-
-**4. Compile and Start the Seed Node:**
-```bash
-cargo build --release
-./target/release/quanta --validator node1.qua
-```
-
-**5. Start the Remaining 6 Nodes:**
-```bash
-./target/release/quanta --validator node2.qua --seed <IP_OF_NODE_1>:8333
-```
-Once 5 of the 7 nodes connect, Block 1 will instantly finalize and the V2 network is live!
 
 ---
 
