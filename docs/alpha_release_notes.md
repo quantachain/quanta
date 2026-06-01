@@ -73,7 +73,7 @@ docker run -d \
   -v quanta-data:/home/quanta/quanta_data \
   -v /absolute/path/to/validator.qua:/home/quanta/validator.qua \
   xd637/quanta-node:latest \
-  quanta start --validator /home/quanta/validator.qua
+  quanta start --validator-wallet /home/quanta/validator.qua --bootstrap 79.137.78.1:8333
 ```
 
 ---
