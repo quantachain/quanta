@@ -748,7 +748,7 @@ impl Blockchain {
 
 
     /// Create a block template for mining (does not mine or save)
-    pub fn create_block_template(&self, miner_address: String) -> Result<Block, BlockchainError> {
+    pub fn create_block_template(&self, proposer_address: String) -> Result<Block, BlockchainError> {
         let reward = self.get_block_reward();
         
         let current_height = self.get_height();
@@ -827,7 +827,7 @@ impl Blockchain {
         let coinbase_amount = proposer_reward.saturating_add(fee_to_miner);
         let coinbase_tx = Transaction {
             sender: "COINBASE".to_string(),
-            recipient: miner_address.clone(),
+            recipient: proposer_address.clone(),
             amount: coinbase_amount,
             timestamp: chrono::Utc::now().timestamp(),
             signature: vec![],
@@ -892,7 +892,7 @@ impl Blockchain {
         let previous_block = self.get_latest_block();
         let previous_hash = previous_block.hash.clone();
         let epoch = crate::consensus::authorities::epoch_for_height(index);
-        let mut new_block = Block::new_bft(index, all_transactions, previous_hash, epoch, 0, "LEGACY".to_string());
+        let mut new_block = Block::new_bft(index, all_transactions, previous_hash, epoch, 0, proposer_address.clone());
         
         // Ensure timestamp is valid (strictly greater than previous and MTP)
         let current_time = chrono::Utc::now().timestamp();

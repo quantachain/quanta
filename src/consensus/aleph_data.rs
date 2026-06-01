@@ -29,10 +29,18 @@ impl DataProvider for QuantaDataProvider {
     type Output = Block;
 
     async fn get_data(&mut self) -> Option<Self::Output> {
-        // Throttle block creation to prevent spamming empty blocks in the DAG
-        tokio::time::sleep(tokio::time::Duration::from_millis(6000)).await;
-
         let bc = self.blockchain.read().await;
+
+        // Ensure a consistent 6-second block time without stalling the BFT DAG.
+        // If we sleep here, we stall AlephBFT's internal consensus loops for all nodes!
+        // Instead, if 6 seconds haven't passed, we return None immediately so AlephBFT 
+        // can create an empty heartbeat unit and maintain the DAG speed.
+        let last_block = bc.get_latest_block();
+        let current_time = chrono::Utc::now().timestamp();
+
+        if current_time < last_block.timestamp + 6 {
+            return None;
+        }
 
         // Quanta's blockchain handles creating the block template with the right height/hashes
         // and automatically pulls from its internal pending transactions.
