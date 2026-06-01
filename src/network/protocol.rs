@@ -107,7 +107,7 @@ pub const PING_INTERVAL_SECS: u64 = 60;
 pub const PEER_TIMEOUT_SECS: u64 = 180;
 
 /// Network magic bytes (prevents testnet/mainnet message mixing)
-pub const TESTNET_MAGIC: [u8; 4] = *b"Q2T1"; // Quanta V2 Testnet (BFT)
+pub const TESTNET_MAGIC: [u8; 4] = *b"Q2T2"; // Quanta V2 Testnet (BFT) Reset 2
 pub const MAINNET_MAGIC: [u8; 4] = *b"Q2M0"; // Quanta V2 Mainnet
 
 /// Default to Testnet magic for current Alpha phase

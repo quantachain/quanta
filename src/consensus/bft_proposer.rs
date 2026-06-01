@@ -123,7 +123,7 @@ pub async fn run_bft_proposer(
     // 3. Setup Network Bridge
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     network_ref.register_aleph_bft_tx(tx).await;
-    let network_bridge: QuantaNetworkBridge<aleph_bft::NetworkData<QuantaHasher, Block, FalconSignature, aleph_bft::SignatureSet<FalconSignature>>> = QuantaNetworkBridge::new(network_ref.clone(), rx);
+    let network_bridge: QuantaNetworkBridge<aleph_bft::NetworkData<QuantaHasher, Block, FalconSignature, aleph_bft::SignatureSet<FalconSignature>>> = QuantaNetworkBridge::new(network_ref.clone(), rx, node_idx.0);
 
     // 4. Setup LocalIO with dummy Saver/Loader since we don't have crash recovery
     let unit_saver = futures::io::sink();
