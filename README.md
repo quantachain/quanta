@@ -22,7 +22,9 @@ It deliberately **omits smart contracts** to minimize attack surfaces, focusing 
 **Built with:**
 - **Falcon-512** — NIST-standardized post-quantum signatures
 - **Kyber-1024** — post-quantum wallet encryption
-- **SHA3-256** — quantum-resistant double-hash Proof-of-Work
+- **AlephBFT** — asynchronous Byzantine Fault Tolerance
+- **SHA3-256** — quantum-resistant double-hash
+
 - **Rust** — memory-safe, high-performance implementation
 
 ---
@@ -31,10 +33,7 @@ It deliberately **omits smart contracts** to minimize attack surfaces, focusing 
 
 | Resource | Description |
 |----------|-------------|
-| [Documentation](https://quantachain.gitbook.io/quantachain-docs) | Node setup, mining, API reference, wallets |
-| [Whitepaper](WHITEPAPER.md) | Complete technical specification and architecture |
-| [Tokenomics](TOKENOMICS.md) | Economic model, supply schedule, and incentive design |
-| [Governance](GOVERNANCE.md) | Treasury multisig, PoS transition, on-chain voting roadmap |
+| [Documentation](https://quantachain.gitbook.io/quantachain-docs) | Node setup, BFT validators, API reference, wallets |
 | [Contributing](CONTRIBUTING.md) | Development guidelines and how to contribute |
 | [Security](SECURITY.md) | Vulnerability reporting and security practices |
 | [Docker Hub](https://hub.docker.com/r/xd637/quanta-node) | Official node image |

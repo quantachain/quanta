@@ -11,6 +11,28 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [2.0.0-alpha] — 2026-06-01
+
+> **CRITICAL NETWORK UPDATE (v2.0.0-alpha)**
+> 
+> We have released a mandatory consensus-critical update. This update replaces the legacy consensus engine with the new **AlephBFT** consensus engine and includes critical fixes for block timing and network broadcast storms.
+> 
+> **Action Required for All Node Operators:**
+> To prevent old nodes from connecting to the new consensus network, we have updated the network magic bytes to `Q2T2`. 
+> 
+> 1. You **must** pull the latest code.
+> 2. You **must** completely wipe your old `quanta_data` directory (hard network reset).
+> 3. Restart your node.
+> 
+> Nodes running older versions will no longer be able to connect to the network.
+
+### Added
+- Replaced legacy PoW and Tendermint-style BFT with AlephBFT consensus engine.
+- Hardcoded `Q2T2` magic bytes to isolate the V2 network.
+- Fixed BFT block timing stalls and broadcast bugs in `QuantaNetworkBridge`.
+
+---
+
 ## [0.7.5-alpha] — 2026-05-08
 
 > **CONSENSUS-CRITICAL. All nodes must upgrade. No testnet reset required.**

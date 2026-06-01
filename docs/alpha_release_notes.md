@@ -12,6 +12,7 @@ This is a pre-release testnet build. Do not use real funds. APIs and chain param
 
 ## 🚨 V2 Hard Fork Details 🚨
 - **Consensus Engine:** Migrated from SHA3-256 Proof of Work to AlephBFT (Asynchronous Byzantine Fault Tolerance).
+- **Network Isolation:** Updated network magic bytes to `Q2T2` to prevent old nodes from connecting to the new consensus network.
 - **Block Time:** Exact 6-second deterministic slots (previously ~30s random).
 - **Mining Removed:** All `start_mining` commands and the `quanta-miner` binary have been removed.
 - **AI Agent Support:** Added headless `QUANTA_WALLET_PASSWORD` environment variable support for automated AI escrow workflows.
