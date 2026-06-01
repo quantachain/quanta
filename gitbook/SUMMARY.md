@@ -11,8 +11,6 @@
 * [Docker Deployment](docker-deployment.md)
 * [Configuration](configuration.md)
 
-## Mining
-* [Mining Guide](mining-guide.md)
 
 ## Wallets
 * [Wallet Operations](wallet-operations.md)
@@ -24,9 +22,6 @@
 
 ## Protocol
 * [Quantum Resistance](quantum-resistance.md)
-* [Performance Benchmarks](performance-benchmarks.md)
-* [Live Node Benchmarks](live-node-benchmarks.md)
-* [Detailed Benchmarks](detailed-benchmarks.md)
 * [Falcon Signing Internals](falcon-signing-internals.md)
 * [P2P Networking](p2p-networking.md)
 * [Security](security.md)
