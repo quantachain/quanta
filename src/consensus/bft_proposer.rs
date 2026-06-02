@@ -96,86 +96,89 @@ pub async fn run_bft_proposer(
     let node_count = NodeCount(committee.len());
     info!("BFT Proposer: I am validator {} out of {}", node_idx.0, node_count.0);
 
-    // 1. Setup Keychain
-    let keychain = QuantaKeychain::new(wallet.clone(), node_idx, node_count, committee_pubkeys);
+    loop {
+        // 1. Setup Keychain
+        let keychain = QuantaKeychain::new(wallet.clone(), node_idx, node_count, committee_pubkeys.clone());
 
-    // 2. Setup Data Provider & Finalization Handler
-    let data_provider = QuantaDataProvider::new(blockchain.clone(), my_address.clone());
-    
-    let (finalized_tx, mut finalized_rx) = tokio::sync::mpsc::unbounded_channel();
-    let finalization_handler = QuantaFinalizationHandler::new(finalized_tx);
-    
-    // Spawn task to process finalized blocks
-    let bc_for_finalization = blockchain.clone();
-    let net_for_finalization = network_ref.clone();
-    tokio::spawn(async move {
-        while let Some(block) = finalized_rx.recv().await {
-            info!("BFT Proposer: AlephBFT finalized block {}", block.index);
-            let mut bc = bc_for_finalization.write().await;
-            if let Err(e) = bc.add_network_block(block.clone()) {
-                error!("BFT Proposer: failed to apply finalized block {}: {}", block.index, e);
-            } else {
-                info!("✓ BFT block {} applied to local chain.", block.index);
-                net_for_finalization.broadcast_block(block).await;
+        // 2. Setup Data Provider & Finalization Handler
+        let data_provider = QuantaDataProvider::new(blockchain.clone(), my_address.clone());
+        
+        let (finalized_tx, mut finalized_rx) = tokio::sync::mpsc::unbounded_channel();
+        let finalization_handler = QuantaFinalizationHandler::new(finalized_tx);
+        
+        // Spawn task to process finalized blocks
+        let bc_for_finalization = blockchain.clone();
+        let net_for_finalization = network_ref.clone();
+        tokio::spawn(async move {
+            while let Some(block) = finalized_rx.recv().await {
+                info!("BFT Proposer: AlephBFT finalized block {}", block.index);
+                let mut bc = bc_for_finalization.write().await;
+                if let Err(e) = bc.add_network_block(block.clone()) {
+                    error!("BFT Proposer: failed to apply finalized block {}: {}", block.index, e);
+                } else {
+                    info!("✓ BFT block {} applied to local chain.", block.index);
+                    net_for_finalization.broadcast_block(block).await;
+                }
             }
-        }
-    });
+        });
 
-    // 3. Setup Network Bridge
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    network_ref.register_aleph_bft_tx(tx).await;
-    let network_bridge: QuantaNetworkBridge<aleph_bft::NetworkData<QuantaHasher, Block, FalconSignature, aleph_bft::SignatureSet<FalconSignature>>> = QuantaNetworkBridge::new(network_ref.clone(), rx, node_idx.0);
+        // 3. Setup Network Bridge
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        network_ref.register_aleph_bft_tx(tx).await;
+        let network_bridge: QuantaNetworkBridge<aleph_bft::NetworkData<QuantaHasher, Block, FalconSignature, aleph_bft::SignatureSet<FalconSignature>>> = QuantaNetworkBridge::new(network_ref.clone(), rx, node_idx.0);
 
-    // 4. Setup LocalIO with Crash Recovery (Persistent Unit Saver / Loader)
-    use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
-    use std::path::Path;
+        // 4. Setup LocalIO with Crash Recovery (Persistent Unit Saver / Loader)
+        use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+        use std::path::Path;
 
-    let backup_path = Path::new(&data_dir).join("alephbft_backup.dat");
-    info!("BFT Proposer: Using backup file {:?}", backup_path);
+        let backup_path = Path::new(&data_dir).join("alephbft_backup.dat");
+        info!("BFT Proposer: Using backup file {:?}", backup_path);
 
-    // Open file for saving (append only). Create if missing.
-    let file_for_saving = tokio::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .append(true)
-        .open(&backup_path)
-        .await
-        .expect("Failed to open AlephBFT backup file for writing");
+        // Open file for saving (append only). Create if missing.
+        let file_for_saving = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .append(true)
+            .open(&backup_path)
+            .await
+            .expect("Failed to open AlephBFT backup file for writing");
+            
+        let unit_saver = file_for_saving.compat_write();
+
+        // Open file for loading (read only). If file is empty or new, loader will just hit EOF.
+        let file_for_loading = tokio::fs::File::open(&backup_path)
+            .await
+            .expect("Failed to open AlephBFT backup file for reading");
+            
+        let unit_loader = file_for_loading.compat();
+
+        let local_io = LocalIO::new(data_provider, finalization_handler, unit_saver, unit_loader);
+
+        // 5. Config
+        // Provide node_count, node_idx, session_id, max_round (e.g. 5000), unit_creation_delay (e.g. 500ms)
+        let config = default_config(node_count, node_idx, 0, 5000, Duration::from_millis(500))
+            .expect("Valid default config");
+        // We can tune config here if it wasn't immutable, but default is fine.
         
-    let unit_saver = file_for_saving.compat_write();
+        // 6. SpawnHandle & Terminator
+        let spawn_handle = QuantaSpawnHandle;
+        let (terminator_tx, terminator_rx) = futures::channel::oneshot::channel();
+        let terminator = Terminator::create_root(terminator_rx, "QuantaBFT");
 
-    // Open file for loading (read only). If file is empty or new, loader will just hit EOF.
-    let file_for_loading = tokio::fs::File::open(&backup_path)
-        .await
-        .expect("Failed to open AlephBFT backup file for reading");
+        info!("BFT Proposer: running aleph_bft::run_session...");
         
-    let unit_loader = file_for_loading.compat();
-
-    let local_io = LocalIO::new(data_provider, finalization_handler, unit_saver, unit_loader);
-
-    // 5. Config
-    // Provide node_count, node_idx, session_id, max_round (e.g. 5000), unit_creation_delay (e.g. 500ms)
-    let config = default_config(node_count, node_idx, 0, 5000, Duration::from_millis(500))
-        .expect("Valid default config");
-    // We can tune config here if it wasn't immutable, but default is fine.
-    
-    // 6. SpawnHandle & Terminator
-    let spawn_handle = QuantaSpawnHandle;
-    let (terminator_tx, terminator_rx) = futures::channel::oneshot::channel();
-    let terminator = Terminator::create_root(terminator_rx, "QuantaBFT");
-
-    info!("BFT Proposer: running aleph_bft::run_session...");
-    
-    // Spawn run_session
-    // AlephBFT run_session blocks until session ends (which is never in our case unless an error occurs)
-    run_session(
-        config,
-        local_io,
-        network_bridge,
-        keychain,
-        spawn_handle,
-        terminator,
-    ).await;
-    
-    warn!("BFT Proposer: aleph_bft session exited unexpectedly.");
+        // Spawn run_session
+        // AlephBFT run_session blocks until session ends (which is never in our case unless an error occurs)
+        run_session(
+            config,
+            local_io,
+            network_bridge,
+            keychain,
+            spawn_handle,
+            terminator,
+        ).await;
+        
+        warn!("BFT Proposer: aleph_bft session exited unexpectedly. Restarting in 3 seconds...");
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+    }
 }
