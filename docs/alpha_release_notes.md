@@ -17,6 +17,7 @@ This is a pre-release testnet build. Do not use real funds. APIs and chain param
 - **Mining Removed:** All `start_mining` commands and the `quanta-miner` binary have been removed.
 - **AI Agent Support:** Added headless `QUANTA_WALLET_PASSWORD` environment variable support for automated AI escrow workflows.
 - **HD Wallets:** The CLI wallet has been completely rewritten to support deterministic hierarchical generation natively.
+- **Persistent Crash Recovery:** AlephBFT DAG state is now persisted to disk (`alephbft_backup.dat`), allowing seamless recovery and network rejoin after node restarts.
 
 ---
 
