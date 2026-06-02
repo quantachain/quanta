@@ -166,9 +166,17 @@ impl QuantumWallet {
             return Err(WalletError::NotFound);
         }
         
-        // Read encrypted file
-        let json = fs::read_to_string(filename)?;
-        let quantum_wallet: QuantumSafeWallet = serde_json::from_str(&json)?;
+        // Try reading as JSON first
+        let quantum_wallet: QuantumSafeWallet = match fs::read_to_string(filename) {
+            Ok(json) => serde_json::from_str(&json)?,
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                // If it's not valid UTF-8, it must be the old V1 binary (bincode) format
+                tracing::warn!("Wallet is in legacy V1 binary format. Loading via bincode...");
+                let bytes = fs::read(filename)?;
+                bincode::deserialize(&bytes).map_err(|_| WalletError::Encryption)?
+            }
+            Err(e) => return Err(e.into()),
+        };
         
         // Derive master key from password using same Argon2 parameters
         let mut master_key = Zeroizing::new([0u8; 32]);
