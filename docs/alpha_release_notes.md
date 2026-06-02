@@ -50,8 +50,8 @@ cargo build --release      # compile the new V2 binary
 
 ## Validator Setup (Docker)
 
-> **⚠️ ATTENTION:** For this Alpha Testnet, only known validators that have been selected can run the network. Unrecognized nodes will be rejected by the AlephBFT consensus committee.
-> To apply for validator early access, please email: **contact@quantachain.org**
+> **⚠️ ATTENTION:** This is currently a strictly permissioned testnet designed only for testing. Only the validators explicitly hardcoded in the Genesis set can run a node and produce blocks.
+> Once the network matures, we will implement full DPoS, allowing anyone to stake and participate in consensus. Until then, if you would like early access to participate, please email: **contact@quantachain.org**
 
 If you have been selected as a validator, follow these steps to run your node using Docker:
 
@@ -82,14 +82,14 @@ docker run -d \
 
 ```bash
 # New HD Wallet (Recommended)
-quanta-wallet new-hd --file my_wallet.qua
+quanta-wallet new --file my_wallet.json
 
 # New Raw Wallet
 quanta-wallet new-raw --file my_raw.qua
 
 # AI Headless Mode (Set env var to skip password prompts)
 export QUANTA_WALLET_PASSWORD="your_password"
-quanta-wallet --wallet my_wallet.qua balance
+quanta-wallet info --file my_wallet.json
 ```
 
 ---

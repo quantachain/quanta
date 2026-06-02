@@ -21,8 +21,11 @@ Quanta V2 is explicitly designed as a settlement layer for AI Agents. To allow a
 export QUANTA_WALLET_PASSWORD="your_password"
 ```
 
-Once set, all CLI commands can be scripted. 
-Example AI Escrow deployment:
+Example AI commands:
 ```bash
+# Check wallet balance and info
+quanta-wallet info --file mywallet.json
+
+# Deploy an escrow contract
 quanta-wallet deploy-escrow --beneficiary <WORKER_ADDR> --secret-hash <HASH> --amount 5.0
 ```

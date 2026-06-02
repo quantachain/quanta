@@ -1,21 +1,21 @@
 # Node Operator Guide
 
-Quanta V2 removes PoW mining. Security is now provided by BFT Validators who stake QUA to participate in the consensus committee.
+Quanta V2 removes PoW mining. Security is now provided by BFT Validators in a strictly permissioned testnet. 
+
+> **Note:** Currently, only the validators hardcoded into the Genesis set can run a node. In future releases, we will implement full DPoS, allowing anyone to stake and participate in consensus.
 
 ## Running a Validator
-To run a validator, you must generate a key and inject it into your node.
+If you are part of the Genesis set, you must inject your raw wallet key into your node to produce blocks.
 
 1. **Generate a Wallet**
    ```bash
    quanta-wallet new-raw --file validator.qua
    ```
-2. **Stake QUA**
+   *(Provide the address and public key to the Quanta core team to be included in the Genesis set)*
+
+2. **Start Node as Validator**
    ```bash
-   quanta-wallet stake --wallet validator.qua --amount 10000
-   ```
-3. **Start Node as Validator**
-   ```bash
-   ./quanta start --validator validator.qua
+   ./quanta start --validator-wallet validator.qua
    ```
 
 ## Configuration (`quanta.toml`)
