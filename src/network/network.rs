@@ -57,6 +57,7 @@ pub struct Network {
     // LRU(1024) keeps ~10+ minutes of blocks at 30s block time.
     seen_blocks: Arc<Mutex<LruCache<String, ()>>>,
     seen_txs:    Arc<Mutex<LruCache<String, ()>>>,
+    seen_bft:    Arc<Mutex<LruCache<String, ()>>>,
     discovery: Arc<PeerDiscovery>,
     /// SYNC FIX: Track whether a sync operation is currently in progress.
     /// When true, broadcast blocks that are "too far ahead" will NOT
@@ -94,6 +95,7 @@ impl Network {
             seen_blocks: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(1024).unwrap()))),
             // 10k tx entries ≈ handles a full mempool cycle without re-flooding
             seen_txs: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(10_000).unwrap()))),
+            seen_bft: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(10_000).unwrap()))),
             discovery,
             syncing: Arc::new(AtomicBool::new(false)),
             sync_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
@@ -392,15 +394,33 @@ impl Network {
                 self.peer_manager.remove_peer(addr).await;
             }
             P2PMessage::AlephBFTMessage(data) => {
-                // tracing::debug!("Received AlephBFT message ({} bytes) from {}", data.len(), addr);
+                // BETA FIX: Hash the BFT message to prevent infinite gossip loops
+                use sha3::{Digest, Sha3_256};
+                let hash = hex::encode(Sha3_256::digest(&data));
+                
+                let already_seen = {
+                    let mut seen = self.seen_bft.lock().unwrap();
+                    seen.put(hash, ()).is_some()
+                };
+
+                if already_seen {
+                    return Ok(());
+                }
+
+                // Send to our local AlephBFT instance
                 let tx_opt = self.aleph_bft_tx.read().await;
                 if let Some(tx) = &*tx_opt {
-                    if let Err(e) = tx.send(data) {
+                    if let Err(e) = tx.send(data.clone()) {
                         tracing::error!("Failed to send AlephBFT message to channel: {:?}", e);
                     }
                 } else {
                     tracing::warn!("AlephBFT channel not registered yet, dropping message.");
                 }
+
+                // HIGH FIX: Relay the message to all peers! This eliminates the need
+                // for a "Full Mesh" network topology and allows the network to scale
+                // massively without hardcoding bootstrap IPs.
+                self.peer_manager.broadcast(P2PMessage::AlephBFTMessage(data)).await;
             }
             _ => {
                 debug!("Unhandled message type from {}", addr);
