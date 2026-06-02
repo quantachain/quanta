@@ -107,6 +107,8 @@ quanta-wallet info --file my_wallet.json
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE)
+QUANTA operates under an **Open-Core Dual License** model:
+1. **Core Protocol:** Licensed under the [GNU AGPLv3](../LICENSE).
+2. **Native Templates & APIs:** Licensed under a [Proprietary Commercial License](../COMMERCIAL_LICENSE.md).
 
-"Quanta" and "QuantaChain" are trademarks. Forks may not use these names without permission.
+"Quanta" and "QuantaChain" are trademarks of QuantaLabs Pvt Ltd. Forks may not use these names without permission.
