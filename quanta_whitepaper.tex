@@ -1,0 +1,106 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{xcolor}
+
+\geometry{margin=1in}
+
+\title{\textbf{QUANTA: A Post-Quantum Institutional Settlement and AI Execution Layer}}
+\author{Kishore K \and QUANTA Development Team}
+\date{June 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+As quantum computing rapidly advances, classical blockchain architectures relying on Elliptic Curve Digital Signature Algorithms (ECDSA) face an existential threat from Shor's algorithm. QUANTA represents a paradigm shift: a production-ready, pure-Rust blockchain built exclusively upon NIST-standardized Post-Quantum Cryptography (PQC). Utilizing Falcon-512 for signatures, Kyber-1024 for wallet encryption, and SHA3-256 for state hashing, QUANTA guarantees long-term cryptographic security. Furthermore, QUANTA is strictly optimized as an execution and settlement layer for autonomous AI agents, Machine-to-Machine (M2M) micro-transactions, and Decentralized Physical Infrastructure Networks (DePIN). By combining an Asynchronous Byzantine Fault Tolerance (AlephBFT) consensus mechanism with Delegated Proof-of-Stake (DPoS), the network achieves deterministic 6-second finality while processing high-throughput transactions.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+\subsection{The Quantum Threat}
+Traditional blockchains secure billions of dollars in value using cryptographic primitives such as secp256k1 (Bitcoin, Ethereum). However, quantum computers running Shor's algorithm will be able to derive private keys from public keys in polynomial time, rendering current digital assets highly vulnerable. QUANTA was designed from the genesis block to be immune to this threat.
+
+\subsection{The QUANTA Vision: An AI Execution Layer}
+QUANTA is not a general-purpose Turing-complete smart contract platform. It is a highly specialized settlement layer optimized for autonomous AI agents and M2M networks. Every transaction on the QUANTA network supports a native \texttt{payload: Vec<u8>} field signed by Falcon-512. This structure allows AI agents to securely transmit instructions, settle stablecoin intents, or negotiate DePIN resource allocations directly on-chain with mathematically proven finality.
+
+\section{Cryptographic Architecture}
+To achieve absolute quantum resistance, QUANTA integrates a full suite of post-quantum cryptographic primitives.
+
+\subsection{Falcon-512 Signatures}
+QUANTA utilizes the Falcon-512 algorithm, a NIST-standardized lattice-based signature scheme. Falcon offers exceptionally fast verification times and relatively compact signature sizes (666 bytes) compared to other PQC alternatives. The network implements a pure-Rust version of Falcon, utilizing parallel verification via the Rayon framework to handle high transaction volumes effortlessly.
+
+\subsection{Wallet Security: Kyber-1024 and BIP39}
+Wallet generation relies on NIST-selected Kyber-1024 Key Encapsulation Mechanisms combined with ChaCha20-Poly1305 for symmetric encryption. HD wallets are generated using BIP39/BIP32 derivation paths adapted for post-quantum keys, ensuring enterprise-grade key custody.
+
+\subsection{Hashing and Data Integrity}
+Double SHA3-256 (FIPS 202) is utilized across the entire protocol for block hashing, Merkle root generation, and state integrity. SHA3 is inherently resistant to Grover's algorithm, maintaining 128-bit quantum security.
+
+\section{Consensus: AlephBFT and DPoS}
+QUANTA completely abandons energy-intensive Proof-of-Work in favor of a modern, eco-friendly consensus model.
+
+\subsection{AlephBFT Finality}
+The network integrates AlephBFT, a leaderless, asynchronous Byzantine Fault Tolerance protocol. Unlike synchronous protocols that halt during network partitions, AlephBFT continues to progress, providing deterministic finality within a strict 6-second slot time. 
+
+\subsection{Delegated Proof-of-Stake (DPoS)}
+Sybil resistance is managed through a DPoS model. Token holders can stake their QUA to register as validators. The active committee is deterministically selected based on stake weight. To ensure strict accountability, deregistering a validator triggers a mandatory unbonding period, locking the stake to punish any late-discovered equivocation or malicious behavior. Future protocol upgrades will integrate Verifiable Random Functions (VRFs) using a Commit-Reveal scheme to randomly shuffle the active committee, further decentralizing block production.
+
+\section{Native Contract Protocol}
+To minimize the massive attack surface presented by Turing-complete Virtual Machines (like the EVM), QUANTA restricts on-chain logic to highly audited, hardcoded Native Templates.
+
+\subsection{Escrow Contracts (\texttt{TEMPLATE\_ESCROW})}
+Cryptographic escrows allow two parties to lock funds conditionally. Funds are only released when a mathematical preimage is revealed matching a predetermined SHA3-256 hash.
+
+\subsection{Agent Job Contracts (\texttt{TEMPLATE\_AGENT\_JOB})}
+Specifically tailored for the AI and DePIN economy, these contracts allow an employer to lock QUA gas. An authorized AI worker agent can claim the funds upon publishing a cryptographic proof of inference or completed work directly to the chain.
+
+\section{Performance Optimization and Forecasting}
+QUANTA's Rust implementation is deeply optimized for modern, multi-core server environments.
+
+\subsection{Current Benchmarks}
+The protocol employs several advanced optimization strategies:
+\begin{itemize}
+    \item \textbf{Parallel Signature Verification:} Rayon distributes Falcon-512 verification across all available physical CPU cores.
+    \item \textbf{LRU Signature Caching:} A 100,000-entry cache prevents the network from re-verifying signatures it has already validated during mempool propagation.
+    \item \textbf{Bloom Filter Mempool:} O(1) duplicate transaction detection dramatically reduces iteration overhead.
+\end{itemize}
+These optimizations allow the network to comfortably process \textbf{120+ TPS} on standard commercial hardware (4-core CPU, 4GB RAM) with a 2MB block size limit.
+
+\subsection{Scaling Roadmap}
+As network adoption grows, QUANTA aims to rapidly scale its throughput. By increasing the block size limit to \textbf{6-8 MB} and further optimizing the BFT network layer, the protocol is actively targeting a maximum sustained throughput of \textbf{1,000 TPS}, cementing its role as the premier settlement layer for global M2M networks.
+
+\section{Tokenomics and Validator Economics}
+The native utility token of the network is \textbf{QUA}, functioning strictly as "gas" for AI execution and network security.
+
+\subsection{Emission and Supply}
+The network features a deterministic emission schedule. Each 6-second block produces a base reward of 50 QUA. To counteract inflation and maintain a healthy fee market, transaction fees are dynamically distributed:
+\begin{itemize}
+    \item 50\% of all transaction fees are permanently burned.
+    \item 35\% is rewarded to the block proposer.
+    \item 15\% is allocated to the Quanta Ecosystem Fund (QEF).
+\end{itemize}
+
+\subsection{Validator Staking Requirements}
+During the permissioned Alpha Testnet, validators are required to stake 1,000 QUA. However, to ensure maximum economic security against Sybil attacks upon Mainnet launch, the minimum staking requirement is slated to increase to \textbf{500,000 QUA}. 
+
+\section{Governance and the Institutional Treasury}
+QUANTA is managed by \textbf{QuantaLabs Pvt Ltd}, operating under an Open-Core Dual License model. The core networking and consensus protocol is licensed under the open-source GNU AGPLv3, while enterprise APIs and Native Templates remain under a proprietary commercial license.
+
+\subsection{Treasury Multisig and On-Chain Governance}
+The Quanta ecosystem is supported by an institutional Treasury. The funds are secured directly at the consensus layer using the \texttt{TreasuryMultisigV2} protocol, which implements an M-of-N Falcon-512 multi-signature policy (e.g., 3-of-5). 
+
+Crucially, the disbursement of these funds, as well as core protocol upgrades, will be heavily influenced by community governance. Token holders will possess the ability to vote on proposals. Approved changes are then cryptographically signed and executed by the multisig committee, ensuring that the development trajectory remains decentralized, democratic, and community-driven.
+
+\section{Conclusion}
+QUANTA is the first blockchain to successfully combine the unbreakable security of NIST-standardized Post-Quantum Cryptography with the blistering speed of Asynchronous BFT. By targeting the highly specific needs of autonomous AI agents and DePIN architectures, and by securing its ecosystem with an Open-Core commercial model, QUANTA provides an impenetrable digital vault built for the future of finance and automation.
+
+\end{document}
