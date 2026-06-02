@@ -394,6 +394,16 @@ impl Network {
                 self.peer_manager.remove_peer(addr).await;
             }
             P2PMessage::AlephBFTMessage(data) => {
+                let tx_opt = self.aleph_bft_tx.read().await;
+                
+                // CRITICAL FIX: If the channel is not registered yet, drop the message 
+                // WITHOUT caching it in the LRU. This allows the node to process the 
+                // inevitable retry broadcast once AlephBFT has actually started.
+                if tx_opt.is_none() {
+                    tracing::warn!("AlephBFT channel not registered yet, dropping message (not caching).");
+                    return Ok(());
+                }
+
                 // BETA FIX: Hash the BFT message to prevent infinite gossip loops
                 use sha3::{Digest, Sha3_256};
                 let hash = hex::encode(Sha3_256::digest(&data));
@@ -408,13 +418,10 @@ impl Network {
                 }
 
                 // Send to our local AlephBFT instance
-                let tx_opt = self.aleph_bft_tx.read().await;
                 if let Some(tx) = &*tx_opt {
                     if let Err(e) = tx.send(data.clone()) {
                         tracing::error!("Failed to send AlephBFT message to channel: {:?}", e);
                     }
-                } else {
-                    tracing::warn!("AlephBFT channel not registered yet, dropping message.");
                 }
 
                 // HIGH FIX: Relay the message to all peers! This eliminates the need
