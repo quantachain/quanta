@@ -523,17 +523,19 @@ Use the feature request template on GitHub Issues:
 
 ## Security Vulnerabilities
 
-**Do NOT open public GitHub issues for security vulnerabilities.**
+**Do NOT open public GitHub issues or openly share security vulnerabilities.**
 
-See [SECURITY.md](SECURITY.md) for responsible disclosure process.
+Critical vulnerabilities MUST be emailed to **admin@quantachain.org**.
 
-Security reports are eligible for bug bounty rewards (program launches Q2 2026).
+See [SECURITY.md](SECURITY.md) for the responsible disclosure process.
+
+Security reports are eligible for bug bounty rewards.
 
 ---
 
 ## License
 
-By contributing to QUANTA, you agree that your contributions will be licensed under the MIT License, the same license as the project.
+By contributing to the QUANTA core protocol, you agree that your contributions will be licensed under the **GNU AGPLv3**, the same license as the open core project.
 
 ---
 

@@ -1,3 +1,12 @@
+// ---------------------------------------------------------------------------
+// Copyright (c) 2026 QuantaLabs Pvt Ltd. All Rights Reserved.
+//
+// This file is strictly PROPRIETARY and is EXCLUDED from the AGPLv3 license
+// covering the core protocol. Commercial use, reproduction, or distribution
+// requires a separate Commercial License Agreement from QuantaLabs Pvt Ltd.
+// See `COMMERCIAL_LICENSE.md` in the repository root for details.
+// ---------------------------------------------------------------------------
+
 use serde::{Deserialize, Serialize};
 use sha3::{Sha3_256, Digest};
 use crate::core::transaction::{AccountState, ContractState, Transaction};

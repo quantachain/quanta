@@ -15,9 +15,11 @@ Educational/research implementation. NOT audited for production use.
 
 ## Reporting Vulnerabilities
 
-Create a draft security advisory on GitHub. Do not open public issues.
+**CRITICAL:** Critical vulnerabilities MUST be emailed directly to **admin@quantachain.org**. 
 
-Include:
+Do NOT open public issues or share vulnerability details openly.
+
+Please include:
 - Description
 - Reproduction steps
 - Impact assessment
@@ -41,7 +43,8 @@ Include:
 
 ## Audit Status
 
-Not audited. For educational/research use only.
+This is an educational/research implementation. It is **NOT** audited for production use. 
+The current testnet is strictly for experimental and research use only.
 
 ## Resources
 
@@ -49,4 +52,4 @@ Not audited. For educational/research use only.
 - [Falcon Specification](https://falcon-sign.info/)
 - [Kyber Specification](https://pq-crystals.org/kyber/)
 
-Last Updated: 2025-12-25
+Last Updated: 2026-06-02
