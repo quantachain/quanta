@@ -43,6 +43,7 @@ pub async fn run_bft_proposer(
     wallet: Arc<QuantumWallet>,
     network: Option<Arc<Network>>,
     _new_block_rx: watch::Receiver<u64>,
+    data_dir: String,
 ) {
     info!("Starting AlephBFT Session for validator {}", wallet.address);
 
@@ -125,9 +126,31 @@ pub async fn run_bft_proposer(
     network_ref.register_aleph_bft_tx(tx).await;
     let network_bridge: QuantaNetworkBridge<aleph_bft::NetworkData<QuantaHasher, Block, FalconSignature, aleph_bft::SignatureSet<FalconSignature>>> = QuantaNetworkBridge::new(network_ref.clone(), rx, node_idx.0);
 
-    // 4. Setup LocalIO with dummy Saver/Loader since we don't have crash recovery
-    let unit_saver = futures::io::sink();
-    let unit_loader = futures::io::empty();
+    // 4. Setup LocalIO with Crash Recovery (Persistent Unit Saver / Loader)
+    use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+    use std::path::Path;
+
+    let backup_path = Path::new(&data_dir).join("alephbft_backup.dat");
+    info!("BFT Proposer: Using backup file {:?}", backup_path);
+
+    // Open file for saving (append only). Create if missing.
+    let file_for_saving = tokio::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open(&backup_path)
+        .await
+        .expect("Failed to open AlephBFT backup file for writing");
+        
+    let unit_saver = file_for_saving.compat_write();
+
+    // Open file for loading (read only). If file is empty or new, loader will just hit EOF.
+    let file_for_loading = tokio::fs::File::open(&backup_path)
+        .await
+        .expect("Failed to open AlephBFT backup file for reading");
+        
+    let unit_loader = file_for_loading.compat();
+
     let local_io = LocalIO::new(data_provider, finalization_handler, unit_saver, unit_loader);
 
     // 5. Config

@@ -79,7 +79,7 @@ tokio-tungstenite = "0.21"
 
 # Thread safety
 parking_lot = "0.12"
-tokio-util = "0.7"   # For CancellationToken
+tokio-util = { version = "0.7", features = ["compat"] }   # For CancellationToken and futures::io compat
 once_cell = "1.19"   # For lazy static initialization
 
 # Logging

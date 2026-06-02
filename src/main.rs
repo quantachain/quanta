@@ -451,7 +451,8 @@ async fn main() {
                             let bc_clone = Arc::clone(&blockchain);
                             let net_clone = network.clone();
                             tokio::spawn(async move {
-                                crate::consensus::bft_proposer::run_bft_proposer(bc_clone, wallet, net_clone, rx).await;
+                                let db_path_for_bft = cfg.node.db_path.clone();
+                                crate::consensus::bft_proposer::run_bft_proposer(bc_clone, wallet, net_clone, rx, db_path_for_bft).await;
                             });
                         }
                         Err(e) => {
