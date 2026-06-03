@@ -38,7 +38,15 @@ impl DataProvider for QuantaDataProvider {
         let last_block = bc.get_latest_block();
         let current_time = chrono::Utc::now().timestamp();
 
-        if current_time < last_block.timestamp + 6 {
+        // TIMESTAMP DRIFT FIX: clamp last_block.timestamp to current_time before computing
+        // the gate.  If AlephBFT finalises blocks faster than wall-clock time, each block
+        // receives timestamp = prev_timestamp + 1 (from create_block_template's MTP rule).
+        // Over hundreds of blocks this pushes last_block.timestamp ahead of current_time,
+        // making `current_time < last_block.timestamp + 6` permanently true and stalling
+        // block production entirely.  By clamping we ensure the wait is at most 6 seconds
+        // from *now*, never from a point in the future.
+        let effective_last_ts = last_block.timestamp.min(current_time);
+        if current_time < effective_last_ts + 6 {
             return None;
         }
 
