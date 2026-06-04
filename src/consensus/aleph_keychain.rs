@@ -85,7 +85,9 @@ impl Keychain for QuantaKeychain {
         if !result {
             tracing::warn!("AlephBFT signature verification FAILED for node index {}", index.0);
         } else {
-            tracing::info!("AlephBFT signature verification SUCCESS for node index {}", index.0);
+            // TRACE only — verify() is called thousands of times per DAG replay.
+            // Logging at INFO level floods the output and starves the tokio runtime.
+            tracing::trace!("AlephBFT signature verification SUCCESS for node index {}", index.0);
         }
         result
     }
@@ -110,9 +112,15 @@ impl MultiKeychain for QuantaKeychain {
         let signature_count = partial.iter().count();
         // BFT threshold is 2/3 of nodes.
         let required = (self.node_count().0 * 2) / 3 + 1;
+
+        // FAST PATH: reject immediately if not enough signatures present.
+        // AlephBFT calls is_complete() on every unit delivery; skipping the
+        // expensive per-signature Falcon-512 verify loop when count is too low
+        // eliminates the tokio starvation that was freezing the DAG.
         if signature_count < required {
             return false;
         }
+
         partial
             .iter()
             .all(|(i, sgn)| self.verify(msg, sgn, i))
