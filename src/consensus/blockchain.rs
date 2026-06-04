@@ -205,7 +205,7 @@ const MAX_ADDRESS_LEN: usize = 128;
 const GENESIS_HASH: &str = "1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0";
 /// Testnet Alpha genesis — difficulty 8_304_130 (~30s/block).
 /// Old nodes on the previous testnet genesis will be rejected by this hash check.
-const TESTNET_GENESIS_HASH: &str = "b75dc9fbbc02c7780db84f94811d02e442ec812294fdad3e568e97e69dfd65ae";
+const TESTNET_GENESIS_HASH: &str = "48119d35c293531f1438b29a50d674575e4d5002e789699fe8efbd955eea2115";
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)

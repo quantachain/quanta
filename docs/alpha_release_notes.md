@@ -12,7 +12,7 @@ This is a pre-release testnet build. Do not use real funds. APIs and chain param
 
 ## 🚨 V2 Hard Fork Details 🚨
 - **Consensus Engine:** Migrated from SHA3-256 Proof of Work to AlephBFT (Asynchronous Byzantine Fault Tolerance).
-- **Network Isolation:** Updated network magic bytes to `Q2T2` to prevent old nodes from connecting to the new consensus network.
+- **Network Isolation:** Updated network magic bytes to `Q2T3` to prevent old nodes from connecting to the new consensus network.
 - **Block Time:** Exact 6-second deterministic slots (previously ~30s random).
 - **Mining Removed:** All `start_mining` commands and the `quanta-miner` binary have been removed.
 - **AI Agent Support:** Added headless `QUANTA_WALLET_PASSWORD` environment variable support for automated AI escrow workflows.
@@ -26,8 +26,8 @@ This is a pre-release testnet build. Do not use real funds. APIs and chain param
 | Parameter | Value |
 |---|---|
 | Network | Testnet (QUA7) |
-| Timestamp | `1775001600` (2026-04-01 00:00:00 UTC) |
-| Testnet Genesis Hash | *(Run `cargo run --bin get_testnet_hash` after injecting your keys)* |
+| Timestamp | `1748736001` (2025-06-01 00:00:01 UTC) |
+| Testnet Genesis Hash | `48119d35c293531f1438b29a50d674575e4d5002e789699fe8efbd955eea2115` |
 | Block Time | Exactly 6 seconds |
 | TPS Limit | ~250 - 300 TPS (assuming 2MB block limit) |
 
@@ -54,7 +54,7 @@ cargo build --release      # compile the new V2 binary
 > **⚠️ ATTENTION:** This is currently a strictly permissioned testnet designed only for testing. Only the validators explicitly hardcoded in the Genesis set can run a node and produce blocks.
 > Once the network matures, we will implement full DPoS, allowing anyone to stake and participate in consensus. Until then, if you would like early access to participate, please email: **contact@quantachain.org**
 
-If you have been selected as a validator, follow these steps to run your node using Docker:
+If you have been selected as a validator, follow these exact instructions to spin up your validator node and connect to the core network using Docker:
 
 **1. Create a Wallet and Get Your Key**
 You must generate a raw wallet and provide the public key to the core team to be whitelisted in the Genesis block.
@@ -62,19 +62,41 @@ You must generate a raw wallet and provide the public key to the core team to be
 docker run --rm -it xd637/quanta-node:latest quanta-wallet new-raw --file /tmp/validator.qua
 ```
 
-**2. Start the Validator Node**
-Make sure to replace `<YOUR_PASSWORD>` with the password you used to create the wallet, and map your local wallet file into the container:
+**2. Directory Setup**
+Create the directory where your blockchain data will live. We recommend adding `_v2` to avoid mixing it with any old testnet data:
+```bash
+mkdir -p ~/quanta_data_v2
+```
+
+**3. Place Your Wallet File**
+Move your validator wallet file (e.g., `validator.qua` or whatever you named it) directly into the `~/quanta_data_v2` directory you just created.
+
+Your folder should look exactly like this:
+```text
+~/quanta_data_v2/
+└── validator.qua
+```
+*(Note: You do NOT need the `genesis.json` or `quanta.toml` files! The latest network configuration is securely baked directly into the V2 Docker image.)*
+
+**4. Pull the Latest Image & Start the Node**
+Run the following Docker commands to pull the latest V2 build, launch your node, connect to the Bootstrap node, and begin proposing blocks. 
+
+> [!IMPORTANT]
+> **Before running the second command below, you MUST change two things:**
+> 1. Change `"YOUR_PASSWORD_HERE"` to your actual wallet password.
+> 2. Change `validator.qua` at the very end of the command to match the exact name of your wallet file.
 
 ```bash
+docker pull xd637/quanta-node:latest
+
 docker run -d \
   --name quanta-validator \
   --restart always \
-  -e QUANTA_WALLET_PASSWORD="<YOUR_PASSWORD>" \
-  -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
-  -v quanta-data:/home/quanta/quanta_data \
-  -v /absolute/path/to/validator.qua:/home/quanta/validator.qua \
+  --network host \
+  -v ~/quanta_data_v2:/home/quanta/quanta_data \
+  -e QUANTA_WALLET_PASSWORD="YOUR_PASSWORD_HERE" \
   xd637/quanta-node:latest \
-  quanta start --validator-wallet /home/quanta/validator.qua --bootstrap 79.137.78.1:8333
+  quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap 79.137.78.1:8333
 ```
 
 ---
