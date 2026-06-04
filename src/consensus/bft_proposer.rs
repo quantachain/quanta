@@ -116,20 +116,19 @@ pub async fn run_bft_proposer(
         // Track the last height we successfully applied so duplicates are silently skipped.
         let mut last_applied_height: u64 = 0;
         while let Some(block) = persistent_rx.recv().await {
-            info!("BFT Proposer: AlephBFT finalized block {}", block.index);
-
-            // DEDUPLICATION: AlephBFT may deliver the same height more than once
-            // (e.g. when multiple validators propose for the same slot).
-            // add_network_block already handles hash-level deduplication via
-            // has_block_at_index(), but that still acquires the write lock each time.
-            // This coarser height guard avoids the lock entirely for pure duplicates.
+            // DEDUPLICATION: AlephBFT delivers the same height N times during backup replay
+            // (once per DAG unit that carried the block data). Skip everything we've
+            // already applied; only the FIRST delivery of each height is processed.
             if block.index <= last_applied_height {
-                tracing::debug!(
-                    "BFT Proposer: skipping duplicate finalization for height {} (already at {})",
+                tracing::trace!(
+                    "BFT Proposer: ignoring duplicate delivery for height {} (already at {})",
                     block.index, last_applied_height
                 );
                 continue;
             }
+
+            // Only log once per height — after the dedup gate.
+            info!("BFT Proposer: AlephBFT finalized block {}", block.index);
 
             let mut bc = bc_for_finalization.write().await;
             if let Err(e) = bc.add_network_block(block.clone()) {
