@@ -912,18 +912,23 @@ impl Network {
                 continue;
             }
             
-            // Validate PoW of the unseen headers
+            // BFT header sanity check: every unseen header must reference a
+            // non-zero hash (i.e. it was actually computed, not zero-initialised).
+            // NOTE: sig_count is NOT checked here — AlephBFT embeds signatures
+            // in the full block body, not in the gossip header. Checking
+            // sig_count == 0 on headers would incorrectly reject all valid BFT
+            // blocks and was the root cause of the "stuck at height 1" bug.
             let unseen_headers: Vec<_> = headers.into_iter().filter(|h| h.index >= request_start).collect();
             let mut valid_headers = true;
             for h in &unseen_headers {
-                if h.index > 0 && h.sig_count == 0 {
+                if h.index > 0 && h.hash.is_empty() {
                     valid_headers = false;
                     break;
                 }
             }
             
             if !valid_headers {
-                warn!("Peer sent headers with invalid PoW - aborting sync");
+                warn!("Peer sent headers with empty hashes - aborting sync (peer may be corrupted)");
                 peer.add_misbehavior(50).await;
                 break;
             }

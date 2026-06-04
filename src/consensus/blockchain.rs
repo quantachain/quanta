@@ -140,8 +140,8 @@ const TREASURY_ALLOCATION_PERCENT: u64 = 8; // 8% of block rewards → Quanta Ec
 // Keyset: treasury_key0.qua … treasury_key4.qua — any 3 of 5 must sign.
 const TREASURY_ADDRESS: &str = "ms69216b1d10425689704d5ae3b2a4aa17049f59b1";
 
-// NOTE: PoW mining reward lock removed — replaced by DPoS unbonding period (UNBONDING_EPOCHS).
-// The BFT path (create_bft_block_template) always paid full proposer reward; this was dead code.
+// NOTE: Reward lock removed — replaced by DPoS unbonding period (UNBONDING_EPOCHS).
+// The BFT proposer always receives the full block reward immediately; no lock is applied.
 
 // Security limits
 const MAX_MEMPOOL_SIZE: usize = 5000; // Maximum pending transactions
@@ -295,12 +295,11 @@ pub struct Blockchain {
     /// NEW-BLOCK NOTIFICATION CHANNEL
     ///
     /// Fires the current chain height every time a block is accepted (normal or reorg).
-    /// The mining loop subscribes via `subscribe_new_blocks()` and uses tokio::select!
-    /// to abort the current PoW the instant the chain moves — eliminating the
-    /// 5–30 s window where miners compute against a stale template.
+    /// The BFT proposer loop subscribes via `subscribe_new_blocks()` and uses tokio::select!
+    /// to restart the template the instant the chain tip moves.
     ///
     /// Using `watch` (not `broadcast`) because we only need the LATEST height;
-    /// miners that are slow to wake up just see the most-recent value and restart.
+    /// slow subscribers simply see the most-recent value and restart.
     new_block_tx: Arc<watch::Sender<u64>>,
 }
 
@@ -588,18 +587,15 @@ impl Blockchain {
     /// Subscribe to new-block notifications.
     ///
     /// Returns a `watch::Receiver<u64>` that yields the new chain height each
-    /// time a block is accepted. Use with `tokio::select!` in the mining loop
-    /// to abort the current PoW immediately when the chain moves:
+    /// time a block is accepted. Use with `tokio::select!` in the BFT proposer
+    /// loop to restart the block template when the chain tip moves:
     ///
     /// ```ignore
     /// let mut new_block_rx = blockchain.read().await.subscribe_new_blocks();
     /// loop {
-    ///     let mut block = create_template();
     ///     tokio::select! {
-    ///         _ = new_block_rx.changed() => { /* chain moved, restart */ }
-    ///         result = spawn_blocking(move || { block.mine_with_cancel(&cancel); block }) => {
-    ///             submit(result);
-    ///         }
+    ///         _ = new_block_rx.changed() => { /* chain moved, restart template */ }
+    ///         block = bft_finalize_rx.recv() => { apply_block(block); }
     ///     }
     /// }
     /// ```
@@ -1524,7 +1520,7 @@ impl Blockchain {
         // subsequent mempool submission to fail with "Invalid nonce: expected N, got 1".
         self.pending_nonces.clear();
 
-        // Notify miners: chain moved during reorg, abort stale PoW.
+        // Notify BFT proposer: chain moved during reorg, restart block template.
         let _ = self.new_block_tx.send(block.index + 1);
 
         tracing::info!("Reorg: network block {} accepted (permissive diff check)", block.index);
@@ -1928,7 +1924,7 @@ impl Blockchain {
         // the old tip's sender nonces are now wrong because the fork erased those txs.
         self.pending_nonces.clear();
 
-        // Notify miners that the tip changed so they abort stale PoW immediately.
+        // Notify BFT proposer: tip changed, restart block template immediately.
         let _ = self.new_block_tx.send(incoming.index + 1);
 
         // Update cumulative_work: subtract old tip's weight (1), add incoming tip's (1). No-op for BFT.
@@ -2153,7 +2149,7 @@ impl Blockchain {
         });
         drop(confirmed_state);
 
-        // 11. Notify miners that the chain has moved — they should abort stale PoW.
+        // 11. Notify BFT proposer: chain has moved, restart block template.
         let _ = self.new_block_tx.send(block.index + 1);
 
         tracing::info!("Network block {} accepted at height {}", block.index, block.index);

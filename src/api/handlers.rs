@@ -459,15 +459,15 @@ pub struct BlockSubmitResponse {
 
 /// POST /api/blocks/submit
 ///
-/// Accepts a fully-solved block from a mining pool (or external miner).
-/// The block must be complete: correct nonce, valid PoW hash, all transactions.
+/// Accepts a fully-validated block from a mining pool or external submitter.
+/// The block must be complete with all transactions included.
 /// Validation runs through the same `add_network_block()` consensus path as P2P blocks.
 ///
 /// POOL INTEGRATION NOTE:
 /// - Pool calls `GET /api/stats` to get the latest block template data
-/// - Pool distributes work units (jobs) to miners with a LOWER pool difficulty
-/// - When a miner finds a nonce that meets the NETWORK difficulty, pool submits here
-/// - Shares (pool-difficulty solutions) are tracked pool-side only — never sent here
+/// - Pool distributes work units (jobs) to validators
+/// - When a validator produces a valid BFT-finalised block, pool submits here
+/// - Shares are tracked pool-side only — never sent here
 async fn submit_pool_block(
     State(state): State<Arc<ApiState>>,
     Json(block): Json<Block>,
