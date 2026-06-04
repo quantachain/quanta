@@ -96,6 +96,53 @@ pub async fn run_bft_proposer(
     let node_count = NodeCount(committee.len());
     info!("BFT Proposer: I am validator {} out of {}", node_idx.0, node_count.0);
 
+    // DUPLICATE-APPLY FIX: Create a SINGLE persistent consumer task outside the restart
+    // loop. Previously the consumer was spawned inside the loop, so each session restart
+    // left a zombie consumer alive — N restarts = N consumers, each receiving and applying
+    // the same finalized block, causing 20+ identical "BFT block X applied" log lines and
+    // wasted blockchain write-lock acquisitions.
+    //
+    // The shared sender is replaced on each session restart via the Arc<Mutex<Option<...>>>
+    // wrapper; the single consumer task always drains from whichever sender is live.
+    let (persistent_tx, mut persistent_rx) =
+        tokio::sync::mpsc::unbounded_channel::<Block>();
+    let shared_tx: Arc<std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<Block>>>> =
+        Arc::new(std::sync::Mutex::new(Some(persistent_tx)));
+
+    // Spawn the one-and-only finalization consumer.
+    let bc_for_finalization = blockchain.clone();
+    let net_for_finalization = network_ref.clone();
+    tokio::spawn(async move {
+        // Track the last height we successfully applied so duplicates are silently skipped.
+        let mut last_applied_height: u64 = 0;
+        while let Some(block) = persistent_rx.recv().await {
+            info!("BFT Proposer: AlephBFT finalized block {}", block.index);
+
+            // DEDUPLICATION: AlephBFT may deliver the same height more than once
+            // (e.g. when multiple validators propose for the same slot).
+            // add_network_block already handles hash-level deduplication via
+            // has_block_at_index(), but that still acquires the write lock each time.
+            // This coarser height guard avoids the lock entirely for pure duplicates.
+            if block.index <= last_applied_height {
+                tracing::debug!(
+                    "BFT Proposer: skipping duplicate finalization for height {} (already at {})",
+                    block.index, last_applied_height
+                );
+                continue;
+            }
+
+            let mut bc = bc_for_finalization.write().await;
+            if let Err(e) = bc.add_network_block(block.clone()) {
+                error!("BFT Proposer: failed to apply finalized block {}: {}", block.index, e);
+            } else {
+                info!("✓ BFT block {} applied to local chain.", block.index);
+                last_applied_height = block.index;
+                drop(bc);
+                net_for_finalization.broadcast_block(block).await;
+            }
+        }
+    });
+
     loop {
         // 1. Setup Keychain
         let keychain = QuantaKeychain::new(wallet.clone(), node_idx, node_count, committee_pubkeys.clone());
@@ -103,21 +150,21 @@ pub async fn run_bft_proposer(
         // 2. Setup Data Provider & Finalization Handler
         let data_provider = QuantaDataProvider::new(blockchain.clone(), my_address.clone());
         
-        let (finalized_tx, mut finalized_rx) = tokio::sync::mpsc::unbounded_channel();
-        let finalization_handler = QuantaFinalizationHandler::new(finalized_tx);
-        
-        // Spawn task to process finalized blocks
-        let bc_for_finalization = blockchain.clone();
-        let net_for_finalization = network_ref.clone();
+        // Create a fresh per-session sender. The persistent consumer task above
+        // will drain from it via the shared_tx slot.
+        let (session_tx, session_rx) = tokio::sync::mpsc::unbounded_channel::<Block>();
+        let finalization_handler = QuantaFinalizationHandler::new(session_tx.clone());
+
+        // Forward session blocks to the persistent consumer.
+        // This indirection lets us swap the sender on each restart without
+        // spawning a new consumer.
+        let forward_to = shared_tx.clone();
+        let mut fwd_rx = session_rx;
         tokio::spawn(async move {
-            while let Some(block) = finalized_rx.recv().await {
-                info!("BFT Proposer: AlephBFT finalized block {}", block.index);
-                let mut bc = bc_for_finalization.write().await;
-                if let Err(e) = bc.add_network_block(block.clone()) {
-                    error!("BFT Proposer: failed to apply finalized block {}: {}", block.index, e);
-                } else {
-                    info!("✓ BFT block {} applied to local chain.", block.index);
-                    net_for_finalization.broadcast_block(block).await;
+            while let Some(block) = fwd_rx.recv().await {
+                let guard = forward_to.lock().unwrap();
+                if let Some(ref tx) = *guard {
+                    let _ = tx.send(block);
                 }
             }
         });

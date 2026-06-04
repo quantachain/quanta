@@ -1772,7 +1772,7 @@ impl Blockchain {
             tracing::info!("Stored orphaned block at height {}, need to sync", block.index);
             return Ok(());
         } else if block.index == latest.index {
-            // Competing block at same height — apply longest-chain (most cumulative PoW) rule.
+            // Competing block at same height — BFT uses first-seen rule (not cumulative work).
             tracing::warn!("Competing block at height {}: incoming {} vs ours {}", 
                 block.index, &block.hash[..8], &latest.hash[..8]);
             
