@@ -917,9 +917,9 @@ impl Blockchain {
             0
         };
         let min_ts = std::cmp::max(previous_block.timestamp + 1, mtp + 1);
-        // Use min_ts if it's already in the past (normal). If it's in the future
-        // (clock skew or race), clamp to current_time to prevent drift.
-        new_block.timestamp = if min_ts <= current_time { min_ts } else { current_time };
+        // Use current_time if it's valid. If min_ts is in the future
+        // (clock skew or race), we MUST use min_ts to prevent validation failure.
+        new_block.timestamp = std::cmp::max(min_ts, current_time);
         
         new_block.state_root = state_root;
         new_block.hash = new_block.calculate_hash();
