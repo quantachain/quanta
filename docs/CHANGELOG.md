@@ -37,6 +37,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   This changes the genesis block hash, forcing all nodes to perform a clean wipe-and-resync.
 - **Testnet genesis hash** updated: `ae37fe2f40a7e7dbe6d2d1337f260d57185ef5fb169008e2600f245809fd1fbf`
   (was `48119d35c293531f1438b29a50d674575e4d5002e789699fe8efbd955eea2115`).
+- **Network magic bytes** updated to `Q2T4` — isolates the new network from old nodes.
 - **Validator 5 wallet replaced** — the original validator wallet (`0x822dd149...`) was lost.
   Replaced with new wallet `0x591277eb458e3185bef4fcf18c1c7136fb8bbad6` in both `genesis.json`
   and `blockchain.rs`. Old `gentx5.json` deleted.
