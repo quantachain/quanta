@@ -102,8 +102,8 @@ impl Block {
     /// Any change to these fields requires a new hash to be computed and
     /// burned into the code.
     pub fn genesis() -> Self {
-        // 2025-06-01 00:00:01 UTC — Quanta v2 genesis
-        let timestamp = 1748736001i64;
+        // 2026-06-06 00:00:01 UTC — Quanta v2 testnet reset (validator wallet replacement)
+        let timestamp = 1780704001i64;
 
         let mut genesis = Self {
             index: 0,

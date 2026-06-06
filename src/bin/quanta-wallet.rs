@@ -323,7 +323,17 @@ async fn main() {
             if mnemonic.split_whitespace().count() < 12 {
                 die("Mnemonic must be at least 12 words.");
             }
-            let mut wallet = HDWallet::from_mnemonic(mnemonic, "");
+            // BIP39 passphrase ("25th word") — optional, defaults to "" which matches
+            // all wallets created without a passphrase (backward compatible).
+            // To restore a wallet created with a passphrase:
+            //   export QUANTA_WALLET_PASSPHRASE="your-passphrase"
+            //   quanta-wallet restore
+            let bip39_passphrase = std::env::var("QUANTA_WALLET_PASSPHRASE")
+                .unwrap_or_default();
+            if !bip39_passphrase.is_empty() {
+                println!("  BIP39 passphrase: [SET via QUANTA_WALLET_PASSPHRASE]");
+            }
+            let mut wallet = HDWallet::from_mnemonic(mnemonic, &bip39_passphrase);
             for i in 0..accounts {
                 wallet.generate_account(Some(format!("Account {}", i)));
             }

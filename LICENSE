@@ -1,3 +1,24 @@
+QUANTA BLOCKCHAIN — DUAL LICENSE
+=================================
+
+Copyright (c) 2026 QuantaLabs Pvt Ltd. All Rights Reserved.
+
+OPEN-CORE DUAL LICENSE MODEL:
+
+  1. CORE PROTOCOL (this repository, except files that reference
+     COMMERCIAL_LICENSE.md in their header):
+     Licensed under the GNU Affero General Public License v3.0 (AGPLv3),
+     reproduced in full below.
+
+  2. PROPRIETARY COMPONENTS (src/core/contracts.rs and any file that
+     explicitly references COMMERCIAL_LICENSE.md in its header):
+     Licensed under the QuantaLabs Commercial License (see COMMERCIAL_LICENSE.md).
+     These files are explicitly EXCLUDED from the AGPLv3 below.
+
+For commercial licensing inquiries: contact@quantachain.org
+
+-------------------------------------------------------------------------------
+
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007
 

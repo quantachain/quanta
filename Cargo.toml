@@ -25,6 +25,10 @@ path = "src/bin/benchmark.rs"
 name = "bridge_indexer"
 path = "src/bin/bridge_indexer.rs"
 
+[[bin]]
+name = "get_testnet_hash"
+path = "src/bin/get_testnet_hash.rs"
+
 
 [dependencies]
 # Post-Quantum Cryptography - Falcon signatures

@@ -31,27 +31,22 @@ impl DataProvider for QuantaDataProvider {
     async fn get_data(&mut self) -> Option<Self::Output> {
         let bc = self.blockchain.read().await;
 
-        // Ensure a consistent 6-second block time without stalling the BFT DAG.
-        // If we sleep here, we stall AlephBFT's internal consensus loops for all nodes!
-        // Instead, if 6 seconds haven't passed, we return None immediately so AlephBFT 
-        // can create an empty heartbeat unit and maintain the DAG speed.
+        // 6-SECOND RATE-LIMIT GATE
+        // AlephBFT calls get_data() as fast as its DAG allows (sub-second).
+        // We return None until 6 wall-clock seconds have passed since the last
+        // finalized block, so blocks are produced at ~6s intervals.
+        //
+        // NOTE: We no longer need to clamp last_block.timestamp here.
+        // create_block_template now hard-caps block timestamps to wall-clock time,
+        // so last_block.timestamp can never be ahead of real time. The old clamp
+        // was a band-aid for the timestamp drift bug — the real fix is upstream.
         let last_block = bc.get_latest_block();
         let current_time = chrono::Utc::now().timestamp();
 
-        // TIMESTAMP DRIFT FIX: clamp last_block.timestamp to current_time before computing
-        // the gate.  If AlephBFT finalises blocks faster than wall-clock time, each block
-        // receives timestamp = prev_timestamp + 1 (from create_block_template's MTP rule).
-        // Over hundreds of blocks this pushes last_block.timestamp ahead of current_time,
-        // making `current_time < last_block.timestamp + 6` permanently true and stalling
-        // block production entirely.  By clamping we ensure the wait is at most 6 seconds
-        // from *now*, never from a point in the future.
-        let effective_last_ts = last_block.timestamp.min(current_time);
-        if current_time < effective_last_ts + 6 {
+        if current_time < last_block.timestamp + 6 {
             return None;
         }
 
-        // Quanta's blockchain handles creating the block template with the right height/hashes
-        // and automatically pulls from its internal pending transactions.
         match bc.create_block_template(self.proposer_address.clone()) {
             Ok(block) => Some(block),
             Err(e) => {

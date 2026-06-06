@@ -2,11 +2,20 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.0.0 — MAJOR ARCHITECTURE UPGRADE: BFT Consensus & AI Agent Support**
-> **TESTNET RESET REQUIRED.** All nodes must wipe their databases (`rm -rf ./quanta_testnet_data`) and sync from the new genesis block.
-> Mining has been completely removed. The network now operates on a deterministic 6-second block time via Proof of Stake BFT.
+> **v2.0.0 — TESTNET RESET (2026-06-06)**
+> All nodes must wipe their databases (`rm -rf ./quanta_testnet_data`) and sync from the new genesis block.
+> New genesis hash: `ae37fe2f40a7e7dbe6d2d1337f260d57185ef5fb169008e2600f245809fd1fbf`
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
+
+---
+
+## What Changed in v2.0.0
+
+- **Block timing fixed** — Blocks were slowing from 6 s to 1–2 h due to a timestamp drift bug in `create_block_template`. Block timestamps now can never exceed wall-clock time.
+- **Validator 5 replaced** — Lost wallet `0x822dd149...` replaced with `0x591277eb458e3185bef4fcf18c1c7136fb8bbad6`.
+- **Faucet wallets rotated** — All 10 genesis faucet wallets replaced with new HD wallet accounts.
+- **Genesis reset** — Timestamp bumped to 2026-06-06, generating a new genesis hash that forces a clean chain wipe.
 
 ---
 
@@ -26,8 +35,9 @@ This is a pre-release testnet build. Do not use real funds. APIs and chain param
 | Parameter | Value |
 |---|---|
 | Network | Testnet (QUA7) |
-| Timestamp | `1748736001` (2025-06-01 00:00:01 UTC) |
-| Testnet Genesis Hash | `48119d35c293531f1438b29a50d674575e4d5002e789699fe8efbd955eea2115` |
+| Timestamp | `1780704001` (2026-06-06 00:00:01 UTC) |
+| Testnet Genesis Hash | `ae37fe2f40a7e7dbe6d2d1337f260d57185ef5fb169008e2600f245809fd1fbf` |
+| Faucet 0 (API sender) | `0xec4f49553e31f22b27a83036a044aff7d697f524` |
 | Block Time | Exactly 6 seconds |
 | TPS Limit | ~250 - 300 TPS (assuming 2MB block limit) |
 
@@ -131,6 +141,10 @@ quanta-wallet info --file my_wallet.json
 ## License
 
 QUANTACHAIN operates under an **Open-Core Dual License** model:
-1. **Core Protocol:** Licensed under the [GNU AGPLv3](../LICENSE).
-2. **Native Templates & APIs:** Licensed under a [Proprietary Commercial License](../COMMERCIAL_LICENSE.md).
 
+| Component | License |
+|---|---|
+| Core Protocol | [GNU AGPLv3](https://github.com/quantachain/quanta/blob/main/LICENSE) |
+| Native Templates & APIs | [QuantaLabs Commercial License](https://github.com/quantachain/quanta/blob/main/COMMERCIAL_LICENSE.md) |
+
+For commercial licensing: **contact@quantachain.org**

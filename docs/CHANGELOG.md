@@ -11,6 +11,52 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [2.0.1] — 2026-06-06
+
+> **TESTNET RESET — All nodes must wipe their database and restart from the new genesis.**
+>
+> This release replaces a lost validator wallet, rotates all 10 genesis faucet wallets,
+> bumps the genesis timestamp to today, and fixes a critical AlephBFT block-timing bug
+> that caused blocks to slow from 6 s to 1–2 h over time.
+
+### Fixed
+- **AlephBFT block timing drift (critical)** — `create_block_template` used
+  `timestamp = max(now, prev+1)`. When AlephBFT finalised blocks faster than 1 block/sec,
+  this incremented the chain timestamp on every block. After N fast-finalised blocks the
+  chain timestamp was N seconds ahead of wall-clock time, making the 6-second gate in
+  `aleph_data.rs` (`current_time < last_ts + 6`) permanently `true` and stalling block
+  production entirely. Symptoms: fast blocks → progressively slower → near-stuck.
+  **Fix:** `timestamp = min_ts if min_ts <= now else now` — timestamps are now hard-capped
+  to wall-clock time and can never drift ahead of real time.
+- **License header missing** — `LICENSE` file contained only raw AGPLv3 boilerplate with no
+  QuantaLabs copyright notice or dual-license clarification. Fixed by prepending the proper
+  project-level header.
+
+### Changed
+- **Genesis timestamp** updated from `1748736001` (2025-06-01) to `1780704001` (2026-06-06).
+  This changes the genesis block hash, forcing all nodes to perform a clean wipe-and-resync.
+- **Testnet genesis hash** updated: `ae37fe2f40a7e7dbe6d2d1337f260d57185ef5fb169008e2600f245809fd1fbf`
+  (was `48119d35c293531f1438b29a50d674575e4d5002e789699fe8efbd955eea2115`).
+- **Validator 5 wallet replaced** — the original validator wallet (`0x822dd149...`) was lost.
+  Replaced with new wallet `0x591277eb458e3185bef4fcf18c1c7136fb8bbad6` in both `genesis.json`
+  and `blockchain.rs`. Old `gentx5.json` deleted.
+- **Genesis faucet wallets rotated** (all 10) — new HD wallet generated on 2026-06-06 using
+  `cargo run --bin gen_faucet_wallets`. Encrypted backup saved to `faucet_wallet.json`.
+  Faucet 0 (API sender): `0xec4f49553e31f22b27a83036a044aff7d697f524`.
+
+### Added
+- **`src/bin/get_testnet_hash`** — new binary that calls `Block::genesis()`, prints all
+  structural fields and the deterministic genesis hash, and verifies it is reproducible.
+  Run after any change to `block.rs` to get the updated `TESTNET_GENESIS_HASH`.
+- **`src/bin/gen_faucet_wallets` v2** — rewritten to read passphrase and file-encryption
+  password from environment variables only (never CLI args). Generates 10 Falcon-512 HD
+  faucet accounts, saves encrypted `faucet_wallet.json`, prints both address arrays for
+  `blockchain.rs`, and prints the genesis hash.
+- **`QUANTA_WALLET_PASSPHRASE` env var** support in `quanta-wallet restore` — optional BIP39
+  25th-word passphrase support, defaults to `""` (backward compatible with all existing wallets).
+
+---
+
 ## [2.0.0-alpha] — 2026-06-01
 
 > **CRITICAL NETWORK UPDATE (v2.0.0-alpha)**
