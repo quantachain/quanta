@@ -14,5 +14,9 @@
 ## Architecture
 * [AlephBFT Consensus](consensus-bft.md)
 
+## Ecosystem & Governance
+* [AI & Smart Contracts](ai-smart-contracts.md)
+* [Treasury & Governance](treasury-governance.md)
+
 ## Developer Reference
 * [API Reference](api-reference.md)
