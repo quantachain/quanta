@@ -20,6 +20,7 @@ use rpc::{RpcServer, RpcClient};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use std::sync::Arc;
+use std::sync::atomic::AtomicI64;
 use tokio::sync::RwLock;
 use tracing_subscriber;
 
@@ -450,9 +451,27 @@ async fn main() {
                             let rx = blockchain.read().await.subscribe_new_blocks();
                             let bc_clone = Arc::clone(&blockchain);
                             let net_clone = network.clone();
+
+                            // Shared atomic: last finalized block timestamp (Unix seconds).
+                            // Initialised to the current chain tip so the first block is
+                            // proposed at the correct 6-second offset from the real tip,
+                            // not from Unix epoch 0.
+                            let tip_ts = {
+                                let bc = blockchain.read().await;
+                                bc.get_latest_block().timestamp
+                            };
+                            let last_finalized_ts = Arc::new(AtomicI64::new(tip_ts));
+
                             tokio::spawn(async move {
                                 let db_path_for_bft = cfg.node.db_path.clone();
-                                crate::consensus::bft_proposer::run_bft_proposer(bc_clone, wallet, net_clone, rx, db_path_for_bft).await;
+                                crate::consensus::bft_proposer::run_bft_proposer(
+                                    bc_clone,
+                                    wallet,
+                                    net_clone,
+                                    rx,
+                                    db_path_for_bft,
+                                    last_finalized_ts,
+                                ).await;
                             });
                         }
                         Err(e) => {

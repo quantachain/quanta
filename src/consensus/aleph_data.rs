@@ -1,25 +1,46 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use tokio::sync::RwLock;
 use async_trait::async_trait;
 use aleph_bft::DataProvider;
 
 use crate::core::block::Block;
-
 use crate::consensus::blockchain::Blockchain;
 
+/// AlephBFT data provider that proposes the next block at the configured
+/// block interval (SLOT_SECONDS = 6).
+///
+/// # Lock-contention fix
+///
+/// The original implementation acquired the blockchain read-lock on *every*
+/// `get_data()` call — including the majority of calls that immediately return
+/// `None` because the 6-second window hasn't elapsed yet.  AlephBFT calls
+/// `get_data()` thousands of times per second, so this caused severe lock
+/// contention with the finalization writer.
+///
+/// The fix: the finalization consumer in `bft_proposer.rs` stores the
+/// timestamp of each newly applied block into `last_finalized_ts` (an
+/// `Arc<AtomicI64>`).  `get_data()` reads that atomic — a single load
+/// instruction, no lock — and only acquires the blockchain read-lock when
+/// it's actually time to build a new block template.
 pub struct QuantaDataProvider {
     blockchain: Arc<RwLock<Blockchain>>,
     proposer_address: String,
+    /// Shared atomic: timestamp (Unix seconds) of the last finalized block.
+    /// Written by the finalization consumer; read here without a lock.
+    last_finalized_ts: Arc<AtomicI64>,
 }
 
 impl QuantaDataProvider {
     pub fn new(
         blockchain: Arc<RwLock<Blockchain>>,
         proposer_address: String,
+        last_finalized_ts: Arc<AtomicI64>,
     ) -> Self {
         Self {
             blockchain,
             proposer_address,
+            last_finalized_ts,
         }
     }
 }
@@ -29,24 +50,29 @@ impl DataProvider for QuantaDataProvider {
     type Output = Block;
 
     async fn get_data(&mut self) -> Option<Self::Output> {
-        let bc = self.blockchain.read().await;
-
-        // 6-SECOND RATE-LIMIT GATE
-        // AlephBFT calls get_data() as fast as its DAG allows (sub-second).
-        // We return None until 6 wall-clock seconds have passed since the last
-        // finalized block, so blocks are produced at ~6s intervals.
+        // ---------------------------------------------------------------------------
+        // HOT PATH: check the 6-second slot gate WITHOUT acquiring any lock.
         //
-        // NOTE: We no longer need to clamp last_block.timestamp here.
-        // create_block_template now hard-caps block timestamps to wall-clock time,
-        // so last_block.timestamp can never be ahead of real time. The old clamp
-        // was a band-aid for the timestamp drift bug — the real fix is upstream.
-        let last_block = bc.get_latest_block();
+        // `last_finalized_ts` is an `Arc<AtomicI64>` updated by the finalization
+        // consumer each time a new block is applied.  A single atomic load is
+        // orders of magnitude cheaper than acquiring a tokio RwLock, which matters
+        // because AlephBFT calls get_data() at sub-millisecond intervals.
+        // ---------------------------------------------------------------------------
+        let last_ts = self.last_finalized_ts.load(Ordering::Acquire);
         let current_time = chrono::Utc::now().timestamp();
 
-        if current_time < last_block.timestamp + 6 {
+        // 6-SECOND SLOT GATE
+        // Block production is rate-limited to once per SLOT_SECONDS (6 s).
+        // Return None while the window hasn't elapsed — no lock needed.
+        if current_time < last_ts + 6 {
             return None;
         }
 
+        // ---------------------------------------------------------------------------
+        // SLOW PATH: we're past the 6-second window, so build a block template.
+        // Only NOW do we acquire the blockchain read-lock.
+        // ---------------------------------------------------------------------------
+        let bc = self.blockchain.read().await;
         match bc.create_block_template(self.proposer_address.clone()) {
             Ok(block) => Some(block),
             Err(e) => {
@@ -69,8 +95,6 @@ impl QuantaFinalizationHandler {
 
 impl aleph_bft::FinalizationHandler<Block> for QuantaFinalizationHandler {
     fn data_finalized(&mut self, data: Block) {
-        // We send the block over a channel to a background async task that will
-        // acquire the RwLock on Blockchain and append it.
         if let Err(e) = self.finalized_tx.send(data) {
             tracing::error!("Failed to send finalized block to processing task: {}", e);
         }

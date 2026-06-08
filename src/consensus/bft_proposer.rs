@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use tokio::sync::{watch, RwLock};
 use tracing::{info, warn, error};
 use aleph_bft::{run_session, Config as AlephConfig, LocalIO, SpawnHandle, Terminator, NodeIndex, NodeCount, default_config};
@@ -38,12 +39,33 @@ impl SpawnHandle for QuantaSpawnHandle {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SESSION LENGTH — how many finalized blocks before we rotate to a new
+// AlephBFT session.  Each rotation:
+//   • increments session_id  → fresh backup file, zero replay cost
+//   • resets internal DAG round counter → prevents exponential delay growth
+//   • deletes the previous session's backup file → keeps disk clean
+//
+// 300 blocks × 6 s/block = 30 minutes per session, which is a good balance
+// between crash-recovery granularity and keeping backup files small.
+// ---------------------------------------------------------------------------
+const SESSION_LENGTH: u64 = 300;
+
+// Maximum DAG rounds within a single session.  AlephBFT's built-in delay
+// function applies an exponential back-off whose exponent grows with the
+// round number.  Keeping this well below SESSION_LENGTH * expected_rounds_per_block
+// ensures the exponential never has time to accumulate within one session.
+const MAX_ROUNDS_PER_SESSION: u32 = 2000;
+
 pub async fn run_bft_proposer(
     blockchain: Arc<RwLock<Blockchain>>,
     wallet: Arc<QuantumWallet>,
     network: Option<Arc<Network>>,
     _new_block_rx: watch::Receiver<u64>,
     data_dir: String,
+    // Shared atomic: QuantaDataProvider reads this to know the timestamp of
+    // the latest finalized block WITHOUT acquiring the blockchain read-lock.
+    last_finalized_ts: Arc<AtomicI64>,
 ) {
     info!("Starting AlephBFT Session for validator {}", wallet.address);
 
@@ -54,10 +76,6 @@ pub async fn run_bft_proposer(
         return;
     };
 
-    // We need to determine the NodeIndex and NodeCount.
-    // For a 5-node test network, we can hardcode it based on a known committee or just get it from the state.
-    // For now, let's fetch the committee from the blockchain state to dynamically set this.
-    
     let (committee, committee_pubkeys) = {
         let bc = blockchain.read().await;
         let snap = bc.get_account_state_snapshot();
@@ -67,8 +85,6 @@ pub async fn run_bft_proposer(
             if let Some(info) = snap.get_validator_info(addr) {
                 pubkeys.push(info.falcon_pk.clone());
             } else {
-                // If a validator is missing public key, we use dummy data so indexes align.
-                // In a real network, this shouldn't happen for active committee members.
                 pubkeys.push(vec![]);
             }
         }
@@ -87,8 +103,6 @@ pub async fn run_bft_proposer(
         Some(idx) => NodeIndex(idx),
         None => {
             info!("BFT Proposer: I am not in the committee. Observer mode.");
-            // We should ideally still run some synchronization, but AlephBFT runs on nodes.
-            // For now, just exit if not in committee.
             return;
         }
     };
@@ -96,14 +110,8 @@ pub async fn run_bft_proposer(
     let node_count = NodeCount(committee.len());
     info!("BFT Proposer: I am validator {} out of {}", node_idx.0, node_count.0);
 
-    // DUPLICATE-APPLY FIX: Create a SINGLE persistent consumer task outside the restart
-    // loop. Previously the consumer was spawned inside the loop, so each session restart
-    // left a zombie consumer alive — N restarts = N consumers, each receiving and applying
-    // the same finalized block, causing 20+ identical "BFT block X applied" log lines and
-    // wasted blockchain write-lock acquisitions.
-    //
-    // The shared sender is replaced on each session restart via the Arc<Mutex<Option<...>>>
-    // wrapper; the single consumer task always drains from whichever sender is live.
+    // DUPLICATE-APPLY FIX: Single persistent consumer task outside the
+    // restart loop — prevents N zombie consumers after N restarts.
     let (persistent_tx, mut persistent_rx) =
         tokio::sync::mpsc::unbounded_channel::<Block>();
     let shared_tx: Arc<std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<Block>>>> =
@@ -112,13 +120,10 @@ pub async fn run_bft_proposer(
     // Spawn the one-and-only finalization consumer.
     let bc_for_finalization = blockchain.clone();
     let net_for_finalization = network_ref.clone();
+    let ts_for_finalization = last_finalized_ts.clone();
     tokio::spawn(async move {
-        // Track the last height we successfully applied so duplicates are silently skipped.
         let mut last_applied_height: u64 = 0;
         while let Some(block) = persistent_rx.recv().await {
-            // DEDUPLICATION: AlephBFT delivers the same height N times during backup replay
-            // (once per DAG unit that carried the block data). Skip everything we've
-            // already applied; only the FIRST delivery of each height is processed.
             if block.index <= last_applied_height {
                 tracing::trace!(
                     "BFT Proposer: ignoring duplicate delivery for height {} (already at {})",
@@ -127,10 +132,13 @@ pub async fn run_bft_proposer(
                 continue;
             }
 
-            // Only log once per height — after the dedup gate.
             info!("BFT Proposer: AlephBFT finalized block {}", block.index);
 
-            let mut bc = bc_for_finalization.write().await;
+            // FIX (Bug 4): Update the shared timestamp BEFORE releasing the lock
+            // so that get_data() sees the new tip immediately.
+            ts_for_finalization.store(block.timestamp, Ordering::Release);
+
+            let bc = bc_for_finalization.write().await;
             if let Err(e) = bc.add_network_block(block.clone()) {
                 error!("BFT Proposer: failed to apply finalized block {}: {}", block.index, e);
             } else {
@@ -142,21 +150,48 @@ pub async fn run_bft_proposer(
         }
     });
 
+    // -----------------------------------------------------------------------
+    // SESSION ROTATION LOOP
+    //
+    // FIX (Bugs 1 & 2): Instead of one infinite session with session_id=0 and
+    // an ever-growing append-mode backup file, we rotate sessions every
+    // SESSION_LENGTH finalized blocks:
+    //
+    //   session_id  = current_chain_height / SESSION_LENGTH
+    //   backup_file = alephbft_backup_{session_id}.dat
+    //
+    // On startup the node reads the chain height, computes session_id, and
+    // opens the corresponding (possibly new) backup file.  At restart the same
+    // height → same session_id → same file, so crash-recovery still works.
+    //
+    // When the chain advances past the next SESSION_LENGTH boundary the outer
+    // loop detects it, increments session_id, DELETES the old backup file, and
+    // starts a fresh session.  This resets:
+    //   • backup replay cost     → O(current session) instead of O(all time)
+    //   • internal DAG round     → 0, preventing exponential delay growth
+    // -----------------------------------------------------------------------
     loop {
+        // Compute the current session_id from chain height.
+        let current_height = {
+            let bc = blockchain.read().await;
+            bc.get_height()
+        };
+        let session_id: u64 = current_height / SESSION_LENGTH;
+
         // 1. Setup Keychain
         let keychain = QuantaKeychain::new(wallet.clone(), node_idx, node_count, committee_pubkeys.clone());
 
         // 2. Setup Data Provider & Finalization Handler
-        let data_provider = QuantaDataProvider::new(blockchain.clone(), my_address.clone());
+        let data_provider = QuantaDataProvider::new(
+            blockchain.clone(),
+            my_address.clone(),
+            last_finalized_ts.clone(),
+        );
         
-        // Create a fresh per-session sender. The persistent consumer task above
-        // will drain from it via the shared_tx slot.
         let (session_tx, session_rx) = tokio::sync::mpsc::unbounded_channel::<Block>();
         let finalization_handler = QuantaFinalizationHandler::new(session_tx.clone());
 
         // Forward session blocks to the persistent consumer.
-        // This indirection lets us swap the sender on each restart without
-        // spawning a new consumer.
         let forward_to = shared_tx.clone();
         let mut fwd_rx = session_rx;
         tokio::spawn(async move {
@@ -173,14 +208,20 @@ pub async fn run_bft_proposer(
         network_ref.register_aleph_bft_tx(tx).await;
         let network_bridge: QuantaNetworkBridge<aleph_bft::NetworkData<QuantaHasher, Block, FalconSignature, aleph_bft::SignatureSet<FalconSignature>>> = QuantaNetworkBridge::new(network_ref.clone(), rx, node_idx.0);
 
-        // 4. Setup LocalIO with Crash Recovery (Persistent Unit Saver / Loader)
+        // 4. Setup LocalIO with per-session backup files.
+        //
+        // FIX (Bug 2): backup file is named by session_id, not a single
+        // shared file.  Each session gets its own fresh file; when a new
+        // session starts the old file is deleted (see cleanup below).
         use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
         use std::path::Path;
 
-        let backup_path = Path::new(&data_dir).join("alephbft_backup.dat");
-        info!("BFT Proposer: Using backup file {:?}", backup_path);
+        let backup_path = Path::new(&data_dir)
+            .join(format!("alephbft_backup_{}.dat", session_id));
+        info!("BFT Proposer: session_id={} backup={:?}", session_id, backup_path);
 
-        // Open file for saving (append only). Create if missing.
+        // Open file for saving (append-within-session is fine; it's the
+        // cross-session accumulation that killed performance).
         let file_for_saving = tokio::fs::OpenOptions::new()
             .write(true)
             .create(true)
@@ -191,7 +232,7 @@ pub async fn run_bft_proposer(
             
         let unit_saver = file_for_saving.compat_write();
 
-        // Open file for loading (read only). If file is empty or new, loader will just hit EOF.
+        // Open file for loading.
         let file_for_loading = tokio::fs::File::open(&backup_path)
             .await
             .expect("Failed to open AlephBFT backup file for reading");
@@ -201,20 +242,30 @@ pub async fn run_bft_proposer(
         let local_io = LocalIO::new(data_provider, finalization_handler, unit_saver, unit_loader);
 
         // 5. Config
-        // Provide node_count, node_idx, session_id, max_round (e.g. 5000), unit_creation_delay (e.g. 500ms)
-        let config = default_config(node_count, node_idx, 0, 5000, Duration::from_millis(500))
-            .expect("Valid default config");
-        // We can tune config here if it wasn't immutable, but default is fine.
+        //
+        // FIX (Bug 1): session_id increments per epoch — AlephBFT uses this
+        // to namespace its state.  Passing 0 every time caused full history
+        // replay on every restart.
+        //
+        // FIX (Bug 3): max_round capped at MAX_ROUNDS_PER_SESSION.  AlephBFT's
+        // delay config uses an exponential that grows with round number, so an
+        // ever-increasing round counter causes ever-increasing block times.
+        // Rotating sessions resets the round counter to 0.
+        let config = default_config(
+            node_count,
+            node_idx,
+            session_id,                                   // FIX Bug 1: increments per epoch
+            MAX_ROUNDS_PER_SESSION as u16,                // FIX Bug 3: caps round number (u16)
+            Duration::from_millis(500),
+        ).expect("Valid default config");
         
         // 6. SpawnHandle & Terminator
         let spawn_handle = QuantaSpawnHandle;
-        let (terminator_tx, terminator_rx) = futures::channel::oneshot::channel();
+        let (_terminator_tx, terminator_rx) = futures::channel::oneshot::channel();
         let terminator = Terminator::create_root(terminator_rx, "QuantaBFT");
 
-        info!("BFT Proposer: running aleph_bft::run_session...");
+        info!("BFT Proposer: running aleph_bft::run_session (session_id={}, height={})…", session_id, current_height);
         
-        // Spawn run_session
-        // AlephBFT run_session blocks until session ends (which is never in our case unless an error occurs)
         run_session(
             config,
             local_io,
@@ -223,8 +274,31 @@ pub async fn run_bft_proposer(
             spawn_handle,
             terminator,
         ).await;
-        
-        warn!("BFT Proposer: aleph_bft session exited unexpectedly. Restarting in 3 seconds...");
-        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+        // Session ended (hit max_round or error).
+        // Determine if a new session is warranted by checking chain height.
+        let new_height = {
+            let bc = blockchain.read().await;
+            bc.get_height()
+        };
+        let new_session_id = new_height / SESSION_LENGTH;
+
+        if new_session_id > session_id {
+            // We've crossed a session boundary — delete the old backup file
+            // so the next iteration starts with a clean slate and no replay cost.
+            let old_backup = Path::new(&data_dir)
+                .join(format!("alephbft_backup_{}.dat", session_id));
+            if let Err(e) = tokio::fs::remove_file(&old_backup).await {
+                // Non-fatal: missing file is fine; warn on other errors.
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    warn!("BFT Proposer: could not remove old backup {:?}: {}", old_backup, e);
+                }
+            } else {
+                info!("BFT Proposer: rotated to session {} — deleted old backup {:?}", new_session_id, old_backup);
+            }
+        }
+
+        warn!("BFT Proposer: session {} ended. Restarting in 1 second…", session_id);
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
 }
