@@ -29,6 +29,10 @@ pub struct QuantaDataProvider {
     /// Shared atomic: timestamp (Unix seconds) of the last finalized block.
     /// Written by the finalization consumer; read here without a lock.
     last_finalized_ts: Arc<AtomicI64>,
+    /// Local tracking: timestamp of the last block we proposed.
+    /// Prevents the node from spamming proposals while waiting for
+    /// AlephBFT to finalize the block we just proposed.
+    last_proposed_ts: i64,
 }
 
 impl QuantaDataProvider {
@@ -41,6 +45,7 @@ impl QuantaDataProvider {
             blockchain,
             proposer_address,
             last_finalized_ts,
+            last_proposed_ts: 0,
         }
     }
 }
@@ -58,21 +63,23 @@ impl DataProvider for QuantaDataProvider {
         // orders of magnitude cheaper than acquiring a tokio RwLock, which matters
         // because AlephBFT calls get_data() at sub-millisecond intervals.
         // ---------------------------------------------------------------------------
-        let last_ts = self.last_finalized_ts.load(Ordering::Acquire);
-        let current_time = chrono::Utc::now().timestamp();
-
         // 6-SECOND SLOT GATE
         // Block production is rate-limited to once per SLOT_SECONDS (6 s).
         // Await until the window has elapsed — returning None would tell
         // AlephBFT that the data provider is permanently closed.
-        let mut last_ts = self.last_finalized_ts.load(Ordering::Acquire);
         loop {
+            let last_ts = self.last_finalized_ts.load(Ordering::Acquire);
             let current_time = chrono::Utc::now().timestamp();
-            if current_time >= last_ts + 6 {
+            
+            // We must wait at least 6s from the last finalized block AND
+            // 6s from our OWN last proposal (to prevent spamming blocks
+            // during the brief window before consensus finalizes our block).
+            let target_ts = std::cmp::max(last_ts + 6, self.last_proposed_ts + 6);
+            
+            if current_time >= target_ts {
                 break;
             }
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            last_ts = self.last_finalized_ts.load(Ordering::Acquire);
         }
 
         // ---------------------------------------------------------------------------
@@ -81,9 +88,14 @@ impl DataProvider for QuantaDataProvider {
         // ---------------------------------------------------------------------------
         let bc = self.blockchain.read().await;
         match bc.create_block_template(self.proposer_address.clone()) {
-            Ok(block) => Some(block),
+            Ok(block) => {
+                self.last_proposed_ts = chrono::Utc::now().timestamp();
+                Some(block)
+            },
             Err(e) => {
                 tracing::error!("Failed to create block template: {:?}", e);
+                // In BFT, if we can't create a block, we shouldn't kill the node
+                // by returning None. However, this is an edge case.
                 None
             }
         }
