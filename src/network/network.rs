@@ -57,7 +57,7 @@ pub struct Network {
     // LRU(1024) keeps ~10+ minutes of blocks at 30s block time.
     seen_blocks: Arc<Mutex<LruCache<String, ()>>>,
     seen_txs:    Arc<Mutex<LruCache<String, ()>>>,
-    seen_bft:    Arc<Mutex<LruCache<String, ()>>>,
+    seen_bft:    Arc<Mutex<LruCache<String, std::time::Instant>>>,
     discovery: Arc<PeerDiscovery>,
     /// SYNC FIX: Track whether a sync operation is currently in progress.
     /// When true, broadcast blocks that are "too far ahead" will NOT
@@ -410,7 +410,17 @@ impl Network {
                 
                 let already_seen = {
                     let mut seen = self.seen_bft.lock().unwrap();
-                    seen.put(hash, ()).is_some()
+                    let now = std::time::Instant::now();
+                    match seen.get(&hash) {
+                        Some(&time) if now.duration_since(time).as_secs() < 2 => {
+                            // Seen within 2 seconds: likely an immediate gossip loop bounce-back
+                            true
+                        }
+                        _ => {
+                            seen.put(hash, now);
+                            false
+                        }
+                    }
                 };
 
                 // Send to our local AlephBFT instance FIRST.

@@ -65,21 +65,17 @@ impl DataProvider for QuantaDataProvider {
         // ---------------------------------------------------------------------------
         // 6-SECOND SLOT GATE
         // Block production is rate-limited to once per SLOT_SECONDS (6 s).
-        // Await until the window has elapsed — returning None would tell
-        // AlephBFT that the data provider is permanently closed.
-        loop {
-            let last_ts = self.last_finalized_ts.load(Ordering::Acquire);
-            let current_time = chrono::Utc::now().timestamp();
-            
-            // We must wait at least 6s from the last finalized block AND
-            // 6s from our OWN last proposal (to prevent spamming blocks
-            // during the brief window before consensus finalizes our block).
-            let target_ts = std::cmp::max(last_ts + 6, self.last_proposed_ts + 6);
-            
-            if current_time >= target_ts {
-                break;
-            }
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        // Return None while the window hasn't elapsed — no lock needed.
+        let last_ts = self.last_finalized_ts.load(Ordering::Acquire);
+        let current_time = chrono::Utc::now().timestamp();
+        
+        // We must wait at least 6s from the last finalized block AND
+        // 6s from our OWN last proposal (to prevent spamming blocks
+        // during the brief window before consensus finalizes our block).
+        let target_ts = std::cmp::max(last_ts + 6, self.last_proposed_ts + 6);
+        
+        if current_time < target_ts {
+            return None;
         }
 
         // ---------------------------------------------------------------------------
