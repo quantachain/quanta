@@ -413,15 +413,17 @@ impl Network {
                     seen.put(hash, ()).is_some()
                 };
 
-                if already_seen {
-                    return Ok(());
-                }
-
-                // Send to our local AlephBFT instance
+                // Send to our local AlephBFT instance FIRST.
+                // AlephBFT relies on retries (identical messages) for reliability.
+                // If we deduplicate before sending to AlephBFT, retries are dropped!
                 if let Some(tx) = &*tx_opt {
                     if let Err(e) = tx.send(data.clone()) {
                         tracing::error!("Failed to send AlephBFT message to channel: {:?}", e);
                     }
+                }
+
+                if already_seen {
+                    return Ok(());
                 }
 
                 // HIGH FIX: Relay the message to all peers! This eliminates the need

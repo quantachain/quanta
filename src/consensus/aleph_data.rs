@@ -63,9 +63,16 @@ impl DataProvider for QuantaDataProvider {
 
         // 6-SECOND SLOT GATE
         // Block production is rate-limited to once per SLOT_SECONDS (6 s).
-        // Return None while the window hasn't elapsed — no lock needed.
-        if current_time < last_ts + 6 {
-            return None;
+        // Await until the window has elapsed — returning None would tell
+        // AlephBFT that the data provider is permanently closed.
+        let mut last_ts = self.last_finalized_ts.load(Ordering::Acquire);
+        loop {
+            let current_time = chrono::Utc::now().timestamp();
+            if current_time >= last_ts + 6 {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            last_ts = self.last_finalized_ts.load(Ordering::Acquire);
         }
 
         // ---------------------------------------------------------------------------
