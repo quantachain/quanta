@@ -26,26 +26,19 @@ use crate::consensus::blockchain::Blockchain;
 pub struct QuantaDataProvider {
     blockchain: Arc<RwLock<Blockchain>>,
     proposer_address: String,
-    /// Shared atomic: timestamp (Unix seconds) of the last finalized block.
-    /// Written by the finalization consumer; read here without a lock.
-    last_finalized_ts: Arc<AtomicI64>,
-    /// Local tracking: timestamp of the last block we proposed.
-    /// Prevents the node from spamming proposals while waiting for
-    /// AlephBFT to finalize the block we just proposed.
-    last_proposed_ts: i64,
+    last_real_time_proposal: Option<tokio::time::Instant>,
 }
 
 impl QuantaDataProvider {
     pub fn new(
         blockchain: Arc<RwLock<Blockchain>>,
         proposer_address: String,
-        last_finalized_ts: Arc<AtomicI64>,
+        _last_finalized_ts: Arc<AtomicI64>, // Kept for backwards compatibility if needed, but unused
     ) -> Self {
         Self {
             blockchain,
             proposer_address,
-            last_finalized_ts,
-            last_proposed_ts: 0,
+            last_real_time_proposal: None,
         }
     }
 }
@@ -56,42 +49,35 @@ impl DataProvider for QuantaDataProvider {
 
     async fn get_data(&mut self) -> Option<Self::Output> {
         // ---------------------------------------------------------------------------
-        // HOT PATH: check the 6-second slot gate WITHOUT acquiring any lock.
+        // REAL-TIME 6-SECOND SLOT GATE
+        // 
+        // Previously, returning `None` caused AlephBFT to aggressively spam empty
+        // units into the network, accelerating the DAG's round counter.
+        // Once the round counter exceeded 3000, AlephBFT's exponential delay 
+        // kicked in, ballooning block times to 30-60 seconds.
         //
-        // `last_finalized_ts` is an `Arc<AtomicI64>` updated by the finalization
-        // consumer each time a new block is applied.  A single atomic load is
-        // orders of magnitude cheaper than acquiring a tokio RwLock, which matters
-        // because AlephBFT calls get_data() at sub-millisecond intervals.
+        // By using `tokio::time::sleep` to block AlephBFT's Creator task, we
+        // PREVENT it from producing empty units. The DAG advances exclusively via
+        // data units, strictly maintaining exactly 1 round per 6 seconds.
         // ---------------------------------------------------------------------------
-        // 6-SECOND SLOT GATE
-        // Block production is rate-limited to once per SLOT_SECONDS (6 s).
-        // Return None while the window hasn't elapsed — no lock needed.
-        let last_ts = self.last_finalized_ts.load(Ordering::Acquire);
-        let current_time = chrono::Utc::now().timestamp();
-        
-        // We must wait at least 6s from the last finalized block AND
-        // 6s from our OWN last proposal (to prevent spamming blocks
-        // during the brief window before consensus finalizes our block).
-        let target_ts = std::cmp::max(last_ts + 6, self.last_proposed_ts + 6);
-        
-        if current_time < target_ts {
-            return None;
-        }
+        let now = tokio::time::Instant::now();
+        let slot = tokio::time::Duration::from_secs(6);
 
-        // ---------------------------------------------------------------------------
-        // SLOW PATH: we're past the 6-second window, so build a block template.
-        // Only NOW do we acquire the blockchain read-lock.
-        // ---------------------------------------------------------------------------
+        if let Some(last_proposal) = self.last_real_time_proposal {
+            let elapsed = now.duration_since(last_proposal);
+            if elapsed < slot {
+                tokio::time::sleep(slot - elapsed).await;
+            }
+        }
+        
+        self.last_real_time_proposal = Some(tokio::time::Instant::now());
+
         let bc = self.blockchain.read().await;
         match bc.create_block_template(self.proposer_address.clone()) {
-            Ok(block) => {
-                self.last_proposed_ts = chrono::Utc::now().timestamp();
-                Some(block)
-            },
+            Ok(block) => Some(block),
             Err(e) => {
                 tracing::error!("Failed to create block template: {:?}", e);
-                // In BFT, if we can't create a block, we shouldn't kill the node
-                // by returning None. However, this is an edge case.
+                // Return None only on catastrophic failure, which triggers AlephBFT's empty-unit delay fallback
                 None
             }
         }
