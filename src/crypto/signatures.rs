@@ -69,6 +69,16 @@ impl FalconKeypair {
         }
     }
 
+    /// Generate a new Falcon-512 keypair deterministically from a 32-byte seed.
+    /// This uses `falcon-rust` because `pqcrypto-falcon` does not expose a deterministic keygen.
+    pub fn generate_from_seed(seed: [u8; 32]) -> Self {
+        let (sk, pk) = fr::keygen(seed);
+        Self {
+            public_key: pk.to_bytes().to_vec(),
+            secret_key: sk.to_bytes().to_vec(),
+        }
+    }
+
     pub fn secret_key_len(&self) -> usize {
         self.secret_key.len()
     }

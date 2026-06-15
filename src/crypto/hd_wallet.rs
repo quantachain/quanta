@@ -114,8 +114,10 @@ impl HDWallet {
         let index = self.accounts.len() as u32;
         let account_key = self.derive_account_key(index);
 
-        // --- Generate a real Falcon-512 keypair ---
-        let keypair = FalconKeypair::generate();
+        // --- Generate a real Falcon-512 keypair deterministically ---
+        let mut seed = [0u8; 32];
+        seed.copy_from_slice(&account_key);
+        let keypair = FalconKeypair::generate_from_seed(seed);
         let public_key = keypair.public_key.clone();
 
         // Derive the address consistently with QuantumWallet::get_address():
