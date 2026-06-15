@@ -46,16 +46,22 @@ impl SpawnHandle for QuantaSpawnHandle {
 //   • resets internal DAG round counter → prevents exponential delay growth
 //   • deletes the previous session's backup file → keeps disk clean
 //
-// 300 blocks × 6 s/block = 30 minutes per session, which is a good balance
-// between crash-recovery granularity and keeping backup files small.
+// TUNED 2026-06-15: At the observed ~25s/block, SESSION_LENGTH=300 meant
+// 125 minutes before the round counter reset. AlephBFT's exponential delay
+// accumulates over the lifetime of a session — cutting to 60 blocks (~25 min)
+// prevents the exponent from growing large enough to matter.
 // ---------------------------------------------------------------------------
-const SESSION_LENGTH: u64 = 300;
+const SESSION_LENGTH: u64 = 60;
 
 // Maximum DAG rounds within a single session.  AlephBFT's built-in delay
 // function applies an exponential back-off whose exponent grows with the
 // round number.  Keeping this well below SESSION_LENGTH * expected_rounds_per_block
 // ensures the exponential never has time to accumulate within one session.
-const MAX_ROUNDS_PER_SESSION: u32 = 2000;
+//
+// TUNED 2026-06-15: Reduced from 2000 → 500. Triggers session rotation sooner
+// if rounds accumulate faster than expected (e.g. during network partitions),
+// bounding the worst-case delay growth within any single session.
+const MAX_ROUNDS_PER_SESSION: u32 = 500;
 
 pub async fn run_bft_proposer(
     blockchain: Arc<RwLock<Blockchain>>,

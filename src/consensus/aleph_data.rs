@@ -66,7 +66,11 @@ impl DataProvider for QuantaDataProvider {
         if let Some(last_proposal) = self.last_real_time_proposal {
             let elapsed = now.duration_since(last_proposal);
             if elapsed < slot {
-                tokio::time::sleep(slot - elapsed).await;
+                // FIX 2026-06-15: Return None immediately instead of sleeping.
+                // Sleeping blocks the AlephBFT Creator task, preventing the DAG
+                // from advancing for 6s. AlephBFT gracefully handles None by
+                // omitting data from the current unit, allowing consensus to proceed.
+                return None;
             }
         }
         

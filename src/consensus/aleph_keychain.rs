@@ -121,9 +121,23 @@ impl MultiKeychain for QuantaKeychain {
             return false;
         }
 
-        partial
-            .iter()
-            .all(|(i, sgn)| self.verify(msg, sgn, i))
+        // PERF FIX 2026-06-15: Only verify the minimum `required` signatures,
+        // not every signature present. AlephBFT calls is_complete() thousands
+        // of times per second. Each Falcon-512 verify is ~1.5ms. Verifying all
+        // signatures (even when only `required` are needed) adds significant
+        // CPU pressure to the finality path and compounds DAG round delays.
+        //
+        // We short-circuit as soon as we have `required` valid sigs.
+        let mut valid = 0usize;
+        for (i, sgn) in partial.iter() {
+            if self.verify(msg, sgn, i) {
+                valid += 1;
+                if valid >= required {
+                    return true;
+                }
+            }
+        }
+        false
     }
 }
 
