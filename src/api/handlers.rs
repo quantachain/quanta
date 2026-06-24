@@ -954,6 +954,7 @@ pub async fn start_server(
         .expect("Server error");
 }
 
+
 // ---------------------------------------------------------------------------
 // AI Contract API Handlers
 // ---------------------------------------------------------------------------
@@ -964,7 +965,8 @@ async fn get_contract(
     State(state): State<Arc<ApiState>>,
     Path(address): Path<String>,
 ) -> impl IntoResponse {
-    let acc = state.blockchain.get_account_state_snapshot();
+    let blockchain = state.blockchain.read().await;
+    let acc = blockchain.get_account_state_read();
     match acc.get_contract(&address) {
         Some(c) => (StatusCode::OK, Json(serde_json::json!({
             "address":     address,
@@ -980,12 +982,13 @@ async fn get_contract(
 }
 
 /// GET /api/contracts/:address/events
-/// Returns only the event log — lightweight for QuaScan feeds.
+/// Returns only the event log - lightweight for QuaScan feeds.
 async fn get_contract_events(
     State(state): State<Arc<ApiState>>,
     Path(address): Path<String>,
 ) -> impl IntoResponse {
-    let acc = state.blockchain.get_account_state_snapshot();
+    let blockchain = state.blockchain.read().await;
+    let acc = blockchain.get_account_state_read();
     match acc.get_contract(&address) {
         Some(c) => (StatusCode::OK, Json(serde_json::json!({
             "address": address,
@@ -1005,7 +1008,8 @@ async fn list_agents(
     State(state): State<Arc<ApiState>>,
     Query(q): Query<AgentQuery>,
 ) -> impl IntoResponse {
-    let acc = state.blockchain.get_account_state_snapshot();
+    let blockchain = state.blockchain.read().await;
+    let acc = blockchain.get_account_state_read();
     let agents: Vec<serde_json::Value> = acc.contracts
         .iter()
         .filter(|(_, c)| c.template_id == crate::core::contracts::TEMPLATE_AGENT_REGISTRY)
