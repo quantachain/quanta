@@ -149,6 +149,36 @@ impl Network {
             })
         };
 
+        // FIX (2026-06-24): Periodic mempool sync loop.
+        //
+        // Transaction gossip is fire-and-forget — if a validator misses a
+        // NewTx broadcast (e.g. because it was banned, restarted, or
+        // temporarily disconnected), it never receives that transaction.
+        // This loop polls a random peer for its full mempool every 30 seconds,
+        // ensuring all validators eventually converge on the same pending set
+        // and the round-robin distribution of transactions works correctly.
+        let mempool_sync_handle = {
+            let network = Arc::clone(&self);
+            tokio::spawn(async move {
+                // Stagger the first sync so it doesn't overlap with initial connection setup.
+                tokio::time::sleep(Duration::from_secs(15)).await;
+                let mut interval = interval(Duration::from_secs(30));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    interval.tick().await;
+                    let peers = network.peer_manager.get_peers().await;
+                    if peers.is_empty() { continue; }
+                    // Pick a random peer to request mempool from.
+                    let idx = (chrono::Utc::now().timestamp() as usize) % peers.len();
+                    if let Some(peer) = peers.get(idx) {
+                        tracing::debug!("Periodic mempool sync: requesting from {}", 
+                            peer.address().await);
+                        let _ = peer.send_message(P2PMessage::GetMempool).await;
+                    }
+                }
+            })
+        };
+
         // Resolve DNS seeds to get additional bootstrap nodes
         if !self.config.dns_seeds.is_empty() {
             info!("Resolving {} DNS seeds...", self.config.dns_seeds.len());
@@ -177,7 +207,7 @@ impl Network {
         info!("Network node started successfully");
         
         // Wait for handles
-        let _ = tokio::join!(listen_handle, processor_handle, maintenance_handle, heartbeat_handle);
+        let _ = tokio::join!(listen_handle, processor_handle, maintenance_handle, heartbeat_handle, mempool_sync_handle);
         
         Ok(())
     }
@@ -305,14 +335,21 @@ impl Network {
         
         // Request known peers from this new connection to discover the rest of the network
         let _ = peer.send_message(P2PMessage::GetAddr).await;
-        
+
+        // FIX (2026-06-24): Request the peer's mempool immediately on connect.
+        // Validators that were temporarily disconnected or banned miss transaction
+        // gossip while offline. Fetching the mempool on reconnect ensures they
+        // have the same pending transactions as the rest of the network and can
+        // include them in their block proposals.
+        let _ = peer.send_message(P2PMessage::GetMempool).await;
+
         // Start single receive task
         Self::start_peer_receive_task(
             peer,
             self.message_tx.clone(),
             Arc::clone(&self.peer_manager)
         ).await;
-        
+
         info!("Connected to peer {}", addr);
         Ok(())
     }

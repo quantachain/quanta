@@ -7,38 +7,73 @@ use aleph_bft::DataProvider;
 use crate::core::block::Block;
 use crate::consensus::blockchain::Blockchain;
 
-/// AlephBFT data provider that proposes the next block at the configured
-/// block interval (SLOT_SECONDS = 6).
+/// Target block slot duration in seconds.
+const SLOT_SECONDS: i64 = 6;
+
+/// How long a non-designated validator waits before acting as backup proposer.
 ///
-/// # Lock-contention fix
+/// When the designated (round-robin) proposer for the current slot does not
+/// produce a block within this window, other validators step in to keep the
+/// chain moving.  Slightly longer than SLOT_SECONDS so the designated proposer
+/// always gets first priority when it is online.
+const PROPOSER_TIMEOUT_SECS: i64 = 8;
+
+/// AlephBFT data provider — proposes the next block once per 6-second slot.
 ///
-/// The original implementation acquired the blockchain read-lock on *every*
-/// `get_data()` call — including the majority of calls that immediately return
-/// `None` because the 6-second window hasn't elapsed yet.  AlephBFT calls
-/// `get_data()` thousands of times per second, so this caused severe lock
-/// contention with the finalization writer.
+/// # Block-time fix (2026-06-24)
 ///
-/// The fix: the finalization consumer in `bft_proposer.rs` stores the
-/// timestamp of each newly applied block into `last_finalized_ts` (an
-/// `Arc<AtomicI64>`).  `get_data()` reads that atomic — a single load
-/// instruction, no lock — and only acquires the blockchain read-lock when
-/// it's actually time to build a new block template.
+/// Previous implementations gated proposals on `last_real_time_proposal`
+/// (when *this node* last proposed).  This was wrong for two reasons:
+///
+///  1. AlephBFT is leaderless — any of the 7 validators can propose.
+///     The slot gate must fire relative to when the last block was
+///     **finalized**, not when this node last proposed.  When the
+///     `QuantaDataProvider` is recreated each session (every 60 blocks),
+///     `last_real_time_proposal` was `None`, causing an immediate proposal
+///     flood right after session rotation, spiking block time to 25s.
+///
+///  2. `last_finalized_ts` was wired up in `bft_proposer.rs` precisely to
+///     solve this, but was then accidentally neutered (prefixed with `_`).
+///     This restores it as the primary timing control.
+///
+/// # Round-robin fix (2026-06-24)
+///
+/// Without explicit turn assignment, validators with lower latency or better
+/// connectivity win the AlephBFT DAG race on every block, causing some
+/// validators to receive zero transactions.  We now use `get_proposer()` to
+/// select a designated proposer for each slot.  Non-designated validators
+/// hold back for PROPOSER_TIMEOUT_SECS before acting as backup, giving the
+/// designated proposer priority while still keeping the chain alive if it
+/// goes offline.
 pub struct QuantaDataProvider {
     blockchain: Arc<RwLock<Blockchain>>,
-    proposer_address: String,
-    last_real_time_proposal: Option<tokio::time::Instant>,
+    /// This validator's own address.
+    my_address: String,
+    /// Sorted committee list — same order used by `get_proposer()`.
+    committee: Vec<String>,
+    /// Shared atomic written by the finalization consumer in `bft_proposer.rs`
+    /// immediately after each block is applied.  `get_data()` reads this
+    /// lock-free to implement the SLOT_SECONDS gate.
+    last_finalized_ts: Arc<AtomicI64>,
+    /// Wall-clock instant at which we first noticed the current slot was
+    /// "open" (>= SLOT_SECONDS since last finalization) but we are not
+    /// the designated proposer.  Used to measure the failover window.
+    slot_overdue_since: Option<tokio::time::Instant>,
 }
 
 impl QuantaDataProvider {
     pub fn new(
         blockchain: Arc<RwLock<Blockchain>>,
-        proposer_address: String,
-        _last_finalized_ts: Arc<AtomicI64>, // Kept for backwards compatibility if needed, but unused
+        my_address: String,
+        committee: Vec<String>,
+        last_finalized_ts: Arc<AtomicI64>,
     ) -> Self {
         Self {
             blockchain,
-            proposer_address,
-            last_real_time_proposal: None,
+            my_address,
+            committee,
+            last_finalized_ts,
+            slot_overdue_since: None,
         }
     }
 }
@@ -48,40 +83,89 @@ impl DataProvider for QuantaDataProvider {
     type Output = Block;
 
     async fn get_data(&mut self) -> Option<Self::Output> {
-        // ---------------------------------------------------------------------------
-        // REAL-TIME 6-SECOND SLOT GATE
-        // 
-        // Previously, returning `None` caused AlephBFT to aggressively spam empty
-        // units into the network, accelerating the DAG's round counter.
-        // Once the round counter exceeded 3000, AlephBFT's exponential delay 
-        // kicked in, ballooning block times to 30-60 seconds.
+        // -----------------------------------------------------------------------
+        // SLOT GATE — primary block-time control.
         //
-        // By using `tokio::time::sleep` to block AlephBFT's Creator task, we
-        // PREVENT it from producing empty units. The DAG advances exclusively via
-        // data units, strictly maintaining exactly 1 round per 6 seconds.
-        // ---------------------------------------------------------------------------
-        let now = tokio::time::Instant::now();
-        let slot = tokio::time::Duration::from_secs(6);
+        // Only propose a block once at least SLOT_SECONDS of real time have
+        // elapsed since the last *finalized* block.  This prevents the rapid-
+        // fire proposal flood that occurred when QuantaDataProvider was
+        // recreated on each session rotation with last_real_time_proposal=None.
+        // -----------------------------------------------------------------------
+        let now_unix = chrono::Utc::now().timestamp();
+        let last_ts  = self.last_finalized_ts.load(Ordering::Acquire);
+        let elapsed  = now_unix.saturating_sub(last_ts);
 
-        if let Some(last_proposal) = self.last_real_time_proposal {
-            let elapsed = now.duration_since(last_proposal);
-            if elapsed < slot {
-                // FIX 2026-06-15: Return None immediately instead of sleeping.
-                // Sleeping blocks the AlephBFT Creator task, preventing the DAG
-                // from advancing for 6s. AlephBFT gracefully handles None by
-                // omitting data from the current unit, allowing consensus to proceed.
-                return None;
+        if elapsed < SLOT_SECONDS {
+            // Slot has not opened yet — reset the overdue timer and yield.
+            self.slot_overdue_since = None;
+            return None;
+        }
+
+        // -----------------------------------------------------------------------
+        // ROUND-ROBIN PROPOSER SELECTION
+        //
+        // Compute the designated proposer for the current height:
+        //   slot_idx         = current_height % committee.len()
+        //   designated       = committee[slot_idx]
+        //
+        // If we ARE the designated proposer → propose immediately.
+        // If we are NOT → start (or continue) the overdue timer.
+        //   • Within PROPOSER_TIMEOUT_SECS: return None (let them go first).
+        //   • After timeout: step in as backup (designated proposer is offline).
+        // -----------------------------------------------------------------------
+        if !self.committee.is_empty() {
+            // Acquire a short-lived read lock only to get the current height.
+            let current_height = {
+                let bc = self.blockchain.read().await;
+                bc.get_height()
+            };
+
+            let slot_idx   = (current_height as usize) % self.committee.len();
+            let designated = &self.committee[slot_idx];
+
+            if designated != &self.my_address {
+                // We are NOT the designated proposer for this slot.
+                let now_instant   = tokio::time::Instant::now();
+                let overdue_since = self.slot_overdue_since.get_or_insert(now_instant);
+                let waiting_secs  = now_instant
+                    .duration_since(*overdue_since)
+                    .as_secs() as i64;
+
+                if waiting_secs < PROPOSER_TIMEOUT_SECS {
+                    // Still within grace period — yield to the designated proposer.
+                    return None;
+                }
+
+                // Timeout: designated proposer appears offline — step in as backup.
+                tracing::warn!(
+                    "BFT slot {}: designated proposer {} did not produce a block within {}s \
+                     — stepping in as backup proposer",
+                    current_height, designated, PROPOSER_TIMEOUT_SECS
+                );
+            } else {
+                // We ARE the designated proposer — clear any stale overdue timer.
+                self.slot_overdue_since = None;
+                tracing::debug!(
+                    "BFT slot {}: I am the designated proposer ({})",
+                    current_height, self.my_address
+                );
             }
         }
-        
-        self.last_real_time_proposal = Some(tokio::time::Instant::now());
 
+        // -----------------------------------------------------------------------
+        // BUILD BLOCK TEMPLATE
+        // -----------------------------------------------------------------------
         let bc = self.blockchain.read().await;
-        match bc.create_block_template(self.proposer_address.clone()) {
-            Ok(block) => Some(block),
+        match bc.create_block_template(self.my_address.clone()) {
+            Ok(block) => {
+                tracing::info!(
+                    "BFT DataProvider: proposing block {} (proposer: {}, elapsed since last: {}s)",
+                    block.index, self.my_address, elapsed
+                );
+                Some(block)
+            }
             Err(e) => {
                 tracing::error!("Failed to create block template: {:?}", e);
-                // Return None only on catastrophic failure, which triggers AlephBFT's empty-unit delay fallback
                 None
             }
         }
