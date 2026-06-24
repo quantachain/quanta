@@ -895,6 +895,10 @@ pub fn create_router(
         // Accepts fully-solved blocks from mining pools.
         // Shares are tracked pool-side; only network-difficulty solutions arrive here.
         .route("/api/blocks/submit",   post(submit_pool_block))
+        // ── AI Contracts ────────────────────────────────────────────────
+        .route("/api/contracts/:address",        get(get_contract))
+        .route("/api/contracts/:address/events", get(get_contract_events))
+        .route("/api/agents",                    get(list_agents))
         .layer(
             ServiceBuilder::new()
                 .layer(middleware::from_fn(rate_limiter))
@@ -948,4 +952,81 @@ pub async fn start_server(
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .expect("Server error");
+}
+
+// ---------------------------------------------------------------------------
+// AI Contract API Handlers
+// ---------------------------------------------------------------------------
+
+/// GET /api/contracts/:address
+/// Returns the full contract state + event log. Powers QuaScan contract pages.
+async fn get_contract(
+    State(state): State<Arc<ApiState>>,
+    Path(address): Path<String>,
+) -> impl IntoResponse {
+    let acc = state.blockchain.get_account_state_snapshot();
+    match acc.get_contract(&address) {
+        Some(c) => (StatusCode::OK, Json(serde_json::json!({
+            "address":     address,
+            "owner":       c.owner,
+            "template_id": c.template_id,
+            "deployed_at": c.deployed_at,
+            "storage":     c.storage,
+            "event_count": c.events.len(),
+            "events":      c.events,
+        }))).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Contract not found" }))).into_response(),
+    }
+}
+
+/// GET /api/contracts/:address/events
+/// Returns only the event log — lightweight for QuaScan feeds.
+async fn get_contract_events(
+    State(state): State<Arc<ApiState>>,
+    Path(address): Path<String>,
+) -> impl IntoResponse {
+    let acc = state.blockchain.get_account_state_snapshot();
+    match acc.get_contract(&address) {
+        Some(c) => (StatusCode::OK, Json(serde_json::json!({
+            "address": address,
+            "events":  c.events,
+        }))).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Contract not found" }))).into_response(),
+    }
+}
+
+/// GET /api/agents?service_type=llm-inference
+/// Lists all Agent Registry contracts, optionally filtered by service_type.
+/// Powers the AI agent marketplace discovery page on QuaScan.
+#[derive(Deserialize)]
+struct AgentQuery { service_type: Option<String> }
+
+async fn list_agents(
+    State(state): State<Arc<ApiState>>,
+    Query(q): Query<AgentQuery>,
+) -> impl IntoResponse {
+    let acc = state.blockchain.get_account_state_snapshot();
+    let agents: Vec<serde_json::Value> = acc.contracts
+        .iter()
+        .filter(|(_, c)| c.template_id == crate::core::contracts::TEMPLATE_AGENT_REGISTRY)
+        .filter(|(_, c)| {
+            if let Some(ref stype) = q.service_type {
+                c.storage.get("service_type").map(|s| s == stype).unwrap_or(false)
+            } else {
+                true
+            }
+        })
+        .map(|(addr, c)| serde_json::json!({
+            "contract_address": addr,
+            "agent_address":    c.storage.get("agent_address"),
+            "name":             c.storage.get("name"),
+            "service_type":     c.storage.get("service_type"),
+            "price_per_call":   c.storage.get("price_per_call"),
+            "endpoint_hash":    c.storage.get("endpoint_hash"),
+            "active":           c.storage.get("active"),
+            "registered_at":    c.storage.get("registered_at"),
+        }))
+        .collect();
+    let count = agents.len();
+    (StatusCode::OK, Json(serde_json::json!({ "agents": agents, "count": count })))
 }

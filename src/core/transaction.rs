@@ -533,6 +533,18 @@ pub struct ValidatorInfo {
     pub epoch_slots_produced: u64,
 }
 
+/// A single on-chain event emitted by a native contract execution.
+/// Indexed by QuaScan for contract activity feeds.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ContractEvent {
+    /// Block height at which this event was emitted.
+    pub height: u64,
+    /// Short event name (e.g. "AgentJobClaimed", "StreamWithdrawn").
+    pub name: String,
+    /// Arbitrary key-value data for the event.
+    pub data: HashMap<String, String>,
+}
+
 /// Minimal deployed-contract state.
 /// Full contract storage lives inside the `storage` map.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -545,6 +557,9 @@ pub struct ContractState {
     pub deployed_at: u64,
     /// Contract-specific key-value storage.
     pub storage: HashMap<String, String>,
+    /// Ordered log of events emitted by this contract.
+    #[serde(default)]
+    pub events: Vec<ContractEvent>,
 }
 
 /// In-memory global state — accounts, validators, contracts.
