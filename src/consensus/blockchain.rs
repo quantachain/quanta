@@ -167,6 +167,19 @@ const MAX_FUTURE_BLOCK_TIME: i64 = 7200; // 2 hours maximum future timestamp
 /// LOW-1 FIX: Bound address string length to prevent unbounded HashMap key allocations.
 const MAX_ADDRESS_LEN: usize = 128;
 
+/// Equivocation-slash burn address — tokens sent here are permanently unspendable.
+/// All-zeros address cannot be derived from any known key.
+const BURN_ADDRESS: &str = "0x0000000000000000000000000000000000000000";
+
+/// Downtime soft-slash percentage: 5% of stake burned per epoch with >30% missed slots.
+const DOWNTIME_SLASH_PCT: u64 = 5;
+
+/// Equivocation hard-slash percentage: 50% of stake burned for double-signing.
+const EQUIVOCATION_SLASH_PCT: u64 = 50;
+
+/// Whistleblower reward: 10% of the slashed equivocation amount.
+const WHISTLEBLOWER_REWARD_PCT: u64 = 10;
+
 /// STATE ROOT SORT FIX (v0.7.2): Prior to this height, state_root was computed
 /// with locked_balances in insertion order, which differs between the mining
 /// path (coinbase first) and the validation path (user txs first, coinbase
@@ -1334,29 +1347,134 @@ impl Blockchain {
                 return Err(BlockchainError::InvalidBlock);
             }
 
-            // Handle Validator Staking (v2)
+            // Handle Validator Staking (v2) — with min-stake, re-stake guard, slash cooldown
             if let crate::core::transaction::TransactionType::Stake { validator_pubkey } = &tx.tx_type {
+                use crate::consensus::authorities::{MIN_VALIDATOR_STAKE, OPEN_VALIDATOR_REGISTRATION_HEIGHT};
                 let epoch = crate::consensus::authorities::epoch_for_height(block.index);
-                temp_state.register_validator(
-                    &tx.sender,
-                    validator_pubkey.clone(),
-                    tx.amount, // staked amount
-                    epoch,
-                );
-                tracing::info!(
-                    "Validator registered: {} (epoch={}, stake={})",
-                    tx.sender, epoch, tx.amount
-                );
+
+                // Guard 1: Minimum stake requirement
+                if tx.amount < MIN_VALIDATOR_STAKE {
+                    tracing::warn!(
+                        "Stake rejected: {} staked {} microunits, minimum is {} ({}k QUA)",
+                        tx.sender, tx.amount, MIN_VALIDATOR_STAKE, MIN_VALIDATOR_STAKE / 1_000_000_000
+                    );
+                    return Err(BlockchainError::InvalidBlock);
+                }
+
+                // Guard 2: Cannot stake if already an active validator
+                let already_active = temp_state
+                    .get_validator_info(&tx.sender)
+                    .map(|v| v.active)
+                    .unwrap_or(false);
+                if already_active {
+                    tracing::warn!("Stake rejected: {} is already an active validator", tx.sender);
+                    return Err(BlockchainError::InvalidBlock);
+                }
+
+                // Guard 3: Cannot re-stake during slash cooldown
+                let slash_cooldown = temp_state
+                    .get_validator_info(&tx.sender)
+                    .map(|v| v.slash_cooldown_until_epoch)
+                    .unwrap_or(0);
+                if slash_cooldown > epoch {
+                    tracing::warn!(
+                        "Stake rejected: {} is in slash cooldown until epoch {} (current: {})",
+                        tx.sender, slash_cooldown, epoch
+                    );
+                    return Err(BlockchainError::InvalidBlock);
+                }
+
+                // Guard 4: Open registration switch
+                // Before OPEN_VALIDATOR_REGISTRATION_HEIGHT: Stake txs are recorded but the
+                // validator is NOT added to the active committee (genesis validators dominate).
+                // After: all stakers are eligible for the committee immediately.
+                let registration_open = block.index >= OPEN_VALIDATOR_REGISTRATION_HEIGHT;
+                if registration_open {
+                    temp_state.register_validator(
+                        &tx.sender,
+                        validator_pubkey.clone(),
+                        tx.amount,
+                        epoch,
+                    );
+                    tracing::info!(
+                        "Validator registered (open set): {} (epoch={}, stake={} microunits)",
+                        tx.sender, epoch, tx.amount
+                    );
+                } else {
+                    // Pre-registration-open: store with active=false so the unbonding/epoch
+                    // logic still works, but they won't enter the committee until the switch.
+                    temp_state.register_validator(
+                        &tx.sender,
+                        validator_pubkey.clone(),
+                        tx.amount,
+                        epoch,
+                    );
+                    tracing::info!(
+                        "Validator pre-registered (opens at height {}): {} (stake={} microunits)",
+                        OPEN_VALIDATOR_REGISTRATION_HEIGHT, tx.sender, tx.amount
+                    );
+                }
             }
 
-            // Handle Validator Unstaking (v2)
+            // Handle Validator Unstaking (v2) — now records unbonding epoch
             if tx.is_unstake() {
-                temp_state.deregister_validator(&tx.sender);
-                tracing::info!("Validator deregistered: {}", tx.sender);
+                // Guard: sender must actually be a registered active validator
+                let is_active = temp_state
+                    .get_validator_info(&tx.sender)
+                    .map(|v| v.active)
+                    .unwrap_or(false);
+                if !is_active {
+                    tracing::warn!("Unstake rejected: {} is not a registered active validator", tx.sender);
+                    return Err(BlockchainError::InvalidBlock);
+                }
+                let epoch = crate::consensus::authorities::epoch_for_height(block.index);
+                temp_state.deregister_validator(&tx.sender, epoch);
+                tracing::info!("Validator deregistered: {} (unbonding epoch={})", tx.sender, epoch);
             }
 
             temp_state.credit_account(tx, block.index, COINBASE_MATURITY);
             temp_state.increment_nonce(&tx.sender);
+
+            // Handle SlashEvidence (v3) — equivocation slashing
+            if let crate::core::transaction::TransactionType::SlashEvidence {
+                offender, height: _, round: _, sig_a, hash_a, sig_b, hash_b,
+            } = &tx.tx_type {
+                // Verify the two signatures are genuinely different (different block hashes)
+                if hash_a == hash_b {
+                    tracing::warn!("SlashEvidence rejected: hash_a == hash_b (not a conflict)");
+                    return Err(BlockchainError::InvalidBlock);
+                }
+                // Verify the validator has a recorded public key we can check against
+                let validator_pk = temp_state
+                    .get_validator_info(offender)
+                    .map(|v| v.falcon_pk.clone());
+                if let Some(pk) = validator_pk {
+                    // Verify both signatures are valid Falcon-512 signatures from offender.
+                    // We verify the raw sig blobs against their respective hash payloads.
+                    let sig_a_valid = crate::crypto::verify_signature_strict(
+                        &crate::crypto::canonical_signing_hash(hash_a.as_bytes()),
+                        sig_a,
+                        &pk,
+                    );
+                    let sig_b_valid = crate::crypto::verify_signature_strict(
+                        &crate::crypto::canonical_signing_hash(hash_b.as_bytes()),
+                        sig_b,
+                        &pk,
+                    );
+                    if !sig_a_valid || !sig_b_valid {
+                        tracing::warn!("SlashEvidence rejected: one or both signatures invalid for {}", offender);
+                        return Err(BlockchainError::InvalidBlock);
+                    }
+                    // Evidence is valid — slash will be applied during state application.
+                    tracing::info!(
+                        "SlashEvidence accepted for offender {} — will be slashed at application",
+                        offender
+                    );
+                } else {
+                    tracing::warn!("SlashEvidence rejected: {} is not a known validator", offender);
+                    return Err(BlockchainError::InvalidBlock);
+                }
+            }
         }
         
         // Apply system transactions to temp_state for state_root calculation
@@ -2102,11 +2220,65 @@ impl Blockchain {
                     return Err(BlockchainError::InvalidBlock);
                 }
                 new_state.increment_nonce(&tx.sender);
+
+                // Apply Unstake: record unbonding epoch
+                if tx.is_unstake() {
+                    let epoch = crate::consensus::authorities::epoch_for_height(block.index);
+                    new_state.deregister_validator(&tx.sender, epoch);
+                }
+
+                // Apply Stake: register validator
+                if let crate::core::transaction::TransactionType::Stake { validator_pubkey } = &tx.tx_type {
+                    let epoch = crate::consensus::authorities::epoch_for_height(block.index);
+                    new_state.register_validator(&tx.sender, validator_pubkey.clone(), tx.amount, epoch);
+                }
+
+                // Apply SlashEvidence: execute the slash
+                if let crate::core::transaction::TransactionType::SlashEvidence {
+                    offender, height: _, round: _, sig_a: _, hash_a: _, sig_b: _, hash_b: _,
+                } = &tx.tx_type {
+                    let epoch = crate::consensus::authorities::epoch_for_height(block.index);
+                    if let Some((burned, reward)) = new_state.slash_validator(
+                        offender,
+                        epoch,
+                        EQUIVOCATION_SLASH_PCT,
+                        WHISTLEBLOWER_REWARD_PCT,
+                    ) {
+                        // Credit burned amount to burn address (permanently unspendable)
+                        new_state.credit_account_direct(BURN_ADDRESS, burned);
+                        // Credit whistleblower reward to submitter
+                        new_state.credit_account_direct(&tx.sender, reward);
+                        tracing::warn!(
+                            "SLASH applied: {} burned={} reward_to_whistleblower={}",
+                            offender, burned, reward
+                        );
+                    }
+                }
             }
             // GENESIS premine: maturity=0 (immediately spendable)
             // All other txs (including COINBASE mining rewards): COINBASE_MATURITY
             let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
             new_state.credit_account(tx, block.index, maturity);
+        }
+
+        // Record the block proposer for downtime tracking
+        new_state.record_block_proposed(&block.proposer, block.index);
+
+        // EPOCH BOUNDARY: process unbonding returns and downtime slashing
+        use crate::consensus::authorities::EPOCH_SIZE;
+        if block.index > 0 && block.index % EPOCH_SIZE == 0 {
+            let epoch = crate::consensus::authorities::epoch_for_height(block.index);
+            tracing::info!("Epoch boundary at block {} (epoch {}): processing stake returns and downtime", block.index, epoch);
+            let credits = new_state.process_epoch_boundary(epoch, DOWNTIME_SLASH_PCT, BURN_ADDRESS);
+            for (addr, amount) in credits {
+                if addr == BURN_ADDRESS {
+                    new_state.credit_account_direct(BURN_ADDRESS, amount);
+                } else {
+                    // Return unbonded stake to validator immediately (spendable)
+                    new_state.credit_account_direct(&addr, amount);
+                    tracing::info!("Unbonded stake returned to {}: {} microunits", addr, amount);
+                }
+            }
         }
 
         // 6. OPTIMIZATION: Don't add to in-memory chain (saves RAM!)

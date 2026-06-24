@@ -24,6 +24,33 @@ pub const UNBONDING_EPOCHS: u64 = 60;
 /// Number of blocks per epoch.
 pub const EPOCH_SIZE: u64 = 1000;
 
+/// Minimum QUA (in microunits) a validator must stake to register.
+/// 100,000 QUA — meaningful economic commitment, but low enough for testnet.
+/// Change to 1,000,000 QUA (1_000_000_000_000) for mainnet launch.
+pub const MIN_VALIDATOR_STAKE: u64 = 100_000_000_000; // 100,000 QUA
+
+/// Block height at which open validator registration activates.
+///
+/// SWITCH MECHANISM: The chain bootstraps with 7 hardcoded genesis validators.
+/// Before this height, only genesis validators participate in the committee.
+/// Stake transactions ARE accepted and processed before this height so that
+/// new validators can "pre-register" and be ready when registration opens.
+///
+/// At this height the committee computation switches to include ALL active
+/// on-chain stakers, not just genesis validators. The genesis validators retain
+/// their stake and remain in the committee as long as they have >= MIN_VALIDATOR_STAKE.
+///
+/// Set to 0 to open registration immediately (not recommended for testnet launch).
+/// Will be raised for mainnet.
+pub const OPEN_VALIDATOR_REGISTRATION_HEIGHT: u64 = 10_000; // ~16.7 hours at 6s/block
+
+/// Epochs a slashed validator must wait before being allowed to re-register.
+pub const SLASH_COOLDOWN_EPOCHS: u64 = 180; // ≈ 12.5 days at 6s/block
+
+/// Maximum % of designated slots a validator can miss before being soft-slashed.
+/// 30% miss rate = validator is penalised. Active validators should be online >70%.
+pub const MAX_MISSED_SLOTS_PCT: u64 = 30;
+
 /// Return the epoch number for a given block height.
 #[inline]
 pub fn epoch_for_height(height: u64) -> u64 {

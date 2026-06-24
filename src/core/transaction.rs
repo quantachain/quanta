@@ -94,6 +94,7 @@ pub struct Transaction {
 ///   4 = Unstake        (v2 — deregister, begin unbonding)
 ///   5 = ContractDeploy (v2 — deploy a named contract template)
 ///   6 = ContractCall   (v2 — invoke a deployed contract)
+///   7 = SlashEvidence  (v3 — submit double-signing proof for slashing)
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, std::hash::Hash, codec::Encode, codec::Decode)]
 pub enum TransactionType {
     /// Standard value transfer.
@@ -118,6 +119,27 @@ pub enum TransactionType {
     /// `method` is the UTF-8 method name.
     /// `call_args` is a JSON-encoded argument map.
     ContractCall { contract_address: String, method: String, call_args: Vec<u8> },
+    /// v3: Submit equivocation proof to slash a double-signing validator.
+    ///
+    /// The submitter provides two conflicting BFT signatures from the SAME
+    /// validator at the SAME (height, round) but for DIFFERENT block hashes.
+    /// Any honest node can collect these and submit for a whistleblower reward.
+    SlashEvidence {
+        /// Address of the validator being slashed.
+        offender: String,
+        /// Block height at which both votes were cast.
+        height: u64,
+        /// BFT round at which both votes were cast.
+        round: u32,
+        /// First BFT signature blob (raw_sig || payload).
+        sig_a: Vec<u8>,
+        /// Block hash that sig_a signed.
+        hash_a: String,
+        /// Second BFT signature blob (raw_sig || payload).
+        sig_b: Vec<u8>,
+        /// Block hash that sig_b signed (must differ from hash_a).
+        hash_b: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +285,16 @@ impl Transaction {
                 buf.extend_from_slice(method.as_bytes());
                 buf.extend_from_slice(call_args);
             }
+            TransactionType::SlashEvidence { offender, height, round, sig_a, hash_a, sig_b, hash_b } => {
+                buf.push(7u8);
+                buf.extend_from_slice(offender.as_bytes());
+                buf.extend_from_slice(&height.to_le_bytes());
+                buf.extend_from_slice(&round.to_le_bytes());
+                buf.extend_from_slice(sig_a);
+                buf.extend_from_slice(hash_a.as_bytes());
+                buf.extend_from_slice(sig_b);
+                buf.extend_from_slice(hash_b.as_bytes());
+            }
         }
 
         buf
@@ -331,6 +363,16 @@ impl Transaction {
                 hasher.update(contract_address.as_bytes());
                 hasher.update(method.as_bytes());
                 hasher.update(call_args);
+            }
+            TransactionType::SlashEvidence { offender, height, round, sig_a, hash_a, sig_b, hash_b } => {
+                hasher.update(&[7u8]);
+                hasher.update(offender.as_bytes());
+                hasher.update(&height.to_le_bytes());
+                hasher.update(&round.to_le_bytes());
+                hasher.update(sig_a);
+                hasher.update(hash_a.as_bytes());
+                hasher.update(sig_b);
+                hasher.update(hash_b.as_bytes());
             }
         }
 
@@ -430,6 +472,10 @@ impl Transaction {
         matches!(self.tx_type, TransactionType::ContractCall { .. })
     }
 
+    /// Returns `true` if this is a v3 `SlashEvidence` transaction.
+    pub fn is_slash_evidence(&self) -> bool {
+        matches!(self.tx_type, TransactionType::SlashEvidence { .. })
+    }
 
 } // impl Transaction
 
@@ -455,7 +501,7 @@ pub struct AccountBalance {
 
 /// BFT validator registration record.
 ///
-/// Stored in `AccountState::validators` keyed by the validator's address.
+/// Stored in `AccountState::validators` keyed by the validator’s address.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ValidatorInfo {
     /// Falcon-512 public key (897 bytes) used for BFT signing.
@@ -466,6 +512,25 @@ pub struct ValidatorInfo {
     pub registered_epoch: u64,
     /// Whether this validator is in the active set for the current epoch.
     pub active: bool,
+    /// Epoch at which unbonding began (set when Unstake tx is processed).
+    /// The stake is returned at epoch `unbonding_epoch + UNBONDING_EPOCHS`.
+    /// 0 means not currently unbonding.
+    #[serde(default)]
+    pub unbonding_epoch: u64,
+    /// If slashed: the epoch after which this address may re-register.
+    /// 0 means not slashed / cooldown expired.
+    #[serde(default)]
+    pub slash_cooldown_until_epoch: u64,
+    /// Block height of the last block this validator successfully proposed.
+    /// Used for downtime detection at epoch boundaries.
+    #[serde(default)]
+    pub last_proposed_height: u64,
+    /// Number of slots this validator was the DESIGNATED proposer in the current epoch.
+    #[serde(default)]
+    pub epoch_slots_assigned: u64,
+    /// Number of slots this validator actually produced a block in the current epoch.
+    #[serde(default)]
+    pub epoch_slots_produced: u64,
 }
 
 /// Minimal deployed-contract state.
@@ -503,28 +568,26 @@ impl AccountState {
         }
     }
 
-    /// Calculate deterministic state root hash of all accounts.
+    /// Calculate deterministic state root hash of all accounts AND validators.
     ///
-    /// CONSENSUS FIX: locked_balances is a Vec whose insertion order differs
-    /// between create_block_template (coinbase credited first) and
-    /// validate_block_consensus (user txs applied first, coinbase in a second
-    /// pass).  Sorting by (unlock_height, amount) before hashing makes the
-    /// state root independent of insertion order.
+    /// SECURITY FIX (2026-06-24): Previously only hashed accounts. Validators
+    /// were excluded, meaning a validator could be added/removed without changing
+    /// the state root (chain-split vector). Now both maps are included.
+    ///
+    /// CONSENSUS FIX: locked_balances is sorted by (unlock_height, amount) to
+    /// make the hash independent of insertion order.
     pub fn calculate_state_root(&self) -> String {
         use sha3::{Digest, Sha3_256};
         let mut hasher = Sha3_256::new();
-        
-        let mut keys: Vec<&String> = self.accounts.keys().collect();
-        keys.sort();
-        
-        for key in keys {
+
+        // --- Accounts (sorted by address) ---
+        let mut account_keys: Vec<&String> = self.accounts.keys().collect();
+        account_keys.sort();
+        for key in account_keys {
             if let Some(acc) = self.accounts.get(key) {
                 hasher.update(acc.address.as_bytes());
                 hasher.update(&acc.balance.to_le_bytes());
                 hasher.update(&acc.nonce.to_le_bytes());
-                // Sort locked balances deterministically so insertion order
-                // (which differs between mining and validation paths) does not
-                // affect the hash.
                 let mut sorted_locks: Vec<&LockedBalance> = acc.locked_balances.iter().collect();
                 sorted_locks.sort_by_key(|l| (l.unlock_height, l.amount));
                 for locked in sorted_locks {
@@ -533,7 +596,24 @@ impl AccountState {
                 }
             }
         }
-        
+
+        // --- Validators (sorted by address) ---
+        let mut val_keys: Vec<&String> = self.validators.keys().collect();
+        val_keys.sort();
+        for key in val_keys {
+            if let Some(v) = self.validators.get(key) {
+                hasher.update(key.as_bytes());
+                hasher.update(&v.stake.to_le_bytes());
+                hasher.update(&[v.active as u8]);
+                hasher.update(&v.registered_epoch.to_le_bytes());
+                hasher.update(&v.unbonding_epoch.to_le_bytes());
+                hasher.update(&v.slash_cooldown_until_epoch.to_le_bytes());
+                hasher.update(&v.last_proposed_height.to_le_bytes());
+                hasher.update(&v.epoch_slots_assigned.to_le_bytes());
+                hasher.update(&v.epoch_slots_produced.to_le_bytes());
+            }
+        }
+
         hex::encode(hasher.finalize())
     }
 
@@ -706,7 +786,7 @@ impl AccountState {
 
     /// Register a new BFT validator.
     ///
-    /// The caller must have already debited `stake` from the sender's balance.
+    /// The caller must have already debited `stake` from the sender’s balance.
     pub fn register_validator(
         &mut self,
         address: &str,
@@ -719,16 +799,133 @@ impl AccountState {
             stake,
             registered_epoch: current_epoch,
             active: true,
+            unbonding_epoch: 0,
+            slash_cooldown_until_epoch: 0,
+            last_proposed_height: 0,
+            epoch_slots_assigned: 0,
+            epoch_slots_produced: 0,
         });
     }
 
     /// Deregister a validator (Unstake transaction).
     ///
-    /// Sets `active = false`; staked QUA is locked until unbonding expires.
-    pub fn deregister_validator(&mut self, address: &str) {
+    /// Sets `active = false` and records the unbonding epoch so the stake
+    /// can be returned after `UNBONDING_EPOCHS` epochs have passed.
+    pub fn deregister_validator(&mut self, address: &str, current_epoch: u64) {
         if let Some(info) = self.validators.get_mut(address) {
             info.active = false;
+            info.unbonding_epoch = current_epoch;
         }
+    }
+
+    /// Record that a validator produced a block at `height`.
+    /// Call this once per block from the block-application path.
+    pub fn record_block_proposed(&mut self, address: &str, height: u64) {
+        if let Some(info) = self.validators.get_mut(address) {
+            info.last_proposed_height = height;
+            info.epoch_slots_produced = info.epoch_slots_produced.saturating_add(1);
+        }
+    }
+
+    /// Record that a validator was the designated proposer for a slot.
+    pub fn record_slot_assigned(&mut self, address: &str) {
+        if let Some(info) = self.validators.get_mut(address) {
+            info.epoch_slots_assigned = info.epoch_slots_assigned.saturating_add(1);
+        }
+    }
+
+    /// Process epoch boundary: return unbonded stake and soft-slash inactive validators.
+    ///
+    /// Called once per epoch (when `block.index % EPOCH_SIZE == 0`).
+    /// Returns a list of `(address, amount)` credits to apply to account balances
+    /// (unbonded stake returns). The caller applies these credits to the state.
+    pub fn process_epoch_boundary(
+        &mut self,
+        current_epoch: u64,
+        soft_slash_pct: u64,  // % of stake burned for downtime (e.g. 5)
+        burn_address: &str,
+    ) -> Vec<(String, u64)> {
+        use crate::consensus::authorities::{UNBONDING_EPOCHS, MAX_MISSED_SLOTS_PCT};
+        let mut stake_returns: Vec<(String, u64)> = Vec::new();
+        let mut to_remove: Vec<String> = Vec::new();
+
+        for (address, info) in self.validators.iter_mut() {
+            // --- UNBONDING RETURN ---
+            if !info.active && info.unbonding_epoch > 0 {
+                let release_epoch = info.unbonding_epoch + UNBONDING_EPOCHS;
+                if current_epoch >= release_epoch && info.stake > 0 {
+                    tracing::info!(
+                        "Unbonding complete for {}: returning {} microunits (unbonded epoch {}, released at {})",
+                        address, info.stake, info.unbonding_epoch, release_epoch
+                    );
+                    stake_returns.push((address.clone(), info.stake));
+                    info.stake = 0;
+                    to_remove.push(address.clone());
+                }
+            }
+
+            // --- DOWNTIME SOFT-SLASH ---
+            if info.active && info.epoch_slots_assigned > 0 {
+                let missed = info.epoch_slots_assigned.saturating_sub(info.epoch_slots_produced);
+                let missed_pct = missed * 100 / info.epoch_slots_assigned;
+                if missed_pct > MAX_MISSED_SLOTS_PCT {
+                    let slash_amount = info.stake * soft_slash_pct / 100;
+                    if slash_amount > 0 && slash_amount <= info.stake {
+                        tracing::warn!(
+                            "Downtime soft-slash {}: missed {}% of slots ({}/{}), burning {} microunits",
+                            address, missed_pct, missed, info.epoch_slots_assigned, slash_amount
+                        );
+                        info.stake = info.stake.saturating_sub(slash_amount);
+                        // Return burn amount as a "credit" to the burn address
+                        stake_returns.push((burn_address.to_string(), slash_amount));
+                    }
+                }
+            }
+
+            // Reset per-epoch slot counters for the next epoch.
+            info.epoch_slots_assigned = 0;
+            info.epoch_slots_produced = 0;
+        }
+
+        // Remove fully-unbonded validator records.
+        for addr in to_remove {
+            self.validators.remove(&addr);
+        }
+
+        stake_returns
+    }
+
+    /// Slash a validator for equivocation (double-signing).
+    ///
+    /// Burns `slash_pct`% of their stake and marks them as slashed.
+    /// Returns `(burned, whistleblower_reward)` in microunits.
+    pub fn slash_validator(
+        &mut self,
+        offender: &str,
+        current_epoch: u64,
+        slash_pct: u64,         // % of stake to burn (e.g. 50)
+        whistleblower_pct: u64, // % of slashed amount to reward whistleblower (e.g. 10)
+    ) -> Option<(u64, u64)> {
+        use crate::consensus::authorities::SLASH_COOLDOWN_EPOCHS;
+        let info = self.validators.get_mut(offender)?;
+        if !info.active {
+            return None; // Already inactive
+        }
+        let slash_amount = info.stake * slash_pct / 100;
+        let whistleblower_reward = slash_amount * whistleblower_pct / 100;
+        let burned = slash_amount.saturating_sub(whistleblower_reward);
+
+        info.stake = info.stake.saturating_sub(slash_amount);
+        info.active = false;
+        info.slash_cooldown_until_epoch = current_epoch + SLASH_COOLDOWN_EPOCHS;
+        info.unbonding_epoch = 0; // Slash voids normal unbonding
+
+        tracing::warn!(
+            "SLASHED validator {}: burned {} microunits, whistleblower reward {} microunits, \
+             cooldown until epoch {}",
+            offender, burned, whistleblower_reward, info.slash_cooldown_until_epoch
+        );
+        Some((burned, whistleblower_reward))
     }
 
     /// Remove a fully-unbonded validator record after unbonding expires.
