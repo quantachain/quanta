@@ -80,6 +80,20 @@ enum Commands {
         file: String,
     },
 
+    /// Reveal the 24-word recovery mnemonic from an HD wallet file.
+    ///
+    /// Use this to import your existing wallet into the browser extension:
+    ///   1. Run this command and copy the phrase.
+    ///   2. Open the extension → Import Wallet → Mnemonic tab.
+    ///   3. Paste the phrase and set a password.
+    ///
+    /// Only works with HD wallets (wallet.json). Raw .qua wallets have no
+    /// recovery phrase — the file itself is the key.
+    ShowMnemonic {
+        #[arg(short, long, default_value = "wallet.json")]
+        file: String,
+    },
+
     /// Export your Address and Falcon-512 Public Key to a genesis JSON file.
     ExportValidator {
         #[arg(short, long, default_value = "wallet.qua")]
@@ -364,6 +378,21 @@ async fn main() {
                     }
                 }
                 WalletKind::Raw(w) => println!("{}", w.address),
+                WalletKind::None(e) => die(&e),
+            }
+        }
+
+        Commands::ShowMnemonic { file } => {
+            match try_load_wallet(&file) {
+                WalletKind::Hd(w) => {
+                    eprintln!("\n  ⚠  KEEP THIS SECRET — anyone with this phrase controls your funds.\n");
+                    println!("{}", w.mnemonic);
+                    eprintln!("\n  Paste this into the wallet extension → Import Wallet → Mnemonic tab.");
+                }
+                WalletKind::Raw(_) => die(
+                    "Raw .qua wallets have no recovery phrase — the file IS the key.\n\
+                     Use the extension's 'Import from Private Key' panel instead."
+                ),
                 WalletKind::None(e) => die(&e),
             }
         }
