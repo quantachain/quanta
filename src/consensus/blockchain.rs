@@ -379,7 +379,7 @@ impl Blockchain {
                     "0x0e95de36b72ab7b20372497c2fe6b429223cd9e7", // Validator 4
                     "0x591277eb458e3185bef4fcf18c1c7136fb8bbad6", // Validator 5 (new wallet — old 0x822dd149... lost)
                     "0x15c00903513803b393c6dc0105afd996349ae2b6", // Validator 6
-                    "0x4ebd9b50c4ef0869d964ae8fd47d36c498f6202b", // Validator 7
+                    "0xf3354d68e1dc8761430a85ffe5683b0598ecc132", // Validator 7
                 ];
                 (testnet_faucets.into_iter().map(String::from).collect(), 1_000_000_000_000)
             } else {
