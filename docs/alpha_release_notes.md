@@ -63,12 +63,25 @@ cargo build --release      # compile the new V2 binary
 
 ### Docker Validators (Safe Wipe)
 
-If you are an existing validator using Docker, you must wipe the old chain data but **KEEP your validator.qua wallet file**. 
+If you are an existing validator using Docker, you must wipe the old chain data but **KEEP your validator wallet file**. Since you may have named your wallet file something other than `validator.qua`, you must be extremely careful.
 
+> [!CAUTION]
+> If you run the `rm -rf` command below without successfully moving your wallet out first, you will delete your validator wallet forever!
+
+**Step 1:** Stop your node and move your wallet out of the data folder. (Replace `validator.qua` with your actual wallet filename if it is different!)
 ```bash
 docker stop quanta-validator
 mv ~/quanta_data_v2/validator.qua ~/validator.qua.backup
+```
+
+**Step 2:** Verify your wallet is safe in your home directory, then wipe the old data.
+```bash
+ls ~/validator.qua.backup     # Verify it exists!
 sudo rm -rf ~/quanta_data_v2/*
+```
+
+**Step 3:** Move your wallet back in (again, replacing `validator.qua` with your actual filename if different), and restart the node.
+```bash
 mv ~/validator.qua.backup ~/quanta_data_v2/validator.qua
 docker start quanta-validator
 ```
