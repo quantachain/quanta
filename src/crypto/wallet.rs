@@ -173,7 +173,6 @@ impl QuantumWallet {
                 // If it's not valid UTF-8, it must be the old V1 binary (bincode) format
                 tracing::warn!("Wallet is in legacy V1 binary format. Loading via bincode...");
                 let bytes = fs::read(filename)?;
-                
                 // Try deserializing as QuantumWallet (V1.5)
                 if let Ok(wallet) = bincode::deserialize::<QuantumWallet>(&bytes) {
                     return Ok(wallet);
