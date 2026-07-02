@@ -39,6 +39,7 @@ Thumbs.db
 remove_emojis.py
 *.py
 *.sh
+!scripts/setup-validator.sh
 
 #Faucet
 
