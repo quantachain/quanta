@@ -48,6 +48,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Genesis faucet wallets rotated** (all 10) — new HD wallet generated on 2026-06-06 using
   `cargo run --bin gen_faucet_wallets`. Encrypted backup saved to `faucet_wallet.json`.
   Faucet 0 (API sender): `0xec4f49553e31f22b27a83036a044aff7d697f524`.
+- **Network magic bytes bumped to `Q2T6`** — Isolates the new v2.0.1 network from older nodes due to the hard fork introduced by increased block capacity and Smart Contracts V3.
 - **Block size and tx capacity increased** — Block size increased 2MB → 4MB, maximum transactions per block increased 1200 → 2000, and max P2P message size increased 4MB → 8MB to double the TPS ceiling to ~400 TPS.
 
 ### Added

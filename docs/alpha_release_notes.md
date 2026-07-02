@@ -12,6 +12,7 @@ This is a pre-release testnet build. Do not use real funds. APIs and chain param
 
 ## What Changed in v2.0.1
 
+- **Hard Fork (Network Magic Bump)** — Network magic bytes bumped to `Q2T6` to isolate v2.0.1 nodes due to breaking block size and consensus changes.
 - **Smart Contracts V3** — Full AI contract layer with 5 native templates (Escrow, AgentJob, AgentBid, Stream, AgentRegistry).
 - **Staking & Slashing** — Full validator staking, slashing, and unbonding logic. Open validator registration.
 - **Performance Fixes** — Block size increased to 4MB, TPS ceiling ~400. Round-robin proposer timeout removed to guarantee 6s blocks.
