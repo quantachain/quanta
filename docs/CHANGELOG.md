@@ -11,13 +11,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
-## [2.0.1] — 2026-06-06
+## [2.0.1] — 2026-07-02
 
 > **TESTNET RESET — All nodes must wipe their database and restart from the new genesis.**
 >
-> This release replaces a lost validator wallet, rotates all 10 genesis faucet wallets,
-> bumps the genesis timestamp to today, and fixes a critical AlephBFT block-timing bug
-> that caused blocks to slow from 6 s to 1–2 h over time.
+> This release includes major updates to the consensus engine, block size optimizations,
+> Smart Contracts V3 (AI layer), and full validator staking. It also includes the previously
+> required genesis reset replacing lost validator wallets and fixing block timing drift.
 
 ### Fixed
 - **AlephBFT block timing drift (critical)** — `create_block_template` used
@@ -31,6 +31,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **License header missing** — `LICENSE` file contained only raw AGPLv3 boilerplate with no
   QuantaLabs copyright notice or dual-license clarification. Fixed by prepending the proper
   project-level header.
+- **AlephBFT 30s block time compounding delays** — Resolved by fixing round-robin proposer timeout and block time compounding logic. All validators now propose at 6s slot open, returning block time to ~6s.
+- **Round-robin tx distribution and mempool propagation** — Fixed block time, round-robin distribution, and mempool issues.
+- **`handlers.rs` compile errors** — Resolved by awaiting the blockchain lock correctly.
+- **`EscrowInitArgs` missing field** — Added `refund_height` to fix `deploy-escrow` compilation.
 
 ### Changed
 - **Genesis timestamp** updated from `1748736001` (2025-06-01) to `1780704001` (2026-06-06).
@@ -44,17 +48,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - **Genesis faucet wallets rotated** (all 10) — new HD wallet generated on 2026-06-06 using
   `cargo run --bin gen_faucet_wallets`. Encrypted backup saved to `faucet_wallet.json`.
   Faucet 0 (API sender): `0xec4f49553e31f22b27a83036a044aff7d697f524`.
+- **Block size and tx capacity increased** — Block size increased 2MB → 4MB, maximum transactions per block increased 1200 → 2000, and max P2P message size increased 4MB → 8MB to double the TPS ceiling to ~400 TPS.
 
 ### Added
 - **`src/bin/get_testnet_hash`** — new binary that calls `Block::genesis()`, prints all
   structural fields and the deterministic genesis hash, and verifies it is reproducible.
   Run after any change to `block.rs` to get the updated `TESTNET_GENESIS_HASH`.
-- **`src/bin/gen_faucet_wallets` v2** — rewritten to read passphrase and file-encryption
-  password from environment variables only (never CLI args). Generates 10 Falcon-512 HD
-  faucet accounts, saves encrypted `faucet_wallet.json`, prints both address arrays for
+  `cargo run --bin gen_faucet_wallets`. Encrypted backup saved to `faucet_wallet.json`, prints both address arrays for
   `blockchain.rs`, and prints the genesis hash.
 - **`QUANTA_WALLET_PASSPHRASE` env var** support in `quanta-wallet restore` — optional BIP39
   25th-word passphrase support, defaults to `""` (backward compatible with all existing wallets).
+- **Smart Contracts V3** — Complete AI contract layer + contract API endpoints (5 native templates: Escrow+refund, AgentJob+deadline+refund, AgentBid multi-agent auction, Stream pay-per-block, AgentRegistry). Added `ContractEvent` logs.
+- **Validator Staking & Slashing** — Full staking, slashing, unbonding, and an open validator registration switch.
+- **Deterministic HD Wallet Key Derivation** — Falcon-512 HD wallet keypairs are now derived deterministically from the account seed.
+- **`setup-validator.sh` script** — Added a secure validator setup script for easy deployment with dry-run mode.
+- **`show-mnemonic` command** — Added to the `quanta-wallet` CLI.
 
 ---
 

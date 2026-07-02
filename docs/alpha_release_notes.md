@@ -1,21 +1,24 @@
-# QuantaChain Testnet — V2 Alpha (v2.0.0)
+# QuantaChain Testnet — V2 Release (v2.0.1)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.0.0 — TESTNET RESET (2026-06-06)**
-> All nodes must wipe their databases (`rm -rf ./quanta_testnet_data`) and sync from the new genesis block.
-> New genesis hash: `ae37fe2f40a7e7dbe6d2d1337f260d57185ef5fb169008e2600f245809fd1fbf`
+> **v2.0.1 — TESTNET UPDATE (2026-07-02)**
+> Minor update and performance improvements on top of the V2 Hard Fork.
+> Genesis hash remains: `ae37fe2f40a7e7dbe6d2d1337f260d57185ef5fb169008e2600f245809fd1fbf`
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
 ---
 
-## What Changed in v2.0.0
+## What Changed in v2.0.1
 
-- **Block timing fixed** — Blocks were slowing from 6 s to 1–2 h due to a timestamp drift bug in `create_block_template`. Block timestamps now can never exceed wall-clock time.
-- **Validator 5 replaced** — Lost wallet `0x822dd149...` replaced with `0x591277eb458e3185bef4fcf18c1c7136fb8bbad6`.
-- **Faucet wallets rotated** — All 10 genesis faucet wallets replaced with new HD wallet accounts.
-- **Genesis reset** — Timestamp bumped to 2026-06-06, generating a new genesis hash that forces a clean chain wipe.
+- **Smart Contracts V3** — Full AI contract layer with 5 native templates (Escrow, AgentJob, AgentBid, Stream, AgentRegistry).
+- **Staking & Slashing** — Full validator staking, slashing, and unbonding logic. Open validator registration.
+- **Performance Fixes** — Block size increased to 4MB, TPS ceiling ~400. Round-robin proposer timeout removed to guarantee 6s blocks.
+- **Validator Setup** — Added `setup-validator.sh` script for secure, verifiable deployment.
+- **HD Wallet Key Derivation** — Deterministic Falcon-512 keypair derivation from account seed.
+- **Block timing fixed (v2.0.0)** — Blocks were slowing from 6s to 1–2h due to timestamp drift.
+- **Genesis Reset (v2.0.0)** — Replaced lost validator wallet, rotated faucet wallets, new genesis hash.
 
 ---
 
