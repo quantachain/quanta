@@ -201,6 +201,9 @@ enum Commands {
         amount: f64,
         #[arg(long, default_value = "0.01")]
         fee: f64,
+        /// Block height after which the deployer can reclaim funds (0 = no refund deadline)
+        #[arg(long, default_value = "0")]
+        refund_height: u64,
         #[arg(short, long, default_value = "http://localhost:3000")]
         node: String,
     },
@@ -516,7 +519,7 @@ async fn main() {
 
         // ── Native Contracts ──────────────────────────────────────────────
 
-        Commands::DeployEscrow { wallet, beneficiary, secret_hash, amount, fee, node } => {
+        Commands::DeployEscrow { wallet, beneficiary, secret_hash, amount, fee, refund_height, node } => {
             if secret_hash.len() != 64 {
                 die("--secret-hash must be a 64-character hex string (SHA3-256 output).");
             }
@@ -526,6 +529,7 @@ async fn main() {
             let init_args = serde_json::to_vec(&EscrowInitArgs {
                 beneficiary: beneficiary.clone(),
                 secret_hash: secret_hash.clone(),
+                refund_height,
             }).expect("Failed to encode init args");
 
             // Compute the deterministic contract address from a preview of the tx hash
