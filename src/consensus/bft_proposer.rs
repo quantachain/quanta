@@ -191,8 +191,7 @@ pub async fn run_bft_proposer(
         let data_provider = QuantaDataProvider::new(
             blockchain.clone(),
             my_address.clone(),
-            committee.clone(),           // round-robin proposer selection
-            last_finalized_ts.clone(),   // finalization-gated slot timing
+            last_finalized_ts.clone(),
         );
         
         let (session_tx, session_rx) = tokio::sync::mpsc::unbounded_channel::<Block>();
