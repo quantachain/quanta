@@ -61,6 +61,18 @@ cargo build --release      # compile the new V2 binary
 ./target/release/quanta start -c quanta.toml
 ```
 
+### Docker Validators (Safe Wipe)
+
+If you are an existing validator using Docker, you must wipe the old chain data but **KEEP your validator.qua wallet file**. 
+
+```bash
+docker stop quanta-validator
+mv ~/quanta_data_v2/validator.qua ~/validator.qua.backup
+sudo rm -rf ~/quanta_data_v2/*
+mv ~/validator.qua.backup ~/quanta_data_v2/validator.qua
+docker start quanta-validator
+```
+
 ---
 
 ## Validator Setup (Docker)
