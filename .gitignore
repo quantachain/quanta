@@ -50,3 +50,4 @@ src/bin/distribute_faucet.rs
 
 VPS_BUILD_GUIDE.md
 target-cli/
+docker-compose.yml
