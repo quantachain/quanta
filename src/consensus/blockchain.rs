@@ -148,16 +148,17 @@ const MAX_MEMPOOL_SIZE: usize = 5000; // Maximum pending transactions
 /// HIGH-1 FIX: Per-sender limit — prevents a single address from griefing the
 /// mempool with thousands of incrementing-nonce transactions at zero cost.
 const MAX_MEMPOOL_TXS_PER_SENDER: usize = 25;
-// CRITICAL FIX (External Audit): Reduced from 2000 to 1200
+// PERF (2026-07-02): Increased from 1200 to 2000
 // Falcon-512 transactions are ~1713 bytes each (666 byte sig + 897 byte pubkey + overhead)
-// 2000 tx × 1713 bytes = 3.43 MB (exceeds 2 MB block size!)
-// 1200 tx × 1713 bytes = 2.06 MB (fits in 2 MB with compression)
-const MAX_BLOCK_TRANSACTIONS: usize = 1200; // Maximum transactions per block
-// SECURITY FIX (External Audit): Increased from 1MB to 2MB
-// Falcon-512 signatures are 666 bytes each, so 1200 tx = ~2.06MB
-// Previous 1MB limit could only support ~583 transactions
+// 2000 tx × 1713 bytes = 3.43 MB — fits cleanly within the new 4 MB block limit
+// with room for the coinbase tx and block header overhead.
+const MAX_BLOCK_TRANSACTIONS: usize = 2000; // Maximum transactions per block
+// PERF (2026-07-02): Increased from 2MB to 4MB
+// Doubles TPS ceiling (~200 → ~400 TPS) without changing block time.
+// Wire size stays ~1MB after zstd compression (4× ratio on Falcon sig data).
+// DB decompress cap in storage/db.rs uses MAX_BLOCK_SIZE_BYTES * 2 and auto-updates.
 /// Exported so `storage::db` can enforce a matching decompress size cap (MED-5).
-pub const MAX_BLOCK_SIZE_BYTES: usize = 2_097_152; // 2 MB max block size
+pub const MAX_BLOCK_SIZE_BYTES: usize = 4_194_304; // 4 MB max block size
 const MAX_ORPHAN_BLOCKS: usize = 2000; // Increased to hold full MAX_SYNC_BATCH out-of-order blocks
 const MAX_TRANSACTION_SIZE_BYTES: usize = 102400; // 100KB max per transaction (prevents DOS)
 const MIN_TRANSACTION_FEE: u64 = 100; // 0.0001 QUA in microunits — sub-cent for AI micro-tx

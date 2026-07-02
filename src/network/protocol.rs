@@ -102,7 +102,7 @@ impl From<&Block> for BlockHeader {
 
 /// Protocol constants
 pub const PROTOCOL_VERSION: u32 = 2; // v2: BFT from genesis
-pub const MAX_MESSAGE_SIZE: usize = 4 * 1024 * 1024; // 4MB (Increased for Falcon signatures)
+pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 pub const PEER_TIMEOUT_SECS: u64 = 180;
 
