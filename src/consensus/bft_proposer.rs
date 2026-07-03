@@ -289,19 +289,31 @@ pub async fn run_bft_proposer(
         };
         let new_session_id = new_height / SESSION_LENGTH;
 
-        if new_session_id > session_id {
-            // We've crossed a session boundary — delete the old backup file
-            // so the next iteration starts with a clean slate and no replay cost.
-            let old_backup = Path::new(&data_dir)
-                .join(format!("alephbft_backup_{}.dat", session_id));
-            if let Err(e) = tokio::fs::remove_file(&old_backup).await {
-                // Non-fatal: missing file is fine; warn on other errors.
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    warn!("BFT Proposer: could not remove old backup {:?}: {}", old_backup, e);
-                }
-            } else {
-                info!("BFT Proposer: rotated to session {} — deleted old backup {:?}", new_session_id, old_backup);
+        // FIX (Session Deadlock): ALWAYS wipe the current session's backup file
+        // on any restart — whether we crossed a session boundary or not.
+        //
+        // Previously, the backup was only deleted when new_session_id > session_id
+        // (i.e. crossing a SESSION_LENGTH block boundary).  But if the chain is
+        // frozen BELOW the boundary (e.g. stuck at block 43 < 60), the session
+        // repeatedly loaded 50k+ units from backup, immediately hit MAX_ROUNDS,
+        // restarted, and loaded again — an infinite deadlock with no way out.
+        //
+        // By always deleting the backup, we force AlephBFT to start each session
+        // from round 0 with no stale DAG state, which is exactly what we want:
+        // the proposer re-fetches the current chain state from the blockchain and
+        // proposes fresh blocks from there.
+        let current_backup = Path::new(&data_dir)
+            .join(format!("alephbft_backup_{}.dat", session_id));
+        if let Err(e) = tokio::fs::remove_file(&current_backup).await {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                warn!("BFT Proposer: could not remove backup {:?}: {}", current_backup, e);
             }
+        } else {
+            info!("BFT Proposer: cleared backup {:?} — next session starts from round 0", current_backup);
+        }
+
+        if new_session_id > session_id {
+            info!("BFT Proposer: rotated to session {} (chain height {})", new_session_id, new_height);
         }
 
         warn!("BFT Proposer: session {} ended. Restarting in 1 second…", session_id);
