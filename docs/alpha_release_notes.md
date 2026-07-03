@@ -135,7 +135,7 @@ docker run -d \
   -v ~/quanta_data_v2:/home/quanta/quanta_data \
   -e QUANTA_WALLET_PASSWORD="YOUR_PASSWORD_HERE" \
   xd637/quanta-node:latest \
-  quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap 34.21.205.173:8333
+  quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap 34.87.128.33:8333
 ```
 
 ---
