@@ -437,8 +437,7 @@ impl Network {
                 // WITHOUT caching it in the LRU. This allows the node to process the 
                 // inevitable retry broadcast once AlephBFT has actually started.
                 if tx_opt.is_none() {
-                    tracing::warn!("AlephBFT channel not registered yet, dropping message (not caching).");
-                    return Ok(());
+                    tracing::trace!("AlephBFT channel not registered yet, skipping local delivery but continuing gossip.");
                 }
 
                 // BETA FIX: Hash the BFT message to prevent infinite gossip loops
