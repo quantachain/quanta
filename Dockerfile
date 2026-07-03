@@ -38,9 +38,6 @@ WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 
-# Limit parallel jobs to prevent Docker VM Out-of-Memory (OOM) crashes
-# compiling the massive post-quantum C libraries
-ENV CARGO_BUILD_JOBS=2
 RUN cargo build --release
 
 # Runtime stage
