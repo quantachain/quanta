@@ -17,6 +17,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 > Deploy by deleting `quanta_data` folder on all nodes before restarting.
 
 ### Changed
+- `MAX_COMMITTEE_SIZE` increased to `21` to allow dynamic expansion of the active validator set.
 - Genesis validators removed from the liquid `testnet_faucets` array. This ensures genesis validators only receive locked stake and no liquid QUA, mathematically preventing Sybil attacks.
 
 ### Fixed
