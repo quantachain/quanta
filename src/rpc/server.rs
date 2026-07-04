@@ -11,7 +11,7 @@ use axum::{
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use std::time::Instant;
-use tokio_util::sync::CancellationToken;
+
 
 pub struct RpcServer {
     pub blockchain: Arc<RwLock<Blockchain>>,

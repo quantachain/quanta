@@ -20,3 +20,4 @@
 
 ## Developer Reference
 * [API Reference](api-reference.md)
+* [JSON-RPC Guide](rpc-node-guide.md)

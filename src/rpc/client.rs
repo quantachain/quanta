@@ -62,6 +62,7 @@ impl RpcClient {
         Ok(block)
     }
 
+    #[allow(dead_code)]
     pub async fn get_balance(&self, address: &str) -> Result<serde_json::Value, Box<dyn Error>> {
         let response = self
             .call("get_balance", serde_json::json!({ "address": address }))
