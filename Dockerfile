@@ -21,7 +21,7 @@ FROM rust:latest AS builder
 # Image metadata (OCI standard)
 LABEL org.opencontainers.image.title="quanta-node" \
       org.opencontainers.image.description="QuantaChain V2 node — post-quantum BFT, Falcon-512 signatures, zero-mining. v2.0.2-alpha." \
-      org.opencontainers.image.version="2.0.2-alpha" \
+      org.opencontainers.image.version="v2.0.2-alpha" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="Apache-2.0"

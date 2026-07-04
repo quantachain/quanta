@@ -13,8 +13,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [2.0.2-alpha] — 2026-07-04
 
-> **No testnet reset required.** Drop-in upgrade from v2.0.1.
-> Deploy by pulling the latest image and restarting nodes one at a time.
+> **TESTNET WIPE REQUIRED.** Genesis block has been modified.
+> Deploy by deleting `quanta_data` folder on all nodes before restarting.
+
+### Changed
+- Genesis validators removed from the liquid `testnet_faucets` array. This ensures genesis validators only receive locked stake and no liquid QUA, mathematically preventing Sybil attacks.
 
 ### Fixed
 - **AlephBFT unicast routing (bandwidth critical)** — `QuantaNetworkBridge::send()` was
