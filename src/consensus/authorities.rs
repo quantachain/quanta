@@ -14,7 +14,7 @@ use falcon_rust::falcon512::PublicKey;
 /// Maximum active validators per epoch committee.
 /// Testnet QUA7: 7 (permissioned, known validators — CONFIRMED)
 /// Mainnet genesis: 21 (Cosmos/Tendermint standard, more decentralized — CONFIRMED)
-pub const MAX_COMMITTEE_SIZE: usize = 21; // Change to 21 at mainnet genesis
+pub const MAX_COMMITTEE_SIZE: usize = 7; // Change to 21 at mainnet genesis
 
 /// Epochs a deregistered validator must wait before staked QUA is returned.
 /// v3: 60 epochs = 60,000 blocks ≈ 4.2 days at 6s/block (SLOT_SECONDS).
