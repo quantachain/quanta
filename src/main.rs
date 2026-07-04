@@ -380,10 +380,24 @@ async fn main() {
                 
                 let listen_addr = format!("0.0.0.0:{}", cfg.node.network_port).parse().unwrap();
                 
+                // BW-FIX-1: Use the validator wallet address as node_id (instead of a random
+                // UUID) so that the AlephBFT network bridge can look up a peer's TCP connection
+                // from its committee index (NodeIndex → wallet address → peer.node_id → SocketAddr).
+                // Non-validator nodes keep a UUID — they don't participate in BFT committee routing.
+                let validator_node_id = if let Some(ref wf) = validator_wallet {
+                    let pw = std::env::var("QUANTA_WALLET_PASSWORD").unwrap_or_default();
+                    match crate::crypto::wallet::QuantumWallet::load_quantum_safe(wf, &pw) {
+                        Ok(w) => w.address,
+                        Err(_) => uuid::Uuid::new_v4().to_string(),
+                    }
+                } else {
+                    uuid::Uuid::new_v4().to_string()
+                };
+
                 let network_config = NetworkConfig {
                     listen_addr,
                     max_peers: cfg.network.max_peers,
-                    node_id: uuid::Uuid::new_v4().to_string(),
+                    node_id: validator_node_id,
                     bootstrap_nodes,
                     dns_seeds: cfg.network.dns_seeds.clone(),
                 };

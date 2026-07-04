@@ -136,11 +136,13 @@ impl Network {
             })
         };
         
-        // Start heartbeat (ping peers every 10 seconds to keep connections alive)
+        // BW-FIX-2: Heartbeat now uses the PING_INTERVAL_SECS constant (60s) defined in
+        // protocol.rs, not a hardcoded 10s. The old 10s value was 6× faster than the
+        // protocol spec, generating ~360 Ping/Pong pairs/hour across a 7-node cluster.
         let heartbeat_handle = {
             let network = Arc::clone(&self);
             tokio::spawn(async move {
-                let mut interval = interval(Duration::from_secs(10));
+                let mut interval = interval(Duration::from_secs(crate::network::protocol::PING_INTERVAL_SECS));
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 loop {
                     interval.tick().await;
@@ -336,12 +338,15 @@ impl Network {
         // Request known peers from this new connection to discover the rest of the network
         let _ = peer.send_message(P2PMessage::GetAddr).await;
 
-        // FIX (2026-06-24): Request the peer's mempool immediately on connect.
-        // Validators that were temporarily disconnected or banned miss transaction
-        // gossip while offline. Fetching the mempool on reconnect ensures they
-        // have the same pending transactions as the rest of the network and can
-        // include them in their block proposals.
-        let _ = peer.send_message(P2PMessage::GetMempool).await;
+        // BW-FIX-3: Only pull the peer's mempool if our own mempool is empty.
+        // The original unconditional GetMempool fired on every connect — combined with
+        // the peer-flapping bug (reconnects every ~10s) this caused full mempool
+        // transfers at 10-second intervals, adding hundreds of MB/hour per node pair.
+        // The periodic 30s mempool sync loop already handles convergence once connected.
+        let local_mempool_size = self.blockchain.read().await.get_pending_transactions().len();
+        if local_mempool_size == 0 {
+            let _ = peer.send_message(P2PMessage::GetMempool).await;
+        }
 
         // Start single receive task
         Self::start_peer_receive_task(
@@ -807,6 +812,38 @@ impl Network {
 
     /// Broadcast an AlephBFT message to all connected peers
     pub async fn broadcast_aleph_bft(&self, data: Vec<u8>) {
+        self.peer_manager.broadcast(P2PMessage::AlephBFTMessage(data)).await;
+    }
+
+    /// BW-FIX-4: Send an AlephBFT message to a SPECIFIC validator peer identified by
+    /// their wallet address (= node_id set at startup via BW-FIX-1 in main.rs).
+    ///
+    /// Called by QuantaNetworkBridge::send() for Recipient::Node(idx) messages.
+    /// Falls back to full broadcast if the target peer is not currently connected
+    /// (e.g. it hasn't finished syncing yet) — AlephBFT handles retries internally.
+    pub async fn send_aleph_bft_to_validator(&self, data: Vec<u8>, validator_address: &str) {
+        let peers = self.peer_manager.get_peers().await;
+        for peer in &peers {
+            if peer.get_info().await.node_id == validator_address {
+                // Clone before move so we can fall back to broadcast on send failure.
+                let data_clone = data.clone();
+                if let Err(e) = peer.send_message(P2PMessage::AlephBFTMessage(data)).await {
+                    warn!(
+                        "Unicast AlephBFT to {} failed: {} — broadcasting as fallback",
+                        validator_address, e
+                    );
+                    self.peer_manager
+                        .broadcast(P2PMessage::AlephBFTMessage(data_clone))
+                        .await;
+                }
+                return;
+            }
+        }
+        // Peer not found (not yet connected) — broadcast so AlephBFT isn't starved.
+        tracing::debug!(
+            "Unicast target {} not connected — broadcasting AlephBFT msg as fallback",
+            validator_address
+        );
         self.peer_manager.broadcast(P2PMessage::AlephBFTMessage(data)).await;
     }
 

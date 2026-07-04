@@ -210,9 +210,19 @@ pub async fn run_bft_proposer(
         });
 
         // 3. Setup Network Bridge
+        //
+        // BW-FIX-4: Pass committee (wallet addresses indexed by NodeIndex) so the
+        // bridge can route Recipient::Node(idx) to the correct peer rather than
+        // broadcasting every unicast message to all validators.
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         network_ref.register_aleph_bft_tx(tx).await;
-        let network_bridge: QuantaNetworkBridge<aleph_bft::NetworkData<QuantaHasher, Block, FalconSignature, aleph_bft::SignatureSet<FalconSignature>>> = QuantaNetworkBridge::new(network_ref.clone(), rx, node_idx.0);
+        let network_bridge: QuantaNetworkBridge<aleph_bft::NetworkData<QuantaHasher, Block, FalconSignature, aleph_bft::SignatureSet<FalconSignature>>> = QuantaNetworkBridge::new(
+            network_ref.clone(),
+            rx,
+            node_idx.0,
+            committee.clone(),  // BW-FIX-4: committee[i] = wallet address of validator i
+        );
+
 
         // 4. Setup LocalIO with per-session backup files.
         //
