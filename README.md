@@ -3,6 +3,7 @@
 **The Post-Quantum BFT Settlement Layer**
 
 [![License: AGPLv3](https://img.shields.io/badge/License-AGPLv3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![License: Commercial](https://img.shields.io/badge/License-Commercial-red.svg)](COMMERCIAL_LICENSE.md)
 [![Rust Version](https://img.shields.io/badge/rust-1.70%2B-blue.svg)](https://www.rust-lang.org)
 
 **Founder**: Kishore K — admin@quantachain.org — quantachain.org
@@ -11,7 +12,7 @@
 
 ## Overview
 
-QUANTA V2 is a production-ready, post-quantum blockchain engineered for extreme performance and determinism. Moving away from legacy Proof-of-Work, QUANTA is built on a custom Delegated Proof-of-Stake (DPoS) engine combined with Asynchronous Byzantine Fault Tolerance (AlephBFT).
+QUANTA V2 is a production-ready, post-quantum blockchain engineered for extreme performance and determinism. QUANTA is built on a custom Delegated Proof-of-Stake (DPoS) engine combined with Asynchronous Byzantine Fault Tolerance (AlephBFT).
 
 This architecture provides the instant finality, high throughput, and cryptographic security required for high-frequency institutional settlement and automated agent networks.
 
