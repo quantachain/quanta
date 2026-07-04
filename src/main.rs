@@ -99,30 +99,7 @@ enum Commands {
         rpc_port: u16,
     },
     
-    /// Check mining status (requires running node)
-    MiningStatus {
-        /// RPC port (default: 7782)
-        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
-        rpc_port: u16,
-    },
-    
-    /// Start mining blocks to a specific address (requires running node)
-    StartMining {
-        /// Address to receive mining rewards
-        address: String,
-        
-        /// RPC port (default: 7782)
-        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
-        rpc_port: u16,
-    },
-    
-    /// Stop mining (requires running node)
-    StopMining {
-        /// RPC port (default: 7782)
-        #[arg(short = 'r', long = "rpc-port", default_value = "7782")]
-        rpc_port: u16,
-    },
-    
+
     /// Print current blockchain height (requires running node)
     PrintHeight {
         /// RPC port (default: 7782)
@@ -201,21 +178,7 @@ enum Commands {
         file: String,
     },
     
-    /// Mine a new block
-    Mine {
-        /// Miner wallet file
-        #[arg(short, long, default_value = "wallet.qua")]
-        wallet: String,
-        
-        /// Database path
-        #[arg(short, long, default_value = "./quanta_data")]
-        db: String,
 
-        /// Network type (mainnet or testnet)
-        #[arg(long, default_value = "testnet")]
-        network: String,
-    },
-    
     /// Send coins to another address
     Send {
         /// Sender wallet file
@@ -614,49 +577,7 @@ async fn main() {
             }
         }
         
-        Commands::MiningStatus { rpc_port } => {
-            let client = RpcClient::new(rpc_port);
-            
-            match client.get_mining_status().await {
-                Ok(status) => {
-                    println!("\n");
-                    println!("            QUANTA MINING STATUS                          ");
-                    println!("");
-                    println!("  Mining Active:  {}                              ", if status.is_mining { "YES " } else { "NO (idle)" });
-                    if let Some(ref addr) = status.mining_address {
-                        // Print full address — no truncation
-                        println!("  Mining To:      {}", addr);
-                    } else {
-                        println!("  Mining To:      (not set — use start_mining <address>)");
-                    }
-                    println!("  Blocks Mined:   {}                                      ", status.blocks_mined);
-                    println!("  Current Epoch:  {}                                      ", status.current_epoch);
-                    println!("  Block Reward:   {} microunits ({:.6} QUA)         ", 
-                        status.mining_reward, 
-                        status.mining_reward as f64 / 1_000_000.0
-                    );
-                    if let Some(last_time) = status.last_block_time {
-                        use chrono::{DateTime, Utc as ChronoUtc};
-                        let dt = DateTime::<ChronoUtc>::from_timestamp(last_time, 0)
-                            .unwrap_or_else(|| ChronoUtc::now());
-                        println!("  Last Block:     {}                        ", dt.format("%Y-%m-%d %H:%M:%S UTC"));
-                    } else {
-                        println!("  Last Block:     (none yet)");
-                    }
-                    if !status.is_mining {
-                        println!("");
-                        println!("  Hint: Start mining with: ./quanta start_mining <your-address>");
-                    }
-                    println!("\n");
-                }
-                Err(e) => {
-                    eprintln!(" Failed to get mining status: {}", e);
-                    eprintln!("  Is the node running? Check with: ./quanta status");
-                    std::process::exit(1);
-                }
-            }
-        }
-        
+
         Commands::GetBlock { height, rpc_port } => {
             let client = RpcClient::new(rpc_port);
             
@@ -712,40 +633,7 @@ async fn main() {
             }
         }
         
-        Commands::StartMining { address, rpc_port } => {
-            let client = RpcClient::new(rpc_port);
-            
-            println!("Starting mining to address: {}", address);
-            
-            match client.start_mining(&address).await {
-                Ok(_) => {
-                    println!(" Mining started successfully");
-                    println!("  Rewards will be sent to: {}", address);
-                    println!("  Use './quanta mining_status' to check status");
-                }
-                Err(e) => {
-                    eprintln!(" Failed to start mining: {}", e);
-                    std::process::exit(1);
-                }
-            }
-        }
-        
-        Commands::StopMining { rpc_port } => {
-            let client = RpcClient::new(rpc_port);
-            
-            println!("Stopping mining...");
-            
-            match client.stop_mining().await {
-                Ok(_) => {
-                    println!(" Mining stopped successfully");
-                }
-                Err(e) => {
-                    eprintln!(" Failed to stop mining: {}", e);
-                    std::process::exit(1);
-                }
-            }
-        }
-        
+
         Commands::PrintHeight { rpc_port } => {
             let client = RpcClient::new(rpc_port);
             
@@ -917,33 +805,6 @@ async fn main() {
             println!("\nWallet Address: {}\n", wallet.address);
         }
 
-        Commands::Mine { wallet: wallet_file, db, network } => {
-            let password = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
-                p
-            } else {
-                println!("Enter wallet password:");
-                rpassword::read_password().expect("Failed to read password")
-            };
-            
-            let wallet = match QuantumWallet::load_quantum_safe(&wallet_file, &password) {
-                Ok(w) => w,
-                Err(e) => {
-                    eprintln!(" Failed to load wallet: {}", e);
-                    return;
-                }
-            };
-
-            let network_type = match network.as_str() {
-                "testnet" => core::ChainNetwork::Testnet,
-                _ => core::ChainNetwork::Mainnet,
-            };
-            
-            let storage = Arc::new(BlockchainStorage::new(&db).expect("Failed to open database"));
-            let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, network_type).expect("Failed to initialize blockchain")));
-            
-            println!("  Mine command removed in Quanta v2. Use the BFT proposer.");
-            println!("  Start a validator node with: ./quanta start --validator");
-        }
 
         Commands::Send { wallet: wallet_file, to, amount, db, network } => {
             let password = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {

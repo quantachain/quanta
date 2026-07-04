@@ -10,6 +10,14 @@ A designated proposer collects mempool transactions, builds a block template, an
 
 There are no reorgs. There are no orphans.
 
+## Validator Staking (DPoS)
+While the Genesis set is hardcoded initially, the network is built for full Delegated Proof-of-Stake (DPoS). Anyone can join the validator committee by staking a minimum of 100,000 QUA.
+
+```bash
+quanta-wallet stake --wallet validator.qua --amount 100000.0
+```
+This registers your Falcon-512 public key for block signing.
+
 ## Network Isolation (`Q2T2`)
 To prevent broadcast storms and cross-contamination with old V1 PoW nodes, the network magic bytes have been permanently changed to `Q2T2`. 
 

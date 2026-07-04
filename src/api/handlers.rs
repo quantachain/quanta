@@ -31,7 +31,7 @@ pub struct ApiState {
     pub blockchain: Arc<RwLock<Blockchain>>,
     pub metrics: Option<Arc<crate::consensus::mempool::MetricsCollector>>,
     pub network: Option<Arc<crate::network::Network>>,
-    pub mining_active: Arc<AtomicBool>,
+
 }
 
 /// Request to create a transaction
@@ -371,177 +371,7 @@ async fn submit_signed_transaction(
 // Mining
 // -----------------------------------------------------------------------
 
-/// Mine request
-#[derive(Deserialize)]
-pub struct MineRequest {
-    pub miner_address: String,
-}
 
-#[derive(Serialize)]
-pub struct MineResponse {
-    pub success: bool,
-    pub block_index: Option<u64>,
-    pub error: Option<String>,
-}
-
-async fn mine_block(
-    State(_state): State<Arc<ApiState>>,
-    Json(_req): Json<MineRequest>,
-) -> (StatusCode, Json<MineResponse>) {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(MineResponse {
-            success: false,
-            block_index: None,
-            error: Some("PoW mining is removed in Quanta v2. Validators use the BFT proposer.".to_string()),
-        }),
-    )
-}
-
-/// Request to get a block template
-#[derive(Deserialize)]
-pub struct TemplateQuery {
-    pub address: String,
-}
-
-/// GET /api/mine/template?address=...
-/// 
-/// Returns an unmined block template that a mining pool or external miner
-/// can use to search for a valid nonce.
-async fn get_block_template(
-    State(state): State<Arc<ApiState>>,
-    Query(params): Query<TemplateQuery>,
-) -> Result<Json<Block>, (StatusCode, Json<serde_json::Value>)> {
-    // Validate address format
-    fn valid_quanta_addr(addr: &str) -> bool {
-        if addr.starts_with("0x") {
-            addr.len() == 42 && addr[2..].chars().all(|c| c.is_ascii_hexdigit())
-        } else if addr.starts_with("ms") {
-            addr.len() >= 42 && addr[2..].chars().all(|c| c.is_ascii_hexdigit())
-        } else {
-            false
-        }
-    }
-    
-    if !valid_quanta_addr(&params.address) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({
-                "error": "Invalid address: must be 0x<40 hex> or ms<40+ hex>"
-            }))
-        ));
-    }
-
-    let blockchain = state.blockchain.read().await;
-    match blockchain.create_block_template(params.address.clone()) {
-        Ok(block) => Ok(Json(block)),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "error": format!("Failed to create template: {}", e)
-            }))
-        ))
-    }
-}
-
-// -----------------------------------------------------------------------
-// Pool block submission endpoint
-// -----------------------------------------------------------------------
-
-/// Response for POST /api/blocks/submit
-#[derive(Serialize)]
-pub struct BlockSubmitResponse {
-    pub success: bool,
-    pub block_height: Option<u64>,
-    pub block_hash: Option<String>,
-    pub error: Option<String>,
-}
-
-/// POST /api/blocks/submit
-///
-/// Accepts a fully-validated block from a mining pool or external submitter.
-/// The block must be complete with all transactions included.
-/// Validation runs through the same `add_network_block()` consensus path as P2P blocks.
-///
-/// POOL INTEGRATION NOTE:
-/// - Pool calls `GET /api/stats` to get the latest block template data
-/// - Pool distributes work units (jobs) to validators
-/// - When a validator produces a valid BFT-finalised block, pool submits here
-/// - Shares are tracked pool-side only — never sent here
-async fn submit_pool_block(
-    State(state): State<Arc<ApiState>>,
-    Json(block): Json<Block>,
-) -> (StatusCode, Json<BlockSubmitResponse>) {
-    let height = block.index;
-    let hash = block.hash.clone();
-
-    let blockchain = state.blockchain.read().await;
-    match blockchain.add_network_block(block.clone()) {
-        Ok(_) => {
-            drop(blockchain);
-            // Broadcast to P2P network immediately
-            if let Some(ref network) = state.network {
-                network.broadcast_block(block).await;
-            }
-            tracing::info!("Pool block submission accepted: height={}, hash={}…", height, &hash[..12]);
-            (
-                StatusCode::OK,
-                Json(BlockSubmitResponse {
-                    success: true,
-                    block_height: Some(height),
-                    block_hash: Some(hash),
-                    error: None,
-                }),
-            )
-        }
-        Err(e) => {
-            tracing::warn!("Pool block submission rejected: height={}, error={}", height, e);
-            (
-                StatusCode::BAD_REQUEST,
-                Json(BlockSubmitResponse {
-                    success: false,
-                    block_height: None,
-                    block_hash: None,
-                    error: Some(format!("Block rejected: {}", e)),
-                }),
-            )
-        }
-    }
-}
-
-
-/// Start continuous mining
-async fn start_continuous_mining(
-    State(_state): State<Arc<ApiState>>,
-    Json(_req): Json<MineRequest>,
-) -> (StatusCode, Json<serde_json::Value>) {
-    (
-        StatusCode::BAD_REQUEST,
-        Json(serde_json::json!({ "status": "error", "message": "PoW mining is removed in Quanta v2. Validators use the BFT proposer." }))
-    )
-}
-
-/// Stop continuous mining
-async fn stop_continuous_mining(
-    State(state): State<Arc<ApiState>>,
-) -> Json<serde_json::Value> {
-    state.mining_active.store(false, Ordering::Relaxed);
-    Json(serde_json::json!({ "status": "stopped", "message": "Continuous mining stopped" }))
-}
-
-/// Get mining status
-#[derive(Serialize)]
-pub struct MiningStatus {
-    pub active: bool,
-}
-
-async fn get_mining_status(
-    State(state): State<Arc<ApiState>>,
-) -> Json<MiningStatus> {
-    Json(MiningStatus {
-        active: state.mining_active.load(Ordering::Relaxed),
-    })
-}
 
 // -----------------------------------------------------------------------
 // Validation / Peers / Metrics
@@ -842,7 +672,7 @@ pub fn create_router(
         blockchain,
         metrics,
         network,
-        mining_active: Arc::new(AtomicBool::new(false)),
+
     });
 
     // Allow both localhost dev and the public block explorer origins.
@@ -885,16 +715,7 @@ pub fn create_router(
         .route("/api/balance/:address",     get(get_balance_by_path))
         .route("/api/address/:address",     get(get_address_info))
         .route("/api/address/:address/txs", get(get_address_transactions))
-        // ── Mining ──────────────────────────────────────────────────────
-        .route("/api/mine",            post(mine_block))
-        .route("/api/mine/template",   get(get_block_template))
-        .route("/api/mine/start",      post(start_continuous_mining))
-        .route("/api/mine/stop",       post(stop_continuous_mining))
-        .route("/api/mine/status",     get(get_mining_status))
-        // ── Pool Integration ────────────────────────────────────────────
-        // Accepts fully-solved blocks from mining pools.
-        // Shares are tracked pool-side; only network-difficulty solutions arrive here.
-        .route("/api/blocks/submit",   post(submit_pool_block))
+
         // ── AI Contracts ────────────────────────────────────────────────
         .route("/api/contracts/:address",        get(get_contract))
         .route("/api/contracts/:address/events", get(get_contract_events))

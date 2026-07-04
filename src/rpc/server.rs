@@ -17,25 +17,20 @@ pub struct RpcServer {
     pub blockchain: Arc<RwLock<Blockchain>>,
     pub network: Option<Arc<Network>>,
     pub start_time: Arc<RwLock<Instant>>,
-    pub mining_state: Arc<RwLock<Option<MiningState>>>,
+
     pub api_port: u16,
     pub network_port: u16,
     pub rpc_port: u16,
 }
 
-pub struct MiningState {
-    pub address: String,
-    pub is_active: bool,
-    pub cancel_token: CancellationToken,
-    pub blocks_mined: Arc<RwLock<u64>>,
-}
+
 
 #[derive(Clone)]
 struct AppState {
     blockchain: Arc<RwLock<Blockchain>>,
     network: Option<Arc<Network>>,
     start_time: Arc<RwLock<Instant>>,
-    mining_state: Arc<RwLock<Option<MiningState>>>,
+
     api_port: u16,
     network_port: u16,
     rpc_port: u16,
@@ -53,7 +48,7 @@ impl RpcServer {
             blockchain,
             network,
             start_time: Arc::new(RwLock::new(Instant::now())),
-            mining_state: Arc::new(RwLock::new(None)),
+
             api_port,
             network_port,
             rpc_port,
@@ -64,7 +59,7 @@ impl RpcServer {
         let state = AppState {
             blockchain: self.blockchain,
             network: self.network,
-            mining_state: self.mining_state,
+
             start_time: self.start_time,
             api_port: self.api_port,
             network_port: self.network_port,
@@ -93,9 +88,7 @@ async fn handle_rpc_request(
 
     let response = match request.method.as_str() {
         "node_status" => handle_node_status(&state).await,
-        "start_mining" => handle_start_mining(&state, &request.params).await,
-        "stop_mining" => handle_stop_mining(&state).await,
-        "mining_status" => handle_mining_status(&state).await,
+
         "get_block" => handle_get_block(&state, &request.params).await,
         "get_balance" => handle_get_balance(&state, &request.params).await,
         "get_peers" => handle_get_peers(&state).await,
@@ -141,102 +134,6 @@ async fn handle_node_status(state: &AppState) -> JsonRpcResponse {
     JsonRpcResponse::success(1, serde_json::to_value(status).unwrap())
 }
 
-async fn handle_mining_status(state: &AppState) -> JsonRpcResponse {
-    let blockchain = state.blockchain.read().await;
-    let latest_block = blockchain.get_latest_block();
-    let stats = blockchain.get_stats();
-    drop(blockchain);
-
-    let mining_state = state.mining_state.read().await;
-    let is_mining = mining_state.as_ref().map(|m| m.is_active).unwrap_or(false);
-    let mining_address = mining_state.as_ref().map(|m| m.address.clone());
-
-    let mining_status = MiningStatus {
-        is_mining,
-        mining_address,
-        last_block_time: Some(latest_block.timestamp),
-        blocks_mined: stats.chain_length as u64,
-        current_epoch: stats.current_epoch,
-        mining_reward: stats.mining_reward,
-    };
-
-    JsonRpcResponse::success(1, serde_json::to_value(mining_status).unwrap())
-}
-
-async fn handle_start_mining(state: &AppState, params: &serde_json::Value) -> JsonRpcResponse {
-    let address = match params.get("address").and_then(|v| v.as_str()) {
-        Some(addr) => addr.to_string(),
-        None => {
-            return JsonRpcResponse::error(
-                1,
-                -32602,
-                "Invalid params: address required".to_string(),
-            )
-        }
-    };
-
-    let mut mining_state = state.mining_state.write().await;
-    
-    // Check if already mining
-    if let Some(ref current) = *mining_state {
-        if current.is_active {
-            return JsonRpcResponse::error(
-                1,
-                -32000,
-                format!("Mining already active for address: {}. Stop current mining first.", current.address),
-            );
-        }
-    }
-
-    // Create cancellation token for mining task
-    let cancel_token = CancellationToken::new();
-    let blocks_mined = Arc::new(RwLock::new(0u64));
-    
-    // Start mining
-    *mining_state = Some(MiningState {
-        address: address.clone(),
-        is_active: true,
-        cancel_token: cancel_token.clone(),
-        blocks_mined: blocks_mined.clone(),
-    });
-    drop(mining_state);
-
-    // Spawn mining task
-    JsonRpcResponse::error(
-        1,
-        -32000,
-        "PoW mining removed in Quanta v2. Validators use the BFT proposer.".to_string(),
-    )
-}
-
-
-async fn handle_stop_mining(state: &AppState) -> JsonRpcResponse {
-    let mut mining_state = state.mining_state.write().await;
-    
-    if mining_state.is_none() {
-        return JsonRpcResponse::error(
-            1,
-            -32000,
-            "No active mining to stop".to_string(),
-        );
-    }
-
-    // Cancel mining task
-    if let Some(ref ms) = *mining_state {
-        ms.cancel_token.cancel();
-        let blocks = *ms.blocks_mined.read().await;
-        tracing::info!("Mining stopped. Total blocks mined: {}", blocks);
-    }
-    
-    *mining_state = None;
-
-    JsonRpcResponse::success(
-        1,
-        serde_json::json!({
-            "message": "Mining stopped"
-        }),
-    )
-}
 
 async fn handle_get_block(state: &AppState, params: &serde_json::Value) -> JsonRpcResponse {
     let height: u64 = match params.get("height").and_then(|v| v.as_u64()) {

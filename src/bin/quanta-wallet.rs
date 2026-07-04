@@ -154,7 +154,7 @@ enum Commands {
     Stake {
         #[arg(short, long, default_value = "wallet.json")]
         wallet: String,
-        /// Amount of QUA to stake (minimum recommended: 1000)
+        /// Amount of QUA to stake (minimum recommended: 100000)
         #[arg(long)]
         amount: f64,
         #[arg(long, default_value = "0.01")]

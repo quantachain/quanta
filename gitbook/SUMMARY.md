@@ -9,7 +9,7 @@
 * [Node Operator Guide](node-operator-guide.md)
 
 ## Wallets & Ecosystem
-* [Wallet Operations](wallet-operations.md)
+* [Wallet CLI](wallet-cli.md)
 
 ## Architecture
 * [AlephBFT Consensus](consensus-bft.md)

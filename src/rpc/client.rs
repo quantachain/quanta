@@ -48,16 +48,6 @@ impl RpcClient {
         Ok(status)
     }
 
-    pub async fn get_mining_status(&self) -> Result<MiningStatus, Box<dyn Error>> {
-        let response = self.call("mining_status", serde_json::json!({})).await?;
-        
-        if let Some(error) = response.error {
-            return Err(format!("RPC Error: {}", error.message).into());
-        }
-
-        let status: MiningStatus = serde_json::from_value(response.result.unwrap())?;
-        Ok(status)
-    }
 
     pub async fn get_block(&self, height: u64) -> Result<BlockInfo, Box<dyn Error>> {
         let response = self
@@ -105,25 +95,5 @@ impl RpcClient {
         Ok(())
     }
 
-    pub async fn start_mining(&self, address: &str) -> Result<(), Box<dyn Error>> {
-        let response = self
-            .call("start_mining", serde_json::json!({ "address": address }))
-            .await?;
-        
-        if let Some(error) = response.error {
-            return Err(format!("RPC Error: {}", error.message).into());
-        }
 
-        Ok(())
-    }
-
-    pub async fn stop_mining(&self) -> Result<(), Box<dyn Error>> {
-        let response = self.call("stop_mining", serde_json::json!({})).await?;
-        
-        if let Some(error) = response.error {
-            return Err(format!("RPC Error: {}", error.message).into());
-        }
-
-        Ok(())
-    }
 }

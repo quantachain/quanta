@@ -22,9 +22,11 @@ Anyone holding a treasury key can propose a spend. The proposal is generated as 
 
 ```bash
 quanta-wallet treasury-propose \
+  --setup treasury_setup.json \
   --to 0xRecipientAddress \
-  --amount 1000 \
-  --fee 0.1
+  --amount 1000.0 \
+  --fee 0.1 \
+  --nonce 1
 ```
 This command creates a `proposal.json` file containing the exact bytes to be signed.
 
@@ -33,21 +35,20 @@ Keyholders review the `proposal.json`. If they agree with the spend (e.g., fundi
 
 ```bash
 quanta-wallet treasury-sign \
-  --key-file treasury_key0.qua \
-  --key-index 0 \
-  --proposal proposal.json
+  --proposal proposal.json \
+  --key treasury_key0.qua \
+  --index 0
 ```
-The signer then sends the output (their signature blob) to the coordinator.
+The signer's signature is saved directly into the `proposal.json` file. You then pass this file to the next signer.
 
 ### 4. Broadcasting the Executed Spend
 Once the required quorum (e.g., 3 signatures) is collected, the coordinator broadcasts the fully signed transaction to the network.
 
 ```bash
 quanta-wallet treasury-broadcast \
-  --proposal proposal.json \
-  --signatures sig0.hex,sig1.hex,sig2.hex
+  --proposal proposal.json
 ```
-The network validates that all signatures are valid Falcon-512 signatures belonging to the authorized keys, and executes the transfer.
+The network validates that all signatures inside the proposal are valid Falcon-512 signatures belonging to the authorized keys, and executes the transfer.
 
 ---
 

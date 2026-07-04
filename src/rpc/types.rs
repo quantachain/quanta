@@ -39,15 +39,6 @@ pub struct NodeStatus {
     pub version: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MiningStatus {
-    pub is_mining: bool,
-    pub mining_address: Option<String>,
-    pub last_block_time: Option<i64>,
-    pub blocks_mined: u64,
-    pub current_epoch: u64,
-    pub mining_reward: u64,
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockInfo {

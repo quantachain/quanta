@@ -4,14 +4,49 @@ QuantaChain is built with Post-Quantum Cryptography (PQC) and natively supports 
 
 This guide covers the core features you can use to build AI-driven dApps using the `quanta-wallet` CLI.
 
-## Trustless Escrows
+## Native Smart Contracts
 
-The Quanta Escrow system allows an employer (or human) to lock funds on-chain, which a worker (or AI agent) can only claim by providing a cryptographic proof of task completion.
+Quanta V2 has **5 Native AI Contracts** baked directly into the consensus layer, designed for PQC-native M2M and AI agent economies:
 
-This solves the "trust" problem in AI task outsourcing: the AI knows it will get paid if it does the work, and the human knows they won't pay unless the work is verifiably completed.
+1. `TEMPLATE_ESCROW` (1) - HTLC hash-time locked escrow with refund support
+2. `TEMPLATE_AGENT_JOB` (2) - Single-worker AI job with deadline and refund
+3. `TEMPLATE_AGENT_BID` (3) - Multi-agent auction: employer picks the best result
+4. `TEMPLATE_STREAM` (4) - Streaming payments (pay-per-block subscription)
+5. `TEMPLATE_AGENT_REGISTRY` (5) - On-chain AI service discovery registry
+
+### Deploying a Contract
+
+Because these contracts are native to the chain, you don't upload code. Instead, you deploy an instance of a template by using the generic `contract-call` (wait, actually they are deployed via the API programmatically, or in the case of Escrow, there is a dedicated CLI helper).
+
+For the Escrow contract, you can use the dedicated CLI command:
+```bash
+quanta-wallet deploy-escrow \
+  --beneficiary 0xWorkerAddressHere \
+  --secret-hash 3a7f8b9c... \
+  --amount 50.0
+```
+
+For the other 4 templates, developers typically deploy them programmatically by constructing a `TransactionType::ContractDeploy` transaction via the API, passing the `template_id` (1-5) and the JSON-encoded `init_args`.
+
+### Calling a Contract
+
+Once a contract is deployed, you can interact with it directly via the CLI's generic contract caller.
+
+```bash
+quanta-wallet contract-call \
+  --contract 0xc_YourContractAddress \
+  --method "claim" \
+  --args '{"preimage": "deadbeef"}'
+```
+
+---
+
+## Trustless Escrows (Deep Dive)
+
+The Quanta Escrow system allows an employer to lock funds on-chain, which a worker (AI agent) can only claim by providing a cryptographic proof of task completion.
 
 ### 1. Deploying an Escrow
-To deploy an escrow, you must provide the worker's address and the SHA3-256 hash of the expected output.
+To deploy an escrow, provide the worker's address and the SHA3-256 hash of the expected output.
 
 ```bash
 # Example: The employer locks 50 QUA for a specific task output hash
@@ -29,7 +64,7 @@ Once the AI worker finishes the task, it proves completion by submitting the raw
 ```bash
 # Example: The worker claims the 50 QUA by submitting the hex-encoded task output
 quanta-wallet claim-escrow \
-  --contract-address 0xc_ContractAddressHere \
+  --contract 0xc_ContractAddressHere \
   --preimage deadbeef...
 ```
 
@@ -49,29 +84,7 @@ Quanta allows you to cryptographically bind a data payload to a standard transac
 quanta-wallet send-with-data \
   --to 0xRecipientAddressHere \
   --amount 0.01 \
-  --payload '{"action":"scraping_complete", "result_hash":"f9a2..."}'
+  --data '{"action":"scraping_complete", "result_hash":"f9a2..."}'
 ```
 
 Anyone querying this transaction on QuaScan or via the API can read the payload and mathematically verify that it was signed by the sender at the block's timestamp.
-
----
-
-## Native Smart Contracts
-
-If you are developing custom protocol templates, you can interact with them directly via the CLI's generic contract caller.
-
-### Deploying a Contract
-```bash
-quanta-wallet contract-deploy \
-  --template-id 1 \
-  --init-args '{"name": "MyToken"}' \
-  --amount 0
-```
-
-### Calling a Contract
-```bash
-quanta-wallet contract-call \
-  --contract-address 0xc_YourContractAddress \
-  --method "transfer" \
-  --call-args '{"to": "0x...", "amount": 100}'
-```

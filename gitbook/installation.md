@@ -11,7 +11,9 @@ git clone https://github.com/quantachain/quanta.git
 cd quanta
 cargo build --release
 ```
-The binary will be located at `./target/release/quanta`.
+The binaries will be located at:
+- Node Daemon: `./target/release/quanta`
+- Wallet CLI: `./target/release/quanta-wallet`
 
 ## Docker (Recommended)
 
