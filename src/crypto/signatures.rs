@@ -87,6 +87,7 @@ impl FalconKeypair {
         &self.secret_key
     }
 
+    #[allow(dead_code)]
     pub fn from_secret_key_bytes(sk_bytes: &[u8], pk_bytes: &[u8]) -> Result<Self, String> {
         if pk_bytes.len() != FALCON512_PUBKEY_BYTES {
             return Err(format!(
@@ -155,6 +156,7 @@ impl FalconKeypair {
     }
 
     /// Legacy — kept for compatibility.
+    #[allow(dead_code)]
     pub fn sign_transaction_data(&self, data: &[u8]) -> Vec<u8> {
         let hash = sha3_hash(data);
         self.sign_raw(&hash)

@@ -85,10 +85,8 @@ pub fn run_all_benchmarks(
     let sections: Vec<BenchmarkSection> = vec![
         crate::benchmark::crypto_bench::run(iterations),
         crate::benchmark::tx_bench::run(iterations),
-        crate::benchmark::mempool_bench::run(iterations),
         crate::benchmark::block_bench::run(iterations, full_pow_solve),
         crate::benchmark::chain_bench::run(iterations),
-        crate::benchmark::dos_bench::run(iterations),
     ];
 
     let report = BenchmarkReport {

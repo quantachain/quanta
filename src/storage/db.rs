@@ -473,10 +473,12 @@ pub struct StorageStats {
 }
 
 impl StorageStats {
+    #[allow(dead_code)]
     pub fn disk_usage_gb(&self) -> f64 {
         self.disk_usage_bytes as f64 / 1_000_000_000.0
     }
     
+    #[allow(dead_code)]
     pub fn estimated_with_optimizations(&self) -> f64 {
         if self.compression_enabled {
             self.disk_usage_gb() // Already optimized

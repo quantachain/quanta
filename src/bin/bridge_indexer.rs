@@ -1,5 +1,5 @@
 use quanta::core::block::Block;
-use quanta::core::transaction::{Transaction, TransactionType, StablecoinIntent};
+use quanta::core::transaction::StablecoinIntent;
 use reqwest;
 use serde_json::Value;
 use std::time::Duration;

@@ -158,6 +158,7 @@ impl HDWallet {
     /// - Account index not found
     /// - Legacy placeholder account (no encrypted SK stored)
     /// - Decryption failure (wrong wallet or corrupted data)
+    #[allow(dead_code)]
     pub fn get_keypair(&self, index: u32) -> Result<FalconKeypair, String> {
         let account = self.accounts.iter()
             .find(|a| a.index == index)
@@ -201,11 +202,13 @@ impl HDWallet {
     }
 
     /// Get account by index.
+    #[allow(dead_code)]
     pub fn get_account(&self, index: u32) -> Option<&HDAccount> {
         self.accounts.iter().find(|a| a.index == index)
     }
 
     /// Get all accounts.
+    #[allow(dead_code)]
     pub fn get_accounts(&self) -> &[HDAccount] {
         &self.accounts
     }
@@ -214,6 +217,7 @@ impl HDWallet {
     ///
     /// Because each account's secret key is re-encrypted from the same
     /// master key, restore produces identical addresses and keypairs.
+    #[allow(dead_code)]
     pub fn restore(mnemonic_phrase: String, passphrase: &str, account_count: u32) -> Self {
         let mut wallet = Self::from_mnemonic(mnemonic_phrase, passphrase);
         for i in 0..account_count {

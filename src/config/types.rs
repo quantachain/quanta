@@ -215,6 +215,7 @@ impl QuantaConfig {
     }
 
     /// Save configuration to file
+    #[allow(dead_code)]
     pub fn save<P: AsRef<Path>>(&self, path: P) -> Result<(), std::io::Error> {
         let toml_string = toml::to_string_pretty(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
@@ -222,6 +223,7 @@ impl QuantaConfig {
     }
     
     /// Validate configuration for sanity and safety
+    #[allow(dead_code)]
     pub fn validate(&self) -> Result<(), String> {
         // Port conflicts
         if self.node.api_port == self.node.network_port {
@@ -246,6 +248,7 @@ impl QuantaConfig {
     }
     
     /// Print effective configuration on startup (debugging lifesaver)
+    #[allow(dead_code)]
     pub fn print_effective_config(&self) {
         tracing::info!("========================================");
         tracing::info!("Quanta Node Configuration (v{})", self.version);

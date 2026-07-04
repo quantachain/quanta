@@ -104,11 +104,9 @@ impl From<&Block> for BlockHeader {
 pub const PROTOCOL_VERSION: u32 = 2; // v2: BFT from genesis
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
-pub const PEER_TIMEOUT_SECS: u64 = 180;
 
 /// Network magic bytes (prevents testnet/mainnet message mixing)
 pub const TESTNET_MAGIC: [u8; 4] = *b"Q2T9"; // Quanta V2 Testnet (BFT) Reset 9
-pub const MAINNET_MAGIC: [u8; 4] = *b"Q2M0"; // Quanta V2 Mainnet
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;
@@ -128,17 +126,7 @@ impl NetworkMessage {
     }
 }
 
-/// Message handler trait for processing P2P messages
-#[async_trait::async_trait]
-pub trait MessageHandler: Send + Sync {
-    async fn handle_version(&self, version: u32, height: u64, cumulative_work: u128, node_id: String) -> Result<(), String>;
-    async fn handle_block(&self, block: Block) -> Result<(), String>;
-    async fn handle_transaction(&self, tx: Transaction) -> Result<(), String>;
-    async fn handle_get_blocks(&self, start: u64, end: u64) -> Result<Vec<Block>, String>;
-    async fn handle_get_height(&self) -> Result<u64, String>;
-    async fn handle_get_mempool(&self) -> Result<Vec<Transaction>, String>;
-    async fn handle_bft_message(&self, data: Vec<u8>) -> Result<(), String>;
-}
+
 
 /// Serialize a P2P message with network magic bytes for transmission.
 ///

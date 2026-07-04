@@ -10,7 +10,7 @@ pub mod aleph_network;
 
 pub use blockchain::Blockchain;
 #[allow(unused_imports)]
-pub use mempool::{Mempool, MetricsCollector};
+pub use mempool::MetricsCollector;
 #[allow(unused_imports)]
 pub use performance::*;
 #[allow(unused_imports)]
