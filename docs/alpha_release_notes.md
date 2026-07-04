@@ -1,12 +1,23 @@
-# QuantaChain Testnet — V2 Release (v2.0.1)
+# QuantaChain Testnet — V2 Release (v2.0.2-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.0.1 — TESTNET UPDATE (2026-07-02)**
-> Minor update and performance improvements on top of the V2 Hard Fork.
+> **v2.0.2-alpha — TESTNET UPDATE (2026-07-04)**
+> Bandwidth & peer stability hotfix. No testnet reset required — drop-in upgrade.
 > Genesis hash remains: `ae37fe2f40a7e7dbe6d2d1337f260d57185ef5fb169008e2600f245809fd1fbf`
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
+
+---
+
+## What Changed in v2.0.2-alpha
+
+- **AlephBFT unicast routing fixed** — BFT vote/signature messages now route to the single intended validator instead of broadcasting to all. Cuts ~80% of inter-node BFT traffic (was O(N²), now O(N)).
+- **Peer flapping loop fixed** — Dead peers now evicted within 30 s instead of holding their IP slot for 180 s. Stops the "Connection reset by peer" reconnect storm that was generating hundreds of MB/hr of spurious mempool traffic.
+- **Heartbeat interval corrected** — was firing every 10 s, now correctly 60 s per protocol spec. ~83% fewer Ping/Pong messages.
+- **GetMempool on reconnect guarded** — no longer fires unconditionally on every peer connect; only pulls if local mempool is empty.
+
+**Estimated bandwidth impact (7 validators): ~5 GB/day → ~1 GB/day per node.**
 
 ---
 

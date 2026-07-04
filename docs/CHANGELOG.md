@@ -11,6 +11,54 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
+## [2.0.2-alpha] — 2026-07-04
+
+> **No testnet reset required.** Drop-in upgrade from v2.0.1.
+> Deploy by pulling the latest image and restarting nodes one at a time.
+
+### Fixed
+- **AlephBFT unicast routing (bandwidth critical)** — `QuantaNetworkBridge::send()` was
+  broadcasting every `Recipient::Node(idx)` message to ALL peers instead of routing it
+  to the single intended validator. For an N-node committee this caused O(N²) bandwidth
+  blowup — every vote, signature, and DAG unit was sent (N-1)× more than necessary.
+  At 7 nodes this was the dominant source of the observed ~15 GB/day traffic.
+  **Fix:** `send()` now inspects `Recipient` and calls `send_aleph_bft_to_validator()`
+  for `Node` targets, routing to a single TCP peer. Falls back to broadcast if the target
+  is temporarily disconnected. Estimated reduction: ~80% of total BFT traffic.
+- **Peer flapping loop (`Connection reset by peer`)** — Dead peers held the IP slot in
+  `PeerManager` for up to 180 s after TCP stream death. Every reconnect attempt during
+  that window was rejected, causing "Connection reset by peer" → immediate retry every
+  10 s → up to 18 failed handshakes per dead link, each triggering a full mempool
+  transfer on the flapping pair.
+  **Fix (FLAP-1):** `add_peer()` evicts stale peers (last_seen > 30 s) instead of
+  hard-rejecting. **Fix (FLAP-2):** Rejected inbound peers receive an explicit
+  `Disconnect` before the stream drops so the remote backs off gracefully.
+  **Fix (FLAP-3):** `maintain_peers` `is_connected` guard now also checks `is_alive()`
+  so dead peers no longer block outbound reconnect attempts indefinitely.
+- **Heartbeat 6× too frequent** — heartbeat task used hardcoded `Duration::from_secs(10)`
+  while `protocol.rs` defines `PING_INTERVAL_SECS = 60`. Fixed to use the protocol
+  constant, reducing Ping/Pong traffic by ~83%.
+- **`GetMempool` fired on every peer reconnect** — previously unconditional on each
+  `connect_to_peer()` call. Combined with the flapping bug, this caused full mempool
+  transfers at ~10 s intervals on flapping node pairs. Now guarded: only fires if the
+  local mempool is empty.
+
+### Changed
+- **`node_id` is now the validator wallet address** — previously a random UUID, now set
+  to the validator's wallet address at startup. This enables the AlephBFT bridge to
+  resolve `NodeIndex → peer TCP connection` for unicast routing. Non-validator (observer)
+  nodes retain a random UUID and are unaffected.
+
+### Performance
+
+| Metric | Before | After (est.) |
+|---|---|---|
+| Daily bandwidth / node (7 validators) | ~5 GB | ~1 GB |
+| Peer reconnect storm duration | up to 180 s | < 30 s |
+| Heartbeat messages / hour (7-node cluster) | ~360 | ~60 |
+
+---
+
 ## [2.0.1] — 2026-07-02
 
 > **TESTNET RESET — All nodes must wipe their database and restart from the new genesis.**
@@ -373,7 +421,10 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ---
 
-[Unreleased]: https://github.com/quantachain/quanta/compare/v0.7.5-alpha...HEAD
+[Unreleased]: https://github.com/quantachain/quanta/compare/v2.0.2-alpha...HEAD
+[2.0.2-alpha]: https://github.com/quantachain/quanta/compare/v2.0.1-alpha...v2.0.2-alpha
+[2.0.1-alpha]: https://github.com/quantachain/quanta/compare/v2.0.0-alpha...v2.0.1-alpha
+[2.0.0-alpha]: https://github.com/quantachain/quanta/compare/v0.7.5-alpha...v2.0.0-alpha
 [0.7.5-alpha]: https://github.com/quantachain/quanta/compare/v0.7.4-alpha...v0.7.5-alpha
 [0.7.4-alpha]: https://github.com/quantachain/quanta/compare/v0.7.3-alpha...v0.7.4-alpha
 [0.7.3-alpha]: https://github.com/quantachain/quanta/compare/v0.7.2-alpha...v0.7.3-alpha
