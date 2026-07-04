@@ -302,18 +302,42 @@ impl PeerManager {
             return Err("Max peers reached".to_string());
         }
 
-        // MED-2 + Existing FIX: Sybil subnet check for both IPv4 /24 and IPv6 /48
+        // FLAP-FIX: Liveness-aware duplicate IP check.
+        //
+        // The previous hard check ("Already connected to this peer IP") held the
+        // IP slot for up to 180 s after a peer's TCP stream died, because
+        // cleanup_dead_peers() only runs every 10 s and uses a 180 s last_seen
+        // timeout. Every reconnect attempt during that window was rejected,
+        // causing "Connection reset by peer" on the initiating side, which then
+        // retried every 10 s — producing the flapping loop seen in the logs.
+        //
+        // Fix: if the existing peer with the same IP is DEAD (last_seen > 30s ago),
+        // evict it immediately and accept the fresh connection.
+        // Only a LIVE duplicate causes a rejection.
+        let mut stale_idx: Option<usize> = None;
         let mut subnet_count = 0;
 
-        for p in peers.iter() {
+        for (i, p) in peers.iter().enumerate() {
             if let Ok(info) = p.info.try_read() {
-                // 1. Check exact match (IP and Port)
+                // Exact address match
                 if info.address == peer_addr {
+                    // Prefer the newer connection: check liveness
+                    let now = chrono::Utc::now().timestamp();
+                    if now - info.last_seen > 30 {
+                        stale_idx = Some(i);
+                        break; // evict and accept below
+                    }
                     return Err("Already connected to this peer".to_string());
                 }
-                
-                // 1.5 Check exact IP match to prevent duplicate connections
+
+                // Same IP, different port — check liveness before rejecting
                 if info.address.ip() == peer_ip {
+                    let now = chrono::Utc::now().timestamp();
+                    if now - info.last_seen > 30 {
+                        // Stale connection holding the IP slot — evict it
+                        stale_idx = Some(i);
+                        break;
+                    }
                     return Err(format!("Already connected to this peer IP: {}", peer_ip));
                 }
 
@@ -337,6 +361,14 @@ impl PeerManager {
             }
         }
 
+        // Evict stale peer and proceed with the new live connection
+        if let Some(idx) = stale_idx {
+            let evicted_addr = peers[idx].address().await;
+            warn!("Evicting stale peer {} (last_seen > 30s) — accepting fresh connection from {}",
+                evicted_addr, peer_addr);
+            peers.remove(idx);
+        }
+
         if subnet_count >= 2 {
             return Err(format!(
                 "Too many connections from subnet of {} (Sybil Protection — max 2 per /24 IPv4 or /48 IPv6)",
@@ -348,6 +380,7 @@ impl PeerManager {
         info!("Peer {} added. Total peers: {}", peer_addr, peers.len());
         Ok(())
     }
+
 
     /// Ban an IP address for BAN_DURATION (HIGH-4).
     ///

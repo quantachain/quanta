@@ -255,17 +255,29 @@ impl Network {
                                 drop(blockchain);
 
                                 if let Ok(_) = peer.handshake(PROTOCOL_VERSION, height, cumulative_work, node_id).await {
-                                    if peer_manager.add_peer(Arc::clone(&peer)).await.is_ok() {
-                                        // BETA FIX: Add the peer's IP to discovery with the default port
-                                        // so that other nodes can discover it and form a full mesh network.
-                                        let mut discovery_addr = addr;
-                                        discovery_addr.set_port(8333); // Assume default Quanta port
-                                        discovery.add_peer(discovery_addr).await;
-                                        
-                                        // Request known peers from this new connection to discover the rest of the network
-                                        let _ = peer.send_message(P2PMessage::GetAddr).await;
-                                        
-                                        Self::start_peer_receive_task(peer, message_tx, peer_manager).await;
+                                    match peer_manager.add_peer(Arc::clone(&peer)).await {
+                                        Ok(_) => {
+                                            // BETA FIX: Add the peer's IP to discovery with the default port
+                                            // so that other nodes can discover it and form a full mesh network.
+                                            let mut discovery_addr = addr;
+                                            discovery_addr.set_port(8333); // Assume default Quanta port
+                                            discovery.add_peer(discovery_addr).await;
+
+                                            // Request known peers from this new connection to discover the rest of the network
+                                            let _ = peer.send_message(P2PMessage::GetAddr).await;
+
+                                            Self::start_peer_receive_task(peer, message_tx, peer_manager).await;
+                                        }
+                                        Err(e) => {
+                                            // FLAP-FIX: Send an explicit Disconnect before dropping the stream.
+                                            // Without this, silently dropping the TCP connection looks like a
+                                            // network failure to the remote, which immediately retries —
+                                            // causing the 'Connection reset' flapping loop.
+                                            // A Disconnect message tells the remote that the rejection was
+                                            // intentional so it can back off gracefully.
+                                            debug!("Inbound peer {} rejected ({}); sending Disconnect", addr, e);
+                                            let _ = peer.send_message(P2PMessage::Disconnect).await;
+                                        }
                                     }
                                 }
                             }
@@ -1183,12 +1195,14 @@ impl Network {
                 }
 
                 for addr in target_peers {
-                    // Check if already connected before dialing
+                    // FLAP-FIX: Check if already connected AND LIVE before skipping.
+                    // The old check only tested by IP, not liveness — a dead peer with
+                    // the same IP would block reconnect attempts indefinitely.
                     let is_connected = {
                         let peers = self.peer_manager.get_peers().await;
                         let mut connected = false;
                         for peer in peers {
-                            if peer.address().await.ip() == addr.ip() {
+                            if peer.address().await.ip() == addr.ip() && peer.is_alive().await {
                                 connected = true;
                                 break;
                             }
