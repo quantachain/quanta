@@ -2,9 +2,10 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.0.2-alpha — TESTNET UPDATE (2026-07-04)**
-> Bandwidth & peer stability hotfix. No testnet reset required — drop-in upgrade.
-> Genesis hash remains: `ae37fe2f40a7e7dbe6d2d1337f260d57185ef5fb169008e2600f245809fd1fbf`
+> **v2.0.2-alpha — TESTNET WIPE REQUIRED (2026-07-04)**
+> Genesis configuration updated for security and network magic bumped to `Q2T9`. 
+> All nodes MUST delete their `quanta_data` (and `quanta_data_v2`) folders before restarting.
+> A new genesis hash will be generated upon startup.
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
@@ -12,6 +13,9 @@ This is a pre-release testnet build. Do not use real funds. APIs and chain param
 
 ## What Changed in v2.0.2-alpha
 
+- **Dynamic Validator Expansion** — `MAX_COMMITTEE_SIZE` increased to 21 to allow dynamic expansion of the active validator set.
+- **Genesis Sybil Protection** — Genesis validators removed from the liquid `testnet_faucets` array. This ensures genesis validators only receive locked stake and no liquid QUA, mathematically preventing Sybil attacks.
+- **Network Isolation** — Network magic bytes bumped to `Q2T9` for testnet reset.
 - **AlephBFT unicast routing fixed** — BFT vote/signature messages now route to the single intended validator instead of broadcasting to all. Cuts ~80% of inter-node BFT traffic (was O(N²), now O(N)).
 - **Peer flapping loop fixed** — Dead peers now evicted within 30 s instead of holding their IP slot for 180 s. Stops the "Connection reset by peer" reconnect storm that was generating hundreds of MB/hr of spurious mempool traffic.
 - **Heartbeat interval corrected** — was firing every 10 s, now correctly 60 s per protocol spec. ~83% fewer Ping/Pong messages.
