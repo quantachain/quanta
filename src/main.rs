@@ -310,7 +310,13 @@ async fn main() {
             tracing::info!("  RPC Port: {}", rpc_port);
             tracing::info!("  Database: {}", cfg.node.db_path);
             
-            let storage = Arc::new(BlockchainStorage::new(&cfg.node.db_path).expect("Failed to open database"));
+            let prune_mode = match cfg.node.mode {
+                crate::config::types::NodeMode::Archive => crate::storage::db::PruneMode::ArchiveFull,
+                crate::config::types::NodeMode::Light => crate::storage::db::PruneMode::HeadersOnly,
+                crate::config::types::NodeMode::Pruned => crate::storage::db::PruneMode::Pruned(cfg.node.prune_days),
+            };
+            
+            let storage = Arc::new(BlockchainStorage::with_options(&cfg.node.db_path, prune_mode, true).expect("Failed to open database"));
             let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, cfg.network_type).expect("Failed to initialize blockchain")));
             
             let metrics = Arc::new(MetricsCollector::new());

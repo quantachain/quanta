@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::core::transaction::Transaction;
 use crate::crypto::signatures::{verify_signature_strict, FalconKeypair};
 use serde::{Deserialize, Serialize};

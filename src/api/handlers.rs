@@ -34,32 +34,6 @@ pub struct ApiState {
 
 }
 
-/// Request to create a transaction
-///  CRITICAL SECURITY WARNING 
-/// This endpoint accepts wallet passwords over HTTP - EXTREMELY DANGEROUS!
-/// 
-///  DO NOT USE IN PRODUCTION WITHOUT CHANGES 
-/// 
-/// SAFE USE CASES ONLY:
-/// - Local development (127.0.0.1 ONLY)
-/// - Single-user personal nodes (not public RPC)
-/// - Behind reverse proxy with TLS + authentication
-/// 
-/// FOR PRODUCTION TESTNET/MAINNET:
-///  Client-side signing (users sign locally, submit pre-signed tx)
-///  Hardware wallet integration
-///  Never transmit private keys or passwords
-///  Use POST /api/transactions/submit with pre-signed transactions
-/// 
-/// TODO: Disable this endpoint for public RPC nodes
-#[derive(Deserialize)]
-pub struct CreateTransactionRequest {
-    pub wallet_file: String,
-    pub wallet_password: String,
-    pub recipient: String,
-    pub amount_microunits: u64, // Amount in microunits (1 QUA = 1_000_000)
-}
-
 /// Response with transaction hash
 #[derive(Serialize)]
 pub struct TransactionResponse {

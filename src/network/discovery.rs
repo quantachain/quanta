@@ -19,7 +19,6 @@ pub struct PeerMeta {
 pub enum PeerSource {
     Seed,
     Discovered,
-    Manual,
 }
 
 /// Peer discovery mechanism
@@ -283,15 +282,6 @@ impl PeerDiscovery {
     }
 }
 
-/// Default seed nodes for the QUANTA network
-pub fn default_seed_nodes() -> Vec<SocketAddr> {
-    vec![
-        // Add your seed nodes here when deploying
-        // "seed1.quanta.network:8333".parse().unwrap(),
-        // "seed2.quanta.network:8333".parse().unwrap(),
-    ]
-}
-
 /// Check if address is routable (not private/loopback unless allowed)
 fn is_routable_addr(addr: &SocketAddr) -> bool {
     let ip = addr.ip();
@@ -345,4 +335,3 @@ mod tests {
         assert!(!selected.is_empty(), "Should select peers from the discovery pool");
     }
 }
-

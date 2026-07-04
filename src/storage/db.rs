@@ -37,10 +37,8 @@ pub enum StorageError {
 pub enum PruneMode {
     /// Keep all blocks forever (full archive node)
     ArchiveFull,
-    /// Keep last 6 months of blocks (~15.7M blocks)
-    Pruned6Months,
-    /// Keep last 1 month of blocks (~2.6M blocks)
-    Pruned1Month,
+    /// Keep a custom window of blocks in days
+    Pruned(u64),
     /// Keep only headers (SPV mode)
     HeadersOnly,
 }
@@ -128,12 +126,16 @@ impl BlockchainStorage {
         }
         
         // 5. Update cache (flush is deferred to sled's background thread or explicit call).
-        //    Sled's WAL guarantees crash-safety without a per-block fsync.
-        //    Calling flush() after EVERY block was the primary cause of sync being
-        //    10-100x slower than necessary (one fsync syscall ≈ 5-50 ms per block).
         {
             let mut cache = self.block_cache.lock().unwrap();
             cache.put(block.index, block.clone());
+        }
+
+        // 6. Auto-prune periodically (every 1000 blocks) to avoid huge single-pass delays
+        if block.index > 0 && block.index % 1000 == 0 {
+            if let Err(e) = self.prune() {
+                tracing::warn!("Auto-pruning failed at height {}: {}", block.index, e);
+            }
         }
 
         let elapsed = start.elapsed();
@@ -375,23 +377,20 @@ impl BlockchainStorage {
         Ok(Vec::new())
     }
 
-    /// Prune old blocks based on configured mode
+    /// Prune old blocks based on configured mode (Amortized O(1))
     pub fn prune(&self) -> Result<u64, StorageError> {
         let height = self.get_chain_height()?;
         
         let cutoff = match self.prune_mode {
             PruneMode::ArchiveFull => return Ok(0), // Don't prune
-            PruneMode::Pruned6Months => {
-                // 6 months = ~180 days = 180 * 2880 blocks
-                height.saturating_sub(180 * 2880)
-            }
-            PruneMode::Pruned1Month => {
-                // 1 month = ~30 days = 30 * 2880 blocks
-                height.saturating_sub(30 * 2880)
+            PruneMode::Pruned(days) => {
+                // Blocks per day: 24h * 60m * (60s / 6s per block) = 14,400 blocks per day
+                let blocks_to_keep = days * 14_400;
+                height.saturating_sub(blocks_to_keep)
             }
             PruneMode::HeadersOnly => {
-                //Keep all headers but prune transaction data
-                height.saturating_sub(1000) // Keep last 1000 blocks full
+                // Keep all headers but prune transaction data (full blocks for last 1000)
+                height.saturating_sub(1000)
             }
         };
         
@@ -399,19 +398,32 @@ impl BlockchainStorage {
             return Ok(0);
         }
         
+        // Fetch last pruned height to avoid O(N) looping from 0 every time
+        let last_pruned_bytes = self.db.get(b"last_pruned_height")?.unwrap_or_else(|| sled::IVec::from(&0u64.to_be_bytes()));
+        let last_pruned = u64::from_be_bytes(last_pruned_bytes.as_ref().try_into().unwrap_or([0; 8]));
+        
+        if last_pruned >= cutoff {
+            return Ok(0); // Already pruned up to cutoff
+        }
+        
         let mut pruned = 0;
-        for block_index in 0..cutoff {
+        // Only loop over the delta of blocks that need pruning
+        for block_index in last_pruned..cutoff {
             let key = format!("block:{}", block_index);
             if self.db.remove(key.as_bytes())?.is_some() {
                 pruned += 1;
             }
         }
         
+        // Save the new pruned height
+        self.db.insert(b"last_pruned_height", &cutoff.to_be_bytes())?;
+        
         tracing::info!("Pruned {} blocks (kept blocks >= {})", pruned, cutoff);
         Ok(pruned)
     }
 
     /// Get storage statistics
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> StorageStats {
         let height = self.get_chain_height().unwrap_or(0);
         let db_size = self.db.size_on_disk().unwrap_or(0);
@@ -451,6 +463,7 @@ struct TxLocation {
 
 /// Storage statistics
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct StorageStats {
     pub chain_height: u64,
     pub disk_usage_bytes: u64,
