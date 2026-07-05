@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::core::merkle::MerkleTree;
 use crate::core::transaction::Transaction;
 use crate::crypto::{double_sha3, FALCON512_SIG_MAX_BYTES, FALCON512_SIG_MIN_BYTES};

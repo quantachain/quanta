@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::core::transaction::Transaction;
 use crate::crypto::sha3_hash;
 use serde::{Deserialize, Serialize};

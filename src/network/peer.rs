@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::network::protocol::{
     deserialize_message, serialize_message, P2PMessage, MAX_MESSAGE_SIZE,
 };

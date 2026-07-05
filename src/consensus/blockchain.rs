@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::core::block::Block;
 use crate::core::transaction::{AccountState, Transaction};
 use crate::core::ChainNetwork;
@@ -6,7 +7,7 @@ use dashmap::DashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use sha3::Digest;
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::watch; // New-block notification channel (abort-on-stale mining)
@@ -76,38 +77,6 @@ const TARGET_BLOCK_TIME: u64 = 30; // seconds
 //
 // References:
 //   Zawy (2017) — https://github.com/zawy12/difficulty-algorithms
-//   Used by: Zcash, Grin, Beam, MimbleWimble variants, many Monero forks
-
-/// Number of blocks in the LWMA sliding window.
-/// 45 blocks × 30s = 22.5 minutes of smoothing — fast without being jumpy.
-const LWMA_WINDOW: u64 = 45;
-
-/// Maximum per-block difficulty INCREASE (as a percentage of current difficulty).
-/// 200% = at most 2× up per block — prevents a single fast block from spiking too high.
-const MAX_DIFF_UP_PCT: u32 = 200;
-
-/// Maximum per-block difficulty DECREASE (as a percentage of current difficulty).
-/// 75% = at most 0.75× down per block (i.e. maximum 25% drop) — prevents death spirals.
-const MAX_DIFF_DOWN_PCT: u32 = 75;
-
-/// Per-block solve-time clamp: individual solve times are clamped to [1 .. 6×T]
-/// before entering the LWMA sum. This prevents a single stalled block (e.g. from
-/// a node going offline) from crashing difficulty.
-const LWMA_SOLVE_TIME_CAP_FACTOR: u64 = 6; // 6 × 30s = 180s cap per solve-time
-
-/// Minimum difficulty — set to the testnet V2 genesis difficulty.
-/// This is the difficulty at which the chain STARTED, so all early blocks
-/// Mined at genesis difficulty are valid. Never output a target easier than this.
-pub const MIN_DIFFICULTY: u32 = 8_304_130;
-
-/// Maximum difficulty — 2^31−1 fits in an i32 (used by block.has_valid_hash)
-/// and is far beyond any real CPU/GPU hashrate.
-const MAX_DIFFICULTY: u32 = 2_147_483_647;
-
-// Keep this available for code that referenced the old constant (e.g. genesis loader).
-// It is no longer used by the difficulty algorithm.
-#[allow(dead_code)]
-const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = LWMA_WINDOW;
 
 // v3 TOKENOMICS — AI Agent Execution Layer Era
 // Block time: SLOT_SECONDS = 6 (bft_proposer.rs)
@@ -305,9 +274,6 @@ pub struct Blockchain {
     /// Stored in memory and in sled for O(1) access instead of O(height) scan.
     /// Enables instant best-peer selection at any chain height.
     cumulative_work: Arc<PLMutex<u128>>,
-
-    /// Treasury payout address (loaded from config or hardcoded default).
-    treasury_address: String,
 
     /// NEW-BLOCK NOTIFICATION CHANNEL
     ///
@@ -639,7 +605,6 @@ impl Blockchain {
             pubkey_cache: Arc::new(DashMap::new()),
             cumulative_work: Arc::new(PLMutex::new(initial_cumulative_work)),
             new_block_tx: Arc::new(new_block_tx),
-            treasury_address: TREASURY_ADDRESS.to_string(),
         })
     }
 
@@ -1096,7 +1061,7 @@ impl Blockchain {
         if treasury_allocation > 0 {
             let treasury_tx = Transaction {
                 sender: "TREASURY".to_string(),
-                recipient: self.treasury_address.clone(),
+                recipient: TREASURY_ADDRESS.to_string(),
                 amount: treasury_allocation,
                 timestamp: chrono::Utc::now().timestamp(),
                 signature: vec![],

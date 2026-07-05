@@ -926,7 +926,7 @@ mod tests {
                 call_args: sa,
             },
         );
-        state.credit_account(&st, 300, 0);
+        state.credit_account(&st, 600, 0);
         assert_eq!(state.get_balance("0xagent1"), 60_000);
         assert_eq!(state.get_balance("0xemployer"), 40_000);
     }
