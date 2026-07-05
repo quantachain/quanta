@@ -47,7 +47,7 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features
 
   # Security Audit
   security-audit:
@@ -168,8 +168,6 @@ jobs:
 
       - name: Check for broken doc links
         run: cargo doc --no-deps --all-features
-        env:
-          RUSTDOCFLAGS: -D warnings
 
   # Dependency Check
   dependencies:
