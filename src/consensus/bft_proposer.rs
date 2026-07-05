@@ -61,7 +61,7 @@ const SESSION_LENGTH: u64 = 60;
 // TUNED 2026-06-15: Reduced from 2000 → 500. Triggers session rotation sooner
 // if rounds accumulate faster than expected (e.g. during network partitions),
 // bounding the worst-case delay growth within any single session.
-const MAX_ROUNDS_PER_SESSION: u32 = 500;
+const MAX_ROUNDS_PER_SESSION: u32 = 5000;
 
 pub async fn run_bft_proposer(
     blockchain: Arc<RwLock<Blockchain>>,
@@ -177,6 +177,27 @@ pub async fn run_bft_proposer(
     //   • internal DAG round     → 0, preventing exponential delay growth
     // -----------------------------------------------------------------------
     loop {
+        // --- WAIT FOR SYNC ---
+        // Ensure we are caught up with the network before starting a BFT session.
+        // Starting an old session causes salt mismatches and spams the network channels,
+        // which can actively prevent the node from downloading missing blocks.
+        loop {
+            let current_height = {
+                let bc = blockchain.read().await;
+                bc.get_height()
+            };
+            
+            let peers = network_ref.get_peers_info().await;
+            let max_peer_height = peers.iter().map(|p| p.height).max().unwrap_or(0);
+            
+            if current_height >= max_peer_height.saturating_sub(2) {
+                break;
+            }
+            
+            tracing::info!("BFT Proposer: waiting for sync (at height {}, network at {})...", current_height, max_peer_height);
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        }
+
         // Compute the current session_id from chain height.
         let current_height = {
             let bc = blockchain.read().await;
@@ -299,30 +320,17 @@ pub async fn run_bft_proposer(
         };
         let new_session_id = new_height / SESSION_LENGTH;
 
-        // FIX (Session Deadlock): ALWAYS wipe the current session's backup file
-        // on any restart — whether we crossed a session boundary or not.
-        //
-        // Previously, the backup was only deleted when new_session_id > session_id
-        // (i.e. crossing a SESSION_LENGTH block boundary).  But if the chain is
-        // frozen BELOW the boundary (e.g. stuck at block 43 < 60), the session
-        // repeatedly loaded 50k+ units from backup, immediately hit MAX_ROUNDS,
-        // restarted, and loaded again — an infinite deadlock with no way out.
-        //
-        // By always deleting the backup, we force AlephBFT to start each session
-        // from round 0 with no stale DAG state, which is exactly what we want:
-        // the proposer re-fetches the current chain state from the blockchain and
-        // proposes fresh blocks from there.
-        let current_backup = Path::new(&data_dir)
-            .join(format!("alephbft_backup_{}.dat", session_id));
-        if let Err(e) = tokio::fs::remove_file(&current_backup).await {
-            if e.kind() != std::io::ErrorKind::NotFound {
-                warn!("BFT Proposer: could not remove backup {:?}: {}", current_backup, e);
-            }
-        } else {
-            info!("BFT Proposer: cleared backup {:?} — next session starts from round 0", current_backup);
-        }
-
         if new_session_id > session_id {
+            let old_backup = Path::new(&data_dir)
+                .join(format!("alephbft_backup_{}.dat", session_id));
+            if let Err(e) = tokio::fs::remove_file(&old_backup).await {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    warn!("BFT Proposer: could not remove backup {:?}: {}", old_backup, e);
+                }
+            } else {
+                info!("BFT Proposer: cleared backup {:?} — next session starts from round 0", old_backup);
+            }
+            
             info!("BFT Proposer: rotated to session {} (chain height {})", new_session_id, new_height);
         }
 

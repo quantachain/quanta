@@ -136,11 +136,13 @@ impl PeerDiscovery {
             // Ban logic: 3 strikes with low reputation
             if (failures > 3 && reputation < -20) || failures > 10 {
                 if !is_seed {
-                    // SECURE: 24-hour ban for malicious or severely failing nodes
-                    let ban_duration = 24 * 3600; // 24 hours in seconds
+                    // FIX: Reduce ban to 60 seconds (down from 24 hours) to prevent
+                    // permanent network partitions when nodes are restarted sequentially
+                    // and temporarily accumulate connection failures.
+                    let ban_duration = 60; // 60 seconds
                     let ban_until = chrono::Utc::now().timestamp() + ban_duration;
                     meta.banned_until = Some(ban_until);
-                    warn!("Peer {} BANNED for 24 hours (reputation: {}, failures: {})", 
+                    warn!("Peer {} BANNED for 60 seconds (reputation: {}, failures: {})", 
                         addr, reputation, failures);
                 } else {
                     warn!("Seed node {} has {} failures (not banning seed)", addr, failures);

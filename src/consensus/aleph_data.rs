@@ -61,12 +61,17 @@ impl DataProvider for QuantaDataProvider {
         // the last finalized block.  All validators propose simultaneously
         // once the slot opens; AlephBFT's DAG selects one via consensus.
         // -----------------------------------------------------------------------
-        let now_unix = chrono::Utc::now().timestamp();
-        let last_ts  = self.last_finalized_ts.load(Ordering::Acquire);
-        let elapsed  = now_unix.saturating_sub(last_ts);
+        loop {
+            let now_unix = chrono::Utc::now().timestamp();
+            let last_ts  = self.last_finalized_ts.load(Ordering::Acquire);
+            let elapsed  = now_unix.saturating_sub(last_ts);
 
-        if elapsed < SLOT_SECONDS {
-            return None;
+            if elapsed >= SLOT_SECONDS {
+                break;
+            }
+            
+            let delay = (SLOT_SECONDS - elapsed) as u64;
+            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
         }
 
         // -----------------------------------------------------------------------
