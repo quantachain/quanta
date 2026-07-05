@@ -3049,12 +3049,12 @@ mod tests {
         let total_fees: u64 = 1_000_000; // 1 QUA in microunits
 
         let fee_burned = (total_fees * FEE_BURN_PERCENT) / 100; // 500_000
-        let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100; // 200_000
-        let fee_to_miner = total_fees - fee_burned - fee_to_treasury; // 300_000 (remainder)
+        let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100; // 150_000
+        let fee_to_miner = total_fees - fee_burned - fee_to_treasury; // 350_000 (remainder)
 
         assert_eq!(fee_burned, 500_000, "50% should be burned");
-        assert_eq!(fee_to_treasury, 200_000, "20% goes to treasury");
-        assert_eq!(fee_to_miner, 300_000, "30% to miner (no rounding loss)");
+        assert_eq!(fee_to_treasury, 150_000, "15% goes to treasury");
+        assert_eq!(fee_to_miner, 350_000, "35% to miner (no rounding loss)");
         assert_eq!(
             fee_burned + fee_to_treasury + fee_to_miner,
             total_fees,

@@ -389,7 +389,6 @@ impl Transaction {
         hasher.update(&self.public_key);
         hasher.update(&[self.sig_scheme as u8]);
         hasher.update(&self.network_id.to_le_bytes());
-        hasher.update(&self.payload);
 
         match &self.tx_type {
             TransactionType::Transfer => hasher.update(&[0u8]),
