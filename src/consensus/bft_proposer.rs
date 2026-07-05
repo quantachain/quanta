@@ -72,7 +72,7 @@ const SESSION_LENGTH: u64 = 60;
 // TUNED 2026-06-15: Reduced from 2000 → 500. Triggers session rotation sooner
 // if rounds accumulate faster than expected (e.g. during network partitions),
 // bounding the worst-case delay growth within any single session.
-const MAX_ROUNDS_PER_SESSION: u32 = 5000;
+const MAX_ROUNDS_PER_SESSION: u32 = 500;
 
 pub async fn run_bft_proposer(
     blockchain: Arc<RwLock<Blockchain>>,
