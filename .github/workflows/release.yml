@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger on version tags
+
+jobs:
+  build:
+    name: Build release binaries
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: quanta-wallet-linux-x86_64
+            bin_name: quanta-wallet
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: quanta-wallet-windows-x86_64.exe
+            bin_name: quanta-wallet.exe
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: quanta-wallet-macos-x86_64
+            bin_name: quanta-wallet
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: quanta-wallet-macos-arm64
+            bin_name: quanta-wallet
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --bin quanta-wallet --target ${{ matrix.target }}
+
+      - name: Rename and Move Binary
+        run: |
+          mkdir -p dist
+          mv target/${{ matrix.target }}/release/${{ matrix.bin_name }} dist/${{ matrix.artifact_name }}
+        shell: bash
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.artifact_name }}
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: dist
+
+      - name: Prepare Release Assets
+        run: |
+          # actions/download-artifact creates a subdirectory for each artifact
+          # Let's move them all into the root of the 'assets' directory
+          mkdir -p assets
+          mv dist/*/* assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,6 +2,8 @@
 
 The `quanta-wallet` CLI has been rewritten for V2 to support HD Wallets (BIP-39), Raw Wallets, and Headless AI execution. All cryptography utilizes Post-Quantum **Falcon-512** signatures.
 
+> **Note on Installation:** You do not need to compile the CLI from source or run Docker to use it. Pre-compiled binaries for Windows, macOS, and Linux are automatically attached to the GitHub Releases page. Just download the executable for your OS and run it!
+
 ## Creating & Managing a Wallet
 
 For human users, use HD Wallets:
@@ -20,8 +22,11 @@ Other wallet commands:
 # Check your address
 quanta-wallet address --file mywallet.json
 
-# Reveal your 24-word recovery mnemonic
+# Reveal your 24-word recovery mnemonic (HD Wallets only)
 quanta-wallet show-mnemonic --file mywallet.json
+
+# Export your raw Falcon-512 private key (for raw .qua validator wallets)
+quanta-wallet export-private-key --file validator.qua
 
 # Restore a wallet from a mnemonic phrase
 quanta-wallet restore --file mywallet.json

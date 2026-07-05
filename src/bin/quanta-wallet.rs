@@ -102,6 +102,13 @@ enum Commands {
         out: String,
     },
 
+    /// Export the raw Falcon-512 Private and Public keys in Hex format.
+    /// Use this to import your raw `.qua` validator wallet into the web extension.
+    ExportPrivateKey {
+        #[arg(short, long, default_value = "wallet.qua")]
+        file: String,
+    },
+
     /// Show wallet balance and info (requires a running node).
     Info {
         #[arg(short, long, default_value = "wallet.json")]
@@ -415,6 +422,14 @@ async fn main() {
             println!("  File      : {}", out);
             println!("  Address   : {}", kp.address);
             println!("\n Send {} to the network coordinator to be included in the Genesis Block.", out);
+        }
+
+        Commands::ExportPrivateKey { file } => {
+            let kp = load_keypair_for_signing(&file);
+            eprintln!("\n  ⚠  KEEP THIS SECRET — anyone with the private key controls your funds.\n");
+            println!("  Public Key (Hex) : {}", hex::encode(&kp.keypair.public_key));
+            println!("  Private Key (Hex): {}", hex::encode(&kp.keypair.secret_key));
+            eprintln!("\n  Paste these into the wallet extension → Import Wallet → Private Key tab.");
         }
 
         Commands::Info { file, node } => {

@@ -2,6 +2,15 @@
 
 Quanta V2 has removed Proof-of-Work mining. Security is now provided by BFT Validators in a permissionless Testnet, allowing anyone to participate as a full node or stake as a validator.
 
+## Minimum System Requirements
+
+To ensure stable block production and AlephBFT consensus participation, validator nodes must meet the following hardware requirements:
+
+- **CPU:** 4 Cores (modern x86_64 or ARM64)
+- **RAM:** 8 GB
+- **Storage:** 50 GB SSD (NVMe recommended)
+- **Network:** Reliable 100 Mbps connection with static IP
+
 ## Node Types
 
 You can run your node in three different storage modes, configured in your `quanta.toml`.
@@ -61,4 +70,4 @@ network_port = 8333
 max_peers = 125
 ```
 
-*Note: The V2 network magic bytes are `Q2T2`. Do not attempt to connect to V1 nodes.*
+*Note: The V2 network magic bytes are `Q2T9` for the current testnet phase.*
