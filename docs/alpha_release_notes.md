@@ -2,10 +2,17 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.1.0-alpha — TESTNET WIPE REQUIRED (2026-07-05)**
-> Genesis configuration updated for security and network magic bumped to `Q2T9`. 
-> All nodes MUST delete their `quanta_data` (and `quanta_data_v2`) folders before restarting.
-> A new genesis hash will be generated upon startup.
+> **v2.1.0-alpha — SOFT UPDATE (2026-07-05)**
+> **NO WIPE REQUIRED.** The blockchain data format and network magic (`Q2T9`) have not changed.
+> 
+> **How to update an existing node:**
+> 1. Pull the new Docker image (`docker-compose pull`).
+> 2. Restart your node (`docker-compose down && docker-compose up -d`).
+> 3. **DO NOT** delete your `quanta_data` folder; your node will resume instantly.
+> 
+> **How to do a clean start (New Nodes):**
+> 1. Run the node using the new image. It will generate a new `validator.qua` wallet.
+> 2. It will automatically sync the blockchain from genesis.
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
