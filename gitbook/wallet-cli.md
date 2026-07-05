@@ -4,6 +4,18 @@ The `quanta-wallet` CLI has been rewritten for V2 to support HD Wallets (BIP-39)
 
 > **Note on Installation:** You do not need to compile the CLI from source or run Docker to use it. Pre-compiled binaries for Windows, macOS, and Linux are automatically attached to the GitHub Releases page. Just download the executable for your OS and run it!
 
+## Global Configuration
+
+You can set a default node and wallet file so you don't have to specify `--node` or `--wallet` for every single command:
+
+```bash
+# Set your default node URL and wallet file
+quanta-wallet config set --node https://rpc.quantachain.org --wallet mywallet.json
+
+# View your current configuration
+quanta-wallet config get
+```
+
 ## Creating & Managing a Wallet
 
 For human users, use HD Wallets:

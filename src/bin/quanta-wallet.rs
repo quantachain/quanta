@@ -9,6 +9,50 @@ use quanta::core::contracts::{NativeContracts, EscrowInitArgs, EscrowClaimArgs, 
 use clap::{Parser, Subcommand};
 use chrono::Utc;
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLI Configuration (Global Config)
+// ─────────────────────────────────────────────────────────────────────────────
+use std::path::PathBuf;
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct CliConfig {
+    pub node: Option<String>,
+    pub wallet: Option<String>,
+}
+
+fn config_path() -> PathBuf {
+    let mut path = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."));
+    path.push(".quanta");
+    std::fs::create_dir_all(&path).unwrap_or_default();
+    path.push("cli-config.json");
+    path
+}
+
+fn load_config() -> CliConfig {
+    if let Ok(data) = std::fs::read_to_string(config_path()) {
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        CliConfig::default()
+    }
+}
+
+fn save_config(config: &CliConfig) {
+    let data = serde_json::to_string_pretty(config).expect("Failed to serialize config");
+    std::fs::write(config_path(), data).unwrap_or_else(|e| die(&format!("Failed to save config: {}", e)));
+}
+
+fn resolve_node(cli_arg: Option<String>) -> String {
+    cli_arg.or_else(|| load_config().node).unwrap_or_else(|| "http://localhost:3000".to_string())
+}
+
+fn resolve_wallet(cli_arg: Option<String>) -> String {
+    cli_arg.or_else(|| load_config().wallet).unwrap_or_else(|| "wallet.json".to_string())
+}
+
 const MICROUNITS_PER_QUA: u64 = 1_000_000;
 
 fn qua_to_u(qua: f64) -> u64 { (qua * MICROUNITS_PER_QUA as f64) as u64 }
@@ -49,8 +93,8 @@ enum Commands {
     /// Use this for all regular users and AI agents.
     New {
         /// Output wallet file path
-        #[arg(short, long, default_value = "wallet.json")]
-        file: String,
+        #[arg(short, long)]
+        file: Option<String>,
         /// Number of accounts to pre-generate
         #[arg(short, long, default_value = "1")]
         accounts: u32,
@@ -59,8 +103,8 @@ enum Commands {
     /// Restore an HD wallet from its 24-word mnemonic phrase (prompted securely).
     Restore {
         /// Output wallet file path
-        #[arg(short, long, default_value = "wallet.json")]
-        file: String,
+        #[arg(short, long)]
+        file: Option<String>,
         /// Number of accounts to restore
         #[arg(short, long, default_value = "1")]
         accounts: u32,
@@ -70,14 +114,14 @@ enum Commands {
     /// Use for server/HSM deployments where the file IS the backup.
     NewRaw {
         /// Output wallet file path
-        #[arg(short, long, default_value = "wallet.qua")]
-        file: String,
+        #[arg(short, long)]
+        file: Option<String>,
     },
 
     /// Show wallet address(es).
     Address {
-        #[arg(short, long, default_value = "wallet.json")]
-        file: String,
+        #[arg(short, long)]
+        file: Option<String>,
     },
 
     /// Reveal the 24-word recovery mnemonic from an HD wallet file.
@@ -90,14 +134,14 @@ enum Commands {
     /// Only works with HD wallets (wallet.json). Raw .qua wallets have no
     /// recovery phrase — the file itself is the key.
     ShowMnemonic {
-        #[arg(short, long, default_value = "wallet.json")]
-        file: String,
+        #[arg(short, long)]
+        file: Option<String>,
     },
 
     /// Export your Address and Falcon-512 Public Key to a genesis JSON file.
     ExportValidator {
-        #[arg(short, long, default_value = "wallet.qua")]
-        wallet: String,
+        #[arg(short, long)]
+        wallet: Option<String>,
         #[arg(short, long, default_value = "validator.json")]
         out: String,
     },
@@ -105,24 +149,35 @@ enum Commands {
     /// Export the raw Falcon-512 Private and Public keys in Hex format.
     /// Use this to import your raw `.qua` validator wallet into the web extension.
     ExportPrivateKey {
-        #[arg(short, long, default_value = "wallet.qua")]
-        file: String,
+        #[arg(short, long)]
+        file: Option<String>,
+    },
+
+
+    /// Manage global CLI configuration (e.g. default node and wallet).
+    Config {
+        /// "set" or "get"
+        action: String,
+        /// Config key (e.g. "node" or "wallet")
+        key: Option<String>,
+        /// Config value (e.g. "http://localhost:3000")
+        value: Option<String>,
     },
 
     /// Show wallet balance and info (requires a running node).
     Info {
-        #[arg(short, long, default_value = "wallet.json")]
-        file: String,
-        #[arg(short, long, default_value = "http://localhost:3000")]
-        node: String,
+        #[arg(short, long)]
+        file: Option<String>,
+        #[arg(short, long)]
+        node: Option<String>,
     },
 
     // ── Basic Transactions ─────────────────────────────────────────────────
 
     /// Send QUA to an address.
     Send {
-        #[arg(short, long, default_value = "wallet.json")]
-        wallet: String,
+        #[arg(short, long)]
+        wallet: Option<String>,
         /// Recipient address
         #[arg(long)]
         to: String,
@@ -132,15 +187,15 @@ enum Commands {
         /// Fee in QUA
         #[arg(long, default_value = "0.001")]
         fee: f64,
-        #[arg(short, long, default_value = "http://localhost:3000")]
-        node: String,
+        #[arg(short, long)]
+        node: Option<String>,
     },
 
     /// Send QUA with an attached data payload (AI agent data provenance).
     /// The payload is cryptographically bound to the transaction signature.
     SendWithData {
-        #[arg(short, long, default_value = "wallet.json")]
-        wallet: String,
+        #[arg(short, long)]
+        wallet: Option<String>,
         #[arg(long)]
         to: String,
         #[arg(long)]
@@ -150,8 +205,8 @@ enum Commands {
         /// Data payload (UTF-8 string, e.g. JSON). Included in the tx signature.
         #[arg(long)]
         data: String,
-        #[arg(short, long, default_value = "http://localhost:3000")]
-        node: String,
+        #[arg(short, long)]
+        node: Option<String>,
     },
 
     // ── Staking / BFT Validator ────────────────────────────────────────────
@@ -159,26 +214,26 @@ enum Commands {
     /// Register as a BFT validator by staking QUA.
     /// Your wallet's Falcon-512 public key is used for BFT signing.
     Stake {
-        #[arg(short, long, default_value = "wallet.json")]
-        wallet: String,
+        #[arg(short, long)]
+        wallet: Option<String>,
         /// Amount of QUA to stake (minimum recommended: 100000)
         #[arg(long)]
         amount: f64,
         #[arg(long, default_value = "0.01")]
         fee: f64,
-        #[arg(short, long, default_value = "http://localhost:3000")]
-        node: String,
+        #[arg(short, long)]
+        node: Option<String>,
     },
 
     /// Deregister as a BFT validator and begin the unbonding period.
     /// Staked QUA is locked for 2 epochs before it is returned to your balance.
     Unstake {
-        #[arg(short, long, default_value = "wallet.json")]
-        wallet: String,
+        #[arg(short, long)]
+        wallet: Option<String>,
         #[arg(long, default_value = "0.01")]
         fee: f64,
-        #[arg(short, long, default_value = "http://localhost:3000")]
-        node: String,
+        #[arg(short, long)]
+        node: Option<String>,
     },
 
     // ── Native Smart Contracts ─────────────────────────────────────────────
@@ -195,8 +250,8 @@ enum Commands {
     ///   sha3sum output.dat → 3a7f...
     ///   quanta-wallet deploy-escrow --beneficiary <WORKER> --secret-hash 3a7f... --amount 5.0
     DeployEscrow {
-        #[arg(short, long, default_value = "wallet.json")]
-        wallet: String,
+        #[arg(short, long)]
+        wallet: Option<String>,
         /// The worker agent's address that will receive funds upon claim
         #[arg(long)]
         beneficiary: String,
@@ -211,8 +266,8 @@ enum Commands {
         /// Block height after which the deployer can reclaim funds (0 = no refund deadline)
         #[arg(long, default_value = "0")]
         refund_height: u64,
-        #[arg(short, long, default_value = "http://localhost:3000")]
-        node: String,
+        #[arg(short, long)]
+        node: Option<String>,
     },
 
     /// Claim funds from an Escrow contract by providing the preimage.
@@ -221,8 +276,8 @@ enum Commands {
     /// whose SHA3-256 hash was committed in the escrow deployment. If correct,
     /// funds are atomically transferred to the beneficiary address.
     ClaimEscrow {
-        #[arg(short, long, default_value = "wallet.json")]
-        wallet: String,
+        #[arg(short, long)]
+        wallet: Option<String>,
         /// The escrow contract address (starts with 0xc_)
         #[arg(long)]
         contract: String,
@@ -231,14 +286,14 @@ enum Commands {
         preimage: String,
         #[arg(long, default_value = "0.001")]
         fee: f64,
-        #[arg(short, long, default_value = "http://localhost:3000")]
-        node: String,
+        #[arg(short, long)]
+        node: Option<String>,
     },
 
     /// Generic contract call — invoke any method on any deployed native contract.
     ContractCall {
-        #[arg(short, long, default_value = "wallet.json")]
-        wallet: String,
+        #[arg(short, long)]
+        wallet: Option<String>,
         /// Contract address (starts with 0xc_)
         #[arg(long)]
         contract: String,
@@ -250,8 +305,8 @@ enum Commands {
         args: String,
         #[arg(long, default_value = "0.001")]
         fee: f64,
-        #[arg(short, long, default_value = "http://localhost:3000")]
-        node: String,
+        #[arg(short, long)]
+        node: Option<String>,
     },
 
     // ── Treasury Multisig ──────────────────────────────────────────────────
@@ -273,8 +328,8 @@ enum Commands {
     TreasuryInfo {
         #[arg(long, default_value = "treasury_setup.json")]
         setup: String,
-        #[arg(short, long, default_value = "http://localhost:3000")]
-        node: String,
+        #[arg(short, long)]
+        node: Option<String>,
     },
 
     /// Propose a treasury spend (creates unsigned proposal JSON).
@@ -309,8 +364,8 @@ enum Commands {
     TreasuryBroadcast {
         #[arg(long, default_value = "proposal.json")]
         proposal: String,
-        #[arg(short, long, default_value = "http://localhost:3000")]
-        node: String,
+        #[arg(short, long)]
+        node: Option<String>,
     },
 }
 
@@ -324,9 +379,31 @@ async fn main() {
 
     match cli.command {
 
+        Commands::Config { action, key, value } => {
+            let mut cfg = load_config();
+            if action == "get" {
+                println!("Current CLI Configuration:");
+                println!("  node   = {}", cfg.node.as_deref().unwrap_or("not set (default: http://localhost:3000)"));
+                println!("  wallet = {}", cfg.wallet.as_deref().unwrap_or("not set (default: wallet.json)"));
+            } else if action == "set" {
+                let k = key.unwrap_or_else(|| die("Missing config key (use 'node' or 'wallet')"));
+                let v = value.unwrap_or_else(|| die("Missing config value"));
+                match k.as_str() {
+                    "node" => cfg.node = Some(v.clone()),
+                    "wallet" => cfg.wallet = Some(v.clone()),
+                    _ => die(&format!("Unknown config key: {}", k)),
+                }
+                save_config(&cfg);
+                println!("Config updated: {} = {}", k, v);
+            } else {
+                die("Unknown config action (use 'set' or 'get')");
+            }
+        }
+
         // ── Wallet creation ──────────────────────────────────────────────
 
         Commands::New { file, accounts } => {
+            let file = resolve_wallet(file);
             let mut wallet = HDWallet::new();
             for i in 0..accounts {
                 wallet.generate_account(Some(format!("Account {}", i)));
@@ -341,6 +418,7 @@ async fn main() {
         }
 
         Commands::Restore { file, accounts } => {
+            let file = resolve_wallet(file);
             println!("Enter your 24-word mnemonic phrase (input hidden):");
             let mnemonic = rpassword::read_password().expect("Failed to read mnemonic");
             let mnemonic = mnemonic.trim().to_string();
@@ -369,6 +447,7 @@ async fn main() {
         }
 
         Commands::NewRaw { file } => {
+            let file = resolve_wallet(file);
             println!("\n  NOTE: Raw wallets have NO recovery phrase.");
             println!("  If you lose this file, your funds are unrecoverable.");
             println!("  Consider `quanta-wallet new` (HD wallet) for regular use.\n");
@@ -381,6 +460,7 @@ async fn main() {
         }
 
         Commands::Address { file } => {
+            let file = resolve_wallet(file);
             match try_load_wallet(&file) {
                 WalletKind::Hd(w)  => {
                     for acc in &w.accounts {
@@ -393,6 +473,7 @@ async fn main() {
         }
 
         Commands::ShowMnemonic { file } => {
+            let file = resolve_wallet(file);
             match try_load_wallet(&file) {
                 WalletKind::Hd(w) => {
                     eprintln!("\n  ⚠  KEEP THIS SECRET — anyone with this phrase controls your funds.\n");
@@ -408,6 +489,7 @@ async fn main() {
         }
 
         Commands::ExportValidator { wallet, out } => {
+            let wallet = resolve_wallet(wallet);
             let kp = load_keypair_for_signing(&wallet);
             let public_key_hex = hex::encode(&kp.keypair.public_key);
             
@@ -425,6 +507,7 @@ async fn main() {
         }
 
         Commands::ExportPrivateKey { file } => {
+            let file = resolve_wallet(file);
             let kp = load_keypair_for_signing(&file);
             eprintln!("\n  ⚠  KEEP THIS SECRET — anyone with the private key controls your funds.\n");
             println!("  Public Key (Hex) : {}", hex::encode(&kp.keypair.public_key));
@@ -433,6 +516,8 @@ async fn main() {
         }
 
         Commands::Info { file, node } => {
+            let file = resolve_wallet(file);
+            let node = resolve_node(node);
             match try_load_wallet(&file) {
                 WalletKind::Hd(w) => {
                     println!("\n HD Wallet ({} account(s))", w.accounts.len());
@@ -452,6 +537,8 @@ async fn main() {
         // ── Basic transactions ────────────────────────────────────────────
 
         Commands::Send { wallet, to, amount, fee, node } => {
+            let wallet = resolve_wallet(wallet);
+            let node = resolve_node(node);
             let kp = load_keypair_for_signing(&wallet);
             let nonce = fetch_nonce(&node, &kp.address).await + 1;
             let tx = build_transfer(&kp, &to, amount, fee, nonce, vec![]);
@@ -459,6 +546,8 @@ async fn main() {
         }
 
         Commands::SendWithData { wallet, to, amount, fee, data, node } => {
+            let wallet = resolve_wallet(wallet);
+            let node = resolve_node(node);
             let kp = load_keypair_for_signing(&wallet);
             let nonce = fetch_nonce(&node, &kp.address).await + 1;
             let data_len = data.len();
@@ -470,6 +559,8 @@ async fn main() {
         // ── Staking ───────────────────────────────────────────────────────
 
         Commands::Stake { wallet, amount, fee, node } => {
+            let wallet = resolve_wallet(wallet);
+            let node = resolve_node(node);
             let kp = load_keypair_for_signing(&wallet);
             let nonce = fetch_nonce(&node, &kp.address).await + 1;
             let mut tx = Transaction {
@@ -502,6 +593,8 @@ async fn main() {
         }
 
         Commands::Unstake { wallet, fee, node } => {
+            let wallet = resolve_wallet(wallet);
+            let node = resolve_node(node);
             let kp = load_keypair_for_signing(&wallet);
             let nonce = fetch_nonce(&node, &kp.address).await + 1;
             let mut tx = Transaction {
@@ -535,6 +628,8 @@ async fn main() {
         // ── Native Contracts ──────────────────────────────────────────────
 
         Commands::DeployEscrow { wallet, beneficiary, secret_hash, amount, fee, refund_height, node } => {
+            let wallet = resolve_wallet(wallet);
+            let node = resolve_node(node);
             if secret_hash.len() != 64 {
                 die("--secret-hash must be a 64-character hex string (SHA3-256 output).");
             }
@@ -588,6 +683,8 @@ async fn main() {
         }
 
         Commands::ClaimEscrow { wallet, contract, preimage, fee, node } => {
+            let wallet = resolve_wallet(wallet);
+            let node = resolve_node(node);
             let kp = load_keypair_for_signing(&wallet);
             let nonce = fetch_nonce(&node, &kp.address).await + 1;
 
@@ -631,6 +728,8 @@ async fn main() {
         }
 
         Commands::ContractCall { wallet, contract, method, args, fee, node } => {
+            let wallet = resolve_wallet(wallet);
+            let node = resolve_node(node);
             let kp = load_keypair_for_signing(&wallet);
             let nonce = fetch_nonce(&node, &kp.address).await + 1;
 
@@ -705,6 +804,7 @@ async fn main() {
         }
 
         Commands::TreasuryInfo { setup, node } => {
+            let node = resolve_node(node);
             let json = std::fs::read_to_string(&setup).expect("Could not read treasury setup");
             let ts = TreasuryMultisigV2::from_json(&json).expect("Invalid treasury setup JSON");
             let bal = fetch_balance(&node, &ts.address).await;
@@ -750,6 +850,7 @@ async fn main() {
         }
 
         Commands::TreasuryBroadcast { proposal, node } => {
+            let node = resolve_node(node);
             let json = std::fs::read_to_string(&proposal).expect("Could not read proposal");
             let prop = MultiSigTransaction::from_json(&json).expect("Invalid proposal JSON");
             let (col, req) = prop.signature_progress();
