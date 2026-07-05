@@ -296,21 +296,44 @@ pub async fn run_bft_proposer(
             Duration::from_millis(500),
         ).expect("Valid default config");
         
-        // 6. SpawnHandle & Terminator
         let spawn_handle = QuantaSpawnHandle;
-        let (_terminator_tx, terminator_rx) = futures::channel::oneshot::channel();
+        let (terminator_tx, terminator_rx) = futures::channel::oneshot::channel();
         let terminator = Terminator::create_root(terminator_rx, "QuantaBFT");
 
         info!("BFT Proposer: running aleph_bft::run_session (session_id={}, height={})…", session_id, current_height);
         
-        run_session(
-            config,
-            local_io,
-            network_bridge,
-            keychain,
-            spawn_handle,
-            terminator,
-        ).await;
+        let target_height_for_next_session = (session_id + 1) * SESSION_LENGTH;
+        let bc_for_monitor = blockchain.clone();
+        
+        let mut session_task = tokio::spawn(async move {
+            run_session(
+                config,
+                local_io,
+                network_bridge,
+                keychain,
+                spawn_handle,
+                terminator,
+            ).await;
+        });
+
+        let mut terminator_tx_opt = Some(terminator_tx);
+        loop {
+            tokio::select! {
+                _ = &mut session_task => {
+                    // Session exited naturally
+                    break;
+                }
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(500)) => {
+                    let height = bc_for_monitor.read().await.get_height();
+                    if height >= target_height_for_next_session {
+                        if let Some(tx) = terminator_tx_opt.take() {
+                            info!("BFT Proposer: reached session boundary (height {} >= {}). Terminating session {}...", height, target_height_for_next_session, session_id);
+                            let _ = tx.send(());
+                        }
+                    }
+                }
+            }
+        }
 
         // Session ended (hit max_round or error).
         // Determine if a new session is warranted by checking chain height.
