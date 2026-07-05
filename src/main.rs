@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use storage::BlockchainStorage;
 use tokio::sync::RwLock;
-use tracing_subscriber;
+use tracing_subscriber::{self, EnvFilter};
 
 // CONSENSUS CONSTANTS: 1 QUA = 1_000_000 microunits
 const MICROUNITS_PER_QUA: u64 = 1_000_000;
@@ -306,6 +306,10 @@ async fn main() {
 
             // Initialize console logging
             tracing_subscriber::fmt()
+                .with_env_filter(
+                    EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| EnvFilter::new("info,aleph_bft=error")),
+                )
                 .with_target(false)
                 .with_level(true)
                 .init();
@@ -778,6 +782,10 @@ async fn main() {
         Commands::NewWallet { file } => {
             // Initialize console logging for non-start commands
             tracing_subscriber::fmt()
+                .with_env_filter(
+                    EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| EnvFilter::new("info,aleph_bft=error")),
+                )
                 .with_target(false)
                 .with_level(true)
                 .try_init()
