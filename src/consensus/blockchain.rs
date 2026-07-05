@@ -3083,13 +3083,13 @@ mod tests {
     fn test_fee_distribution_no_rounding_loss() {
         let total_fees: u64 = 1_000_000; // 1 QUA in microunits
 
-        let fee_burned = (total_fees * FEE_BURN_PERCENT) / 100; // 700_000
+        let fee_burned = (total_fees * FEE_BURN_PERCENT) / 100; // 500_000
         let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100; // 200_000
-        let fee_to_miner = total_fees - fee_burned - fee_to_treasury; // 100_000 (remainder)
+        let fee_to_miner = total_fees - fee_burned - fee_to_treasury; // 300_000 (remainder)
 
-        assert_eq!(fee_burned, 700_000, "70% should be burned");
+        assert_eq!(fee_burned, 500_000, "50% should be burned");
         assert_eq!(fee_to_treasury, 200_000, "20% goes to treasury");
-        assert_eq!(fee_to_miner, 100_000, "10% to miner (no rounding loss)");
+        assert_eq!(fee_to_miner, 300_000, "30% to miner (no rounding loss)");
         assert_eq!(
             fee_burned + fee_to_treasury + fee_to_miner,
             total_fees,
@@ -3121,11 +3121,11 @@ mod tests {
     fn test_block_reward_treasury_split() {
         let reward: u64 = 100_000_000; // 100 QUA Year-1 reward
 
-        let treasury_allocation = (reward * TREASURY_ALLOCATION_PERCENT) / 100; // 5 QUA
-        let miner_reward = reward - treasury_allocation; // 95 QUA
+        let treasury_allocation = (reward * TREASURY_ALLOCATION_PERCENT) / 100; // 8 QUA
+        let miner_reward = reward - treasury_allocation; // 92 QUA
 
-        assert_eq!(treasury_allocation, 5_000_000, "5% of 100 QUA = 5 QUA");
-        assert_eq!(miner_reward, 95_000_000, "95% of 100 QUA = 95 QUA");
+        assert_eq!(treasury_allocation, 8_000_000, "8% of 100 QUA = 8 QUA");
+        assert_eq!(miner_reward, 92_000_000, "92% of 100 QUA = 92 QUA");
         assert_eq!(treasury_allocation + miner_reward, reward, "no value lost");
     }
 

@@ -32,11 +32,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Remove rust-toolchain.toml
+        run: rm -f rust-toolchain.toml
 
-      - name: Add target
-        run: rustup target add ${{ matrix.target }} --toolchain 1.85.0
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.85.0
+          targets: ${{ matrix.target }}
 
       - name: Build
         run: cargo build --release --bin quanta-wallet --target ${{ matrix.target }}
