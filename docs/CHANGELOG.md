@@ -9,6 +9,21 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.1.0-alpha] — 2026-07-05
+
+### Added
+- **JSON-RPC Guide**: Added a comprehensive guide on using the JSON-RPC endpoints.
+
+### Fixed
+- **BFT Session Termination**: Replaced `return None` with an async wait loop in AlephBFT `get_data` to ensure the consensus session isn't prematurely killed.
+- **Backup Deletion**: Fixed an issue causing "Backup state behind" errors by exclusively wiping BFT backups on session transitions instead of node restarts.
+- **BFT Start Race Condition**: Added a sync-wait loop ensuring a node finishes downloading missing blocks before initiating an AlephBFT session, stopping older sessions from flooding the network.
+- **Network Partitioning Cascades**: Reduced peer ban penalty for connection failures from 24 hours to 60 seconds to prevent nodes from permanently banning each other during sequential rolling restarts.
+- **Database Pruning**: Fixed underlying mechanics behind database pruning.
+
+### Removed
+- **Dead Code**: Cleaned up significant dead code and orphaned modules across the consensus, network, core, and RPC implementations.
+
 ---
 
 ## [2.0.2-alpha] — 2026-07-04

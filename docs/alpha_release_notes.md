@@ -1,13 +1,29 @@
-# QuantaChain Testnet — V2 Release (v2.0.2-alpha)
+# QuantaChain Testnet — V2 Release (v2.1.0-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.0.2-alpha — TESTNET WIPE REQUIRED (2026-07-04)**
+> **v2.1.0-alpha — TESTNET WIPE REQUIRED (2026-07-05)**
 > Genesis configuration updated for security and network magic bumped to `Q2T9`. 
 > All nodes MUST delete their `quanta_data` (and `quanta_data_v2`) folders before restarting.
 > A new genesis hash will be generated upon startup.
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
+
+---
+
+## What Changed in v2.1.0-alpha
+
+- **Consensus & Network Resilience**
+  - **Fixed BFT session termination**: Replaced `return None` with an async wait in `get_data` to ensure the session remains active while waiting for blocks.
+  - **Fixed 'Backup state behind' errors**: BFT backups are now exclusively wiped during actual session transitions rather than upon restarts.
+  - **Sync-Wait Loop added**: Nodes will now fully sync the blockchain before initializing BFT sessions, preventing old-session network spam.
+  - **Partition Cascade fixed**: Lowered the aggressive connection-failure peer ban duration from 24 hours to 60 seconds, preventing network halt during sequential node restarts.
+- **Documentation & DX**
+  - Refactored README, updated badges, and synced GitBook with V2 CLI/API updates.
+  - Added a comprehensive JSON-RPC guide.
+- **Codebase Optimization**
+  - Cleaned up extensive dead code across the consensus, network, core, and RPC modules.
+  - Fixed database pruning mechanics.
 
 ---
 

@@ -78,6 +78,7 @@ impl DataProvider for QuantaDataProvider {
         // BUILD BLOCK TEMPLATE
         // -----------------------------------------------------------------------
         let bc = self.blockchain.read().await;
+        let elapsed = chrono::Utc::now().timestamp().saturating_sub(self.last_finalized_ts.load(Ordering::Acquire));
         match bc.create_block_template(self.my_address.clone()) {
             Ok(block) => {
                 tracing::info!(
