@@ -4,7 +4,11 @@
 
 use chrono::Utc;
 use clap::{Parser, Subcommand};
-use quanta::core::contracts::{EscrowClaimArgs, EscrowInitArgs, NativeContracts, TEMPLATE_ESCROW};
+use quanta::core::contracts::{
+    AgentBidInitArgs, AgentBidSelectArgs, AgentBidSubmitArgs, AgentJobClaimArgs, AgentJobInitArgs,
+    EscrowClaimArgs, EscrowInitArgs, NativeContracts, TEMPLATE_AGENT_BID, TEMPLATE_AGENT_JOB,
+    TEMPLATE_ESCROW,
+};
 use quanta::core::transaction::{SignatureScheme, Transaction, TransactionType};
 #[allow(deprecated)]
 use quanta::crypto::{HDWallet, MultiSigTransaction, QuantumWallet, TreasuryMultisigV2};
@@ -287,6 +291,101 @@ enum Commands {
         /// The raw preimage in hex (the actual task output hash, not its SHA3)
         #[arg(long)]
         preimage: String,
+        #[arg(long, default_value = "0.001")]
+        fee: f64,
+        #[arg(short, long)]
+        node: Option<String>,
+    },
+
+    /// Deploy an Agent Job contract to hire a specific AI worker directly.
+    DeployAgentJob {
+        #[arg(short, long)]
+        wallet: Option<String>,
+        /// The worker AI's address
+        #[arg(long)]
+        worker: String,
+        /// IPFS CID or SHA3-256 hash of the task requirements
+        #[arg(long)]
+        task_hash: String,
+        /// QUA to lock for the job
+        #[arg(long)]
+        amount: f64,
+        /// Block height deadline for the task to be completed
+        #[arg(long)]
+        deadline_height: u64,
+        #[arg(long, default_value = "0.01")]
+        fee: f64,
+        #[arg(short, long)]
+        node: Option<String>,
+    },
+
+    /// Claim funds from an Agent Job contract after completing the work.
+    ClaimAgentJob {
+        #[arg(short, long)]
+        wallet: Option<String>,
+        /// The agent job contract address
+        #[arg(long)]
+        contract: String,
+        /// IPFS CID or SHA3-256 hash of the completed work/results
+        #[arg(long)]
+        result_hash: String,
+        #[arg(long, default_value = "0.001")]
+        fee: f64,
+        #[arg(short, long)]
+        node: Option<String>,
+    },
+
+    /// Deploy an Agent Bid contract (open auction) for AI agents to compete for a task.
+    DeployAgentBid {
+        #[arg(short, long)]
+        wallet: Option<String>,
+        /// IPFS CID or SHA3-256 hash of the task requirements
+        #[arg(long)]
+        task_hash: String,
+        /// Max budget in QUA to lock
+        #[arg(long)]
+        amount: f64,
+        /// Block height when bidding closes
+        #[arg(long)]
+        close_height: u64,
+        /// Block height when employer can refund if no suitable bids
+        #[arg(long)]
+        refund_height: u64,
+        #[arg(long, default_value = "0.01")]
+        fee: f64,
+        #[arg(short, long)]
+        node: Option<String>,
+    },
+
+    /// Submit a bid for an open Agent Bid contract.
+    SubmitAgentBid {
+        #[arg(short, long)]
+        wallet: Option<String>,
+        /// The agent bid contract address
+        #[arg(long)]
+        contract: String,
+        /// Bid price in QUA
+        #[arg(long)]
+        price: f64,
+        /// IPFS CID or hash describing the proposed solution/credentials
+        #[arg(long)]
+        proposal_hash: String,
+        #[arg(long, default_value = "0.001")]
+        fee: f64,
+        #[arg(short, long)]
+        node: Option<String>,
+    },
+
+    /// Select the winning AI agent for an Agent Bid contract.
+    SelectAgentBid {
+        #[arg(short, long)]
+        wallet: Option<String>,
+        /// The agent bid contract address
+        #[arg(long)]
+        contract: String,
+        /// The chosen worker AI's address
+        #[arg(long)]
+        winner: String,
         #[arg(long, default_value = "0.001")]
         fee: f64,
         #[arg(short, long)]
@@ -801,6 +900,268 @@ async fn main() {
                     );
                 }
                 Err(e) => die(&format!("Claim failed: {}", e)),
+            }
+        }
+
+        Commands::DeployAgentJob {
+            wallet,
+            worker,
+            task_hash,
+            amount,
+            deadline_height,
+            fee,
+            node,
+        } => {
+            let wallet = resolve_wallet(wallet);
+            let node = resolve_node(node);
+            let kp = load_keypair_for_signing(&wallet);
+            let nonce = fetch_nonce(&node, &kp.address).await + 1;
+
+            let init_args = serde_json::to_vec(&AgentJobInitArgs {
+                worker: worker.clone(),
+                task_hash: task_hash.clone(),
+                deadline_height,
+            })
+            .expect("Failed to encode init args");
+
+            let mut tx = Transaction {
+                sender: kp.address.clone(),
+                recipient: "".to_string(), // Contract deployment has no recipient
+                amount: qua_to_u(amount),
+                timestamp: Utc::now().timestamp(),
+                signature: vec![],
+                public_key: kp.keypair.public_key.clone(),
+                fee: qua_to_u(fee),
+                nonce,
+                lock_time: 0,
+                tx_type: TransactionType::ContractDeploy {
+                    template_id: TEMPLATE_AGENT_JOB,
+                    init_args,
+                },
+                sig_scheme: SignatureScheme::Falcon512,
+                network_id: 0,
+                payload: vec![],
+            };
+            let sig_bytes = tx.get_signing_bytes();
+            tx.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
+
+            match broadcast_tx(&node, &tx).await {
+                Ok(hash) => {
+                    let expected_addr = NativeContracts::generate_address(&tx.hash());
+                    println!("\n Agent Job Contract deployed!");
+                    println!("  TX Hash   : {}", hash);
+                    println!("  Contract  : {}", expected_addr);
+                    println!("  Worker    : {}", worker);
+                    println!("  Locked    : {:.6} QUA", amount);
+                }
+                Err(e) => die(&format!("Deploy failed: {}", e)),
+            }
+        }
+
+        Commands::ClaimAgentJob {
+            wallet,
+            contract,
+            result_hash,
+            fee,
+            node,
+        } => {
+            let wallet = resolve_wallet(wallet);
+            let node = resolve_node(node);
+            let kp = load_keypair_for_signing(&wallet);
+            let nonce = fetch_nonce(&node, &kp.address).await + 1;
+
+            let call_args = serde_json::to_vec(&AgentJobClaimArgs {
+                result_hash: result_hash.clone(),
+            })
+            .expect("Failed to encode claim args");
+
+            let mut tx = Transaction {
+                sender: kp.address.clone(),
+                recipient: contract.clone(),
+                amount: 0,
+                timestamp: Utc::now().timestamp(),
+                signature: vec![],
+                public_key: kp.keypair.public_key.clone(),
+                fee: qua_to_u(fee),
+                nonce,
+                lock_time: 0,
+                tx_type: TransactionType::ContractCall {
+                    contract_address: contract.clone(),
+                    method: "claim".to_string(),
+                    call_args,
+                },
+                sig_scheme: SignatureScheme::Falcon512,
+                network_id: 0,
+                payload: vec![],
+            };
+            let sig_bytes = tx.get_signing_bytes();
+            tx.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
+
+            match broadcast_tx(&node, &tx).await {
+                Ok(hash) => {
+                    println!("\n Agent Job claim submitted!");
+                    println!("  TX Hash   : {}", hash);
+                    println!("  Contract  : {}", contract);
+                    println!("  Result    : {}", result_hash);
+                }
+                Err(e) => die(&format!("Claim failed: {}", e)),
+            }
+        }
+
+        Commands::DeployAgentBid {
+            wallet,
+            task_hash,
+            amount,
+            close_height,
+            refund_height,
+            fee,
+            node,
+        } => {
+            let wallet = resolve_wallet(wallet);
+            let node = resolve_node(node);
+            let kp = load_keypair_for_signing(&wallet);
+            let nonce = fetch_nonce(&node, &kp.address).await + 1;
+
+            let init_args = serde_json::to_vec(&AgentBidInitArgs {
+                task_hash: task_hash.clone(),
+                close_height,
+                refund_height,
+            })
+            .expect("Failed to encode init args");
+
+            let mut tx = Transaction {
+                sender: kp.address.clone(),
+                recipient: "".to_string(),
+                amount: qua_to_u(amount),
+                timestamp: Utc::now().timestamp(),
+                signature: vec![],
+                public_key: kp.keypair.public_key.clone(),
+                fee: qua_to_u(fee),
+                nonce,
+                lock_time: 0,
+                tx_type: TransactionType::ContractDeploy {
+                    template_id: TEMPLATE_AGENT_BID,
+                    init_args,
+                },
+                sig_scheme: SignatureScheme::Falcon512,
+                network_id: 0,
+                payload: vec![],
+            };
+            let sig_bytes = tx.get_signing_bytes();
+            tx.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
+
+            match broadcast_tx(&node, &tx).await {
+                Ok(hash) => {
+                    let expected_addr = NativeContracts::generate_address(&tx.hash());
+                    println!("\n Agent Bid Contract deployed!");
+                    println!("  TX Hash   : {}", hash);
+                    println!("  Contract  : {}", expected_addr);
+                    println!("  Task Hash : {}", task_hash);
+                    println!("  Budget    : {:.6} QUA", amount);
+                }
+                Err(e) => die(&format!("Deploy failed: {}", e)),
+            }
+        }
+
+        Commands::SubmitAgentBid {
+            wallet,
+            contract,
+            price,
+            proposal_hash,
+            fee,
+            node,
+        } => {
+            let wallet = resolve_wallet(wallet);
+            let node = resolve_node(node);
+            let kp = load_keypair_for_signing(&wallet);
+            let nonce = fetch_nonce(&node, &kp.address).await + 1;
+
+            let call_args = serde_json::to_vec(&AgentBidSubmitArgs {
+                bid_price: qua_to_u(price),
+                proposal_hash: proposal_hash.clone(),
+            })
+            .expect("Failed to encode submit args");
+
+            let mut tx = Transaction {
+                sender: kp.address.clone(),
+                recipient: contract.clone(),
+                amount: 0,
+                timestamp: Utc::now().timestamp(),
+                signature: vec![],
+                public_key: kp.keypair.public_key.clone(),
+                fee: qua_to_u(fee),
+                nonce,
+                lock_time: 0,
+                tx_type: TransactionType::ContractCall {
+                    contract_address: contract.clone(),
+                    method: "submit_bid".to_string(),
+                    call_args,
+                },
+                sig_scheme: SignatureScheme::Falcon512,
+                network_id: 0,
+                payload: vec![],
+            };
+            let sig_bytes = tx.get_signing_bytes();
+            tx.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
+
+            match broadcast_tx(&node, &tx).await {
+                Ok(hash) => {
+                    println!("\n Bid submitted to Agent Bid contract!");
+                    println!("  TX Hash   : {}", hash);
+                    println!("  Contract  : {}", contract);
+                    println!("  Price     : {:.6} QUA", price);
+                }
+                Err(e) => die(&format!("Bid failed: {}", e)),
+            }
+        }
+
+        Commands::SelectAgentBid {
+            wallet,
+            contract,
+            winner,
+            fee,
+            node,
+        } => {
+            let wallet = resolve_wallet(wallet);
+            let node = resolve_node(node);
+            let kp = load_keypair_for_signing(&wallet);
+            let nonce = fetch_nonce(&node, &kp.address).await + 1;
+
+            let call_args = serde_json::to_vec(&AgentBidSelectArgs {
+                winner_address: winner.clone(),
+            })
+            .expect("Failed to encode select args");
+
+            let mut tx = Transaction {
+                sender: kp.address.clone(),
+                recipient: contract.clone(),
+                amount: 0,
+                timestamp: Utc::now().timestamp(),
+                signature: vec![],
+                public_key: kp.keypair.public_key.clone(),
+                fee: qua_to_u(fee),
+                nonce,
+                lock_time: 0,
+                tx_type: TransactionType::ContractCall {
+                    contract_address: contract.clone(),
+                    method: "select_winner".to_string(),
+                    call_args,
+                },
+                sig_scheme: SignatureScheme::Falcon512,
+                network_id: 0,
+                payload: vec![],
+            };
+            let sig_bytes = tx.get_signing_bytes();
+            tx.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
+
+            match broadcast_tx(&node, &tx).await {
+                Ok(hash) => {
+                    println!("\n Agent Bid winner selected!");
+                    println!("  TX Hash   : {}", hash);
+                    println!("  Contract  : {}", contract);
+                    println!("  Winner    : {}", winner);
+                }
+                Err(e) => die(&format!("Select winner failed: {}", e)),
             }
         }
 
