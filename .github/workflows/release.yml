@@ -34,8 +34,9 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
+
+      - name: Add target
+        run: rustup target add ${{ matrix.target }}
 
       - name: Build
         run: cargo build --release --bin quanta-wallet --target ${{ matrix.target }}
