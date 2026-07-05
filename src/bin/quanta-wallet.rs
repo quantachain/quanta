@@ -428,7 +428,7 @@ async fn main() {
             let kp = load_keypair_for_signing(&file);
             eprintln!("\n  ⚠  KEEP THIS SECRET — anyone with the private key controls your funds.\n");
             println!("  Public Key (Hex) : {}", hex::encode(&kp.keypair.public_key));
-            println!("  Private Key (Hex): {}", hex::encode(&kp.keypair.secret_key));
+            println!("  Private Key (Hex): {}", hex::encode(kp.keypair.secret_key_bytes()));
             eprintln!("\n  Paste these into the wallet extension → Import Wallet → Private Key tab.");
         }
 
