@@ -1024,7 +1024,7 @@ async fn main() {
 
             let init_args = serde_json::to_vec(&AgentBidInitArgs {
                 task_hash: task_hash.clone(),
-                close_height,
+                bid_close_height: close_height,
                 refund_height,
             })
             .expect("Failed to encode init args");
@@ -1077,8 +1077,8 @@ async fn main() {
             let nonce = fetch_nonce(&node, &kp.address).await + 1;
 
             let call_args = serde_json::to_vec(&AgentBidSubmitArgs {
-                bid_price: qua_to_u(price),
-                proposal_hash: proposal_hash.clone(),
+                price: qua_to_u(price),
+                result_hash: proposal_hash.clone(),
             })
             .expect("Failed to encode submit args");
 
@@ -1128,7 +1128,7 @@ async fn main() {
             let nonce = fetch_nonce(&node, &kp.address).await + 1;
 
             let call_args = serde_json::to_vec(&AgentBidSelectArgs {
-                winner_address: winner.clone(),
+                winner: winner.clone(),
             })
             .expect("Failed to encode select args");
 
