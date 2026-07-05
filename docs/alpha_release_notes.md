@@ -3,12 +3,22 @@
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
 > **v2.1.0-alpha — SOFT UPDATE (2026-07-05)**
-> **NO WIPE REQUIRED.** The blockchain data format and network magic (`Q2T9`) have not changed.
+> **NO WIPE REQUIRED.** The blockchain data format and network magic (`Q2T9`) have not changed. DO NOT delete your `quanta_data` folder!
 > 
-> **How to update:**
-> 1. Pull the new Docker image (`docker-compose pull`).
-> 2. Restart your node (`docker-compose down && docker-compose up -d`).
-> 3. **DO NOT** delete your `quanta_data` folder; your node will resume instantly.
+> **How to update and start your node:**
+> 
+> ```bash
+> docker pull xd637/quanta-node:latest
+> 
+> docker run -d \
+>   --name quanta-validator \
+>   --restart always \
+>   --network host \
+>   -v ~/quanta_data_v2:/home/quanta/quanta_data \
+>   -e QUANTA_WALLET_PASSWORD="YOUR_PASSWORD_HERE" \
+>   xd637/quanta-node:latest \
+>   quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap 34.87.128.33:8333
+> ```
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
 
