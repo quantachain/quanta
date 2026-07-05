@@ -19,12 +19,9 @@
 /// - `BftVoteCollector`         — accumulates prevotes/precommits during live
 ///                                consensus (used by the validator node).
 /// - `BftMessage` types         — wire messages exchanged over P2P.
-
 use std::collections::HashMap;
 
-use crate::consensus::authorities::{
-    resolve_committee_keys, EPOCH_SIZE, MAX_COMMITTEE_SIZE,
-};
+use crate::consensus::authorities::{resolve_committee_keys, EPOCH_SIZE, MAX_COMMITTEE_SIZE};
 use crate::core::block::Block;
 use crate::core::transaction::AccountState;
 use crate::crypto::{verify_signature_strict, FalconKeypair};
@@ -73,11 +70,7 @@ pub enum VoteKind {
 /// 5. The genesis block (height 0) always passes without signatures.
 ///
 /// Returns `true` if the certificate is valid, `false` otherwise.
-pub fn verify_bft_certificate(
-    block: &Block,
-    committee: &[String],
-    state: &AccountState,
-) -> bool {
+pub fn verify_bft_certificate(block: &Block, committee: &[String], state: &AccountState) -> bool {
     // Genesis block is always valid (no BFT certificate required).
     if block.index == 0 {
         return true;
@@ -106,21 +99,25 @@ pub fn verify_bft_certificate(
 
         tracing::warn!(
             "BFT verify block {}: only {} signatures, need {} (committee={})",
-            block.index, block.bft_signatures.len(), threshold, committee_size
+            block.index,
+            block.bft_signatures.len(),
+            threshold,
+            committee_size
         );
         return false;
     }
 
     // Signer/signature arrays must be parallel.
     if block.bft_signatures.len() != block.bft_signers.len() {
-        tracing::warn!("BFT verify block {}: sig/signer count mismatch", block.index);
+        tracing::warn!(
+            "BFT verify block {}: sig/signer count mismatch",
+            block.index
+        );
         return false;
     }
 
     // Pre-compute the payload all committee members must have signed.
     let payload = block.bft_signing_payload();
-
-
 
     let mut valid_count = 0usize;
     let mut seen_signers: std::collections::HashSet<&str> = std::collections::HashSet::new();
@@ -130,7 +127,8 @@ pub fn verify_bft_certificate(
         if !seen_signers.insert(signer.as_str()) {
             tracing::warn!(
                 "BFT verify block {}: duplicate signer {}",
-                block.index, signer
+                block.index,
+                signer
             );
             return false;
         }
@@ -139,7 +137,8 @@ pub fn verify_bft_certificate(
         if !committee.contains(signer) {
             tracing::warn!(
                 "BFT verify block {}: signer {} not in committee",
-                block.index, signer
+                block.index,
+                signer
             );
             return false;
         }
@@ -150,7 +149,8 @@ pub fn verify_bft_certificate(
             None => {
                 tracing::warn!(
                     "BFT verify block {}: no validator info for {}",
-                    block.index, signer
+                    block.index,
+                    signer
                 );
                 return false;
             }
@@ -160,7 +160,8 @@ pub fn verify_bft_certificate(
         if !verify_signature_strict(&payload, sig, pk_bytes) {
             tracing::warn!(
                 "BFT verify block {}: invalid Falcon-512 sig from {}",
-                block.index, signer
+                block.index,
+                signer
             );
             return false;
         }
@@ -171,14 +172,19 @@ pub fn verify_bft_certificate(
     if valid_count < threshold {
         tracing::warn!(
             "BFT verify block {}: only {} valid sigs, need {}",
-            block.index, valid_count, threshold
+            block.index,
+            valid_count,
+            threshold
         );
         return false;
     }
 
     tracing::debug!(
         "BFT verify block {}: certificate OK ({}/{} sigs, threshold={})",
-        block.index, valid_count, committee_size, threshold
+        block.index,
+        valid_count,
+        committee_size,
+        threshold
     );
     true
 }
@@ -191,8 +197,6 @@ pub fn verify_bft_certificate(
 pub fn bft_threshold(committee_size: usize) -> usize {
     (committee_size * 2) / 3 + 1
 }
-
-
 
 // ---------------------------------------------------------------------------
 // Unit tests
@@ -233,10 +237,7 @@ mod tests {
         committee.sort(); // match compute_epoch_committee sort order
 
         let genesis = Block::genesis();
-        let mut block = Block::new_bft(
-            1, vec![], genesis.hash.clone(), 0, 0,
-            committee[0].clone(),
-        );
+        let mut block = Block::new_bft(1, vec![], genesis.hash.clone(), 0, 0, committee[0].clone());
         block.state_root = "0".repeat(64);
         block.finalize_hash();
 
@@ -270,10 +271,7 @@ mod tests {
         committee.sort();
 
         let genesis = Block::genesis();
-        let mut block = Block::new_bft(
-            1, vec![], genesis.hash.clone(), 0, 0,
-            committee[0].clone(),
-        );
+        let mut block = Block::new_bft(1, vec![], genesis.hash.clone(), 0, 0, committee[0].clone());
         block.state_root = "0".repeat(64);
         block.finalize_hash();
 
@@ -289,10 +287,10 @@ mod tests {
 
     #[test]
     fn bft_threshold_values() {
-        assert_eq!(bft_threshold(1),  1);
-        assert_eq!(bft_threshold(3),  3);
-        assert_eq!(bft_threshold(4),  3);
-        assert_eq!(bft_threshold(7),  5);
+        assert_eq!(bft_threshold(1), 1);
+        assert_eq!(bft_threshold(3), 3);
+        assert_eq!(bft_threshold(4), 3);
+        assert_eq!(bft_threshold(7), 5);
         assert_eq!(bft_threshold(21), 15);
     }
 }

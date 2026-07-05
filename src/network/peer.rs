@@ -1,4 +1,6 @@
-use crate::network::protocol::{P2PMessage, serialize_message, deserialize_message, MAX_MESSAGE_SIZE};
+use crate::network::protocol::{
+    deserialize_message, serialize_message, P2PMessage, MAX_MESSAGE_SIZE,
+};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -41,10 +43,7 @@ pub struct Peer {
 
 impl Peer {
     /// Create a new peer connection
-    pub async fn new(
-        stream: TcpStream,
-        address: SocketAddr,
-    ) -> Result<Self, String> {
+    pub async fn new(stream: TcpStream, address: SocketAddr) -> Result<Self, String> {
         let (shutdown_tx, _) = mpsc::channel(1);
 
         let info = PeerInfo {
@@ -98,10 +97,7 @@ impl Peer {
 
     /// Receive a message from this peer with timeout
     pub async fn receive_message(&self) -> Result<P2PMessage, String> {
-        let result = timeout(
-            Duration::from_secs(120),
-            self.receive_message_internal()
-        ).await;
+        let result = timeout(Duration::from_secs(120), self.receive_message_internal()).await;
 
         match result {
             Ok(Ok(msg)) => {
@@ -120,8 +116,7 @@ impl Peer {
 
         // Read length prefix (4 bytes)
         let mut len_bytes = [0u8; 4];
-        read
-            .read_exact(&mut len_bytes)
+        read.read_exact(&mut len_bytes)
             .await
             .map_err(|e| format!("Failed to read message length: {}", e))?;
 
@@ -133,8 +128,7 @@ impl Peer {
 
         // Read message data
         let mut data = vec![0u8; len];
-        read
-            .read_exact(&mut data)
+        read.read_exact(&mut data)
             .await
             .map_err(|e| format!("Failed to read message data: {}", e))?;
 
@@ -143,7 +137,13 @@ impl Peer {
     }
 
     /// Update peer information after handshake
-    pub async fn update_info(&self, node_id: String, version: u32, height: u64, cumulative_work: u128) {
+    pub async fn update_info(
+        &self,
+        node_id: String,
+        version: u32,
+        height: u64,
+        cumulative_work: u128,
+    ) {
         let mut info = self.info.write().await;
         info.node_id = node_id;
         info.version = version;
@@ -180,7 +180,9 @@ impl Peer {
         }
         tracing::warn!(
             "Peer {} misbehavior score: {}/100 (+{})",
-            info.address, info.misbehavior_score, score
+            info.address,
+            info.misbehavior_score,
+            score
         );
         info.misbehavior_score >= 100
     }
@@ -204,7 +206,13 @@ impl Peer {
     }
 
     /// Perform handshake with peer
-    pub async fn handshake(&self, our_version: u32, our_height: u64, our_cumulative_work: u128, our_node_id: String) -> Result<(), String> {
+    pub async fn handshake(
+        &self,
+        our_version: u32,
+        our_height: u64,
+        our_cumulative_work: u128,
+        our_node_id: String,
+    ) -> Result<(), String> {
         // Send our version
         let version_msg = P2PMessage::Version {
             version: our_version,
@@ -218,8 +226,15 @@ impl Peer {
 
         // Wait for their version
         match self.receive_message().await? {
-            P2PMessage::Version { version, height, cumulative_work, node_id, .. } => {
-                self.update_info(node_id, version, height, cumulative_work).await;
+            P2PMessage::Version {
+                version,
+                height,
+                cumulative_work,
+                node_id,
+                ..
+            } => {
+                self.update_info(node_id, version, height, cumulative_work)
+                    .await;
 
                 // Send verack
                 self.send_message(P2PMessage::VerAck).await?;
@@ -227,7 +242,10 @@ impl Peer {
                 // Wait for their verack
                 match self.receive_message().await? {
                     P2PMessage::VerAck => {
-                        info!("Handshake completed with peer {}", self.info.read().await.address);
+                        info!(
+                            "Handshake completed with peer {}",
+                            self.info.read().await.address
+                        );
                         Ok(())
                     }
                     _ => Err("Expected VerAck".to_string()),
@@ -364,8 +382,10 @@ impl PeerManager {
         // Evict stale peer and proceed with the new live connection
         if let Some(idx) = stale_idx {
             let evicted_addr = peers[idx].address().await;
-            warn!("Evicting stale peer {} (last_seen > 30s) — accepting fresh connection from {}",
-                evicted_addr, peer_addr);
+            warn!(
+                "Evicting stale peer {} (last_seen > 30s) — accepting fresh connection from {}",
+                evicted_addr, peer_addr
+            );
             peers.remove(idx);
         }
 
@@ -381,23 +401,23 @@ impl PeerManager {
         Ok(())
     }
 
-
     /// Ban an IP address for BAN_DURATION (HIGH-4).
     ///
     /// Called by the network layer when a peer accumulates 3+ strikes.
     pub async fn ban_ip(&self, ip: IpAddr) {
         let expiry = Instant::now() + BAN_DURATION;
         self.banned_ips.write().await.insert(ip, expiry);
-        warn!("IP {} BANNED for {} minutes (persistent — survives reconnect)",
-            ip, BAN_DURATION.as_secs() / 60);
+        warn!(
+            "IP {} BANNED for {} minutes (persistent — survives reconnect)",
+            ip,
+            BAN_DURATION.as_secs() / 60
+        );
     }
 
     /// Remove a peer
     pub async fn remove_peer(&self, address: SocketAddr) {
         let mut peers = self.peers.write().await;
-        peers.retain(|p| {
-            !matches!(p.info.try_read(), Ok(info) if info.address == address)
-        });
+        peers.retain(|p| !matches!(p.info.try_read(), Ok(info) if info.address == address));
         info!("Peer removed. Total peers: {}", peers.len());
     }
 

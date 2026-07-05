@@ -1,10 +1,10 @@
+use crate::consensus::authorities::compute_committee;
+use crate::core::transaction::AccountState;
+use crate::crypto::signatures::FalconKeypair;
+use crate::crypto::wallet::QuantumWallet;
 use aleph_bft::{
     Index, Keychain, MultiKeychain, NodeCount, NodeIndex, PartialMultisignature, SignatureSet,
 };
-use crate::crypto::signatures::FalconKeypair;
-use crate::crypto::wallet::QuantumWallet;
-use crate::consensus::authorities::compute_committee;
-use crate::core::transaction::AccountState;
 use codec::{Decode, Encode};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -14,7 +14,6 @@ use tokio::sync::RwLock;
 pub struct FalconSignature {
     pub raw: Vec<u8>,
 }
-
 
 /// Bridges the local `QuantumWallet` and the epoch committee to the `aleph_bft::Keychain` traits.
 #[derive(Clone)]
@@ -76,18 +75,24 @@ impl Keychain for QuantaKeychain {
             return false;
         }
         let pubkey = &self.committee_pubkeys[index.0];
-        
+
         let mut hash_arr = [0u8; 32];
         let len = msg.len().min(32);
         hash_arr[..len].copy_from_slice(&msg[..len]);
-        
+
         let result = crate::crypto::signatures::verify_hash_strict(&hash_arr, &sgn.raw, pubkey);
         if !result {
-            tracing::warn!("AlephBFT signature verification FAILED for node index {}", index.0);
+            tracing::warn!(
+                "AlephBFT signature verification FAILED for node index {}",
+                index.0
+            );
         } else {
             // TRACE only — verify() is called thousands of times per DAG replay.
             // Logging at INFO level floods the output and starves the tokio runtime.
-            tracing::trace!("AlephBFT signature verification SUCCESS for node index {}", index.0);
+            tracing::trace!(
+                "AlephBFT signature verification SUCCESS for node index {}",
+                index.0
+            );
         }
         result
     }
@@ -101,11 +106,7 @@ impl MultiKeychain for QuantaKeychain {
         signature: &Self::Signature,
         index: NodeIndex,
     ) -> Self::PartialMultisignature {
-        SignatureSet::add_signature(
-            SignatureSet::with_size(self.node_count()),
-            signature,
-            index,
-        )
+        SignatureSet::add_signature(SignatureSet::with_size(self.node_count()), signature, index)
     }
 
     fn is_complete(&self, msg: &[u8], partial: &Self::PartialMultisignature) -> bool {

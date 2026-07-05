@@ -9,16 +9,11 @@
 ///
 /// If ALL tests pass here, the live wallet→node flow will work.
 /// If any test fails here, you have a bug to fix before redeploying.
-
-use quanta::crypto::{
-    verify_signature_strict, canonical_signing_hash, FALCON512_PUBKEY_BYTES,
-};
+use quanta::crypto::{canonical_signing_hash, verify_signature_strict, FALCON512_PUBKEY_BYTES};
 
 // Import falcon-rust directly (same lib WASM uses)
-use falcon_rust::falcon512::{
-    PublicKey, keygen, sign as falcon_sign, verify as falcon_verify,
-};
-use sha3::{Sha3_256, Digest};
+use falcon_rust::falcon512::{keygen, sign as falcon_sign, verify as falcon_verify, PublicKey};
+use sha3::{Digest, Sha3_256};
 
 // ── Helpers that EXACTLY mirror popup.js ────────────────────────────────────
 
@@ -45,16 +40,16 @@ fn build_payload(
     pk_bytes: &[u8],
 ) -> Vec<u8> {
     let mut buf = Vec::new();
-    buf.extend_from_slice(sender.as_bytes());      // sender UTF-8
-    buf.extend_from_slice(recipient.as_bytes());   // recipient UTF-8
-    buf.extend_from_slice(&to_le_bytes(amount));   // amount LE u64
-    buf.extend_from_slice(&to_le_bytes(timestamp));// timestamp LE (i64 same as u64 for positive)
-    buf.extend_from_slice(&to_le_bytes(fee));      // fee LE u64
-    buf.extend_from_slice(&to_le_bytes(nonce));    // nonce LE u64
-    buf.extend_from_slice(&to_le_bytes(lock_time));// lock_time LE u64
-    buf.extend_from_slice(pk_bytes);               // public_key bytes
-    buf.push(0u8);                                 // sig_scheme: Falcon512 = 0
-    buf.push(0u8);                                 // tx_type: Transfer = 0
+    buf.extend_from_slice(sender.as_bytes()); // sender UTF-8
+    buf.extend_from_slice(recipient.as_bytes()); // recipient UTF-8
+    buf.extend_from_slice(&to_le_bytes(amount)); // amount LE u64
+    buf.extend_from_slice(&to_le_bytes(timestamp)); // timestamp LE (i64 same as u64 for positive)
+    buf.extend_from_slice(&to_le_bytes(fee)); // fee LE u64
+    buf.extend_from_slice(&to_le_bytes(nonce)); // nonce LE u64
+    buf.extend_from_slice(&to_le_bytes(lock_time)); // lock_time LE u64
+    buf.extend_from_slice(pk_bytes); // public_key bytes
+    buf.push(0u8); // sig_scheme: Falcon512 = 0
+    buf.push(0u8); // tx_type: Transfer = 0
     buf
 }
 
@@ -72,7 +67,8 @@ fn test_falcon_rust_sign_verify_roundtrip() {
     let sig_bytes = sig.to_bytes();
 
     let pk_restored = PublicKey::from_bytes(&pk.to_bytes()).expect("pk parse");
-    let sig_restored = falcon_rust::falcon512::Signature::from_bytes(&sig_bytes).expect("sig parse");
+    let sig_restored =
+        falcon_rust::falcon512::Signature::from_bytes(&sig_bytes).expect("sig parse");
 
     assert!(
         falcon_verify(message, &sig_restored, &pk_restored),
@@ -89,7 +85,11 @@ fn test_node_verify_accepts_falcon_rust_sig_with_hash() {
     let (sk, pk) = keygen(seed);
     let pk_bytes = pk.to_bytes();
 
-    assert_eq!(pk_bytes.len(), FALCON512_PUBKEY_BYTES, "PK must be 897 bytes");
+    assert_eq!(
+        pk_bytes.len(),
+        FALCON512_PUBKEY_BYTES,
+        "PK must be 897 bytes"
+    );
 
     let message = b"test transaction data";
     let hash = canonical_signing_hash(message);
@@ -121,12 +121,12 @@ fn test_full_wallet_to_node_flow() {
     let pk_bytes = pk.to_bytes();
     let sk_bytes = sk.to_bytes();
 
-    let sender    = derive_address(&pk_bytes); // "0x..." derived from pk
+    let sender = derive_address(&pk_bytes); // "0x..." derived from pk
     let recipient = "0xc20e263e1c6cd7ec11076b4fc028647eeb2ddfa2".to_string();
-    let amount    = 1000 * 1_000_000u64; // 1000 QUA in microunits
-    let fee       = 1000u64;             // 0.001 QUA
-    let nonce     = 1u64;
-    let timestamp = 1711603299u64;       // fixed for test determinism
+    let amount = 1000 * 1_000_000u64; // 1000 QUA in microunits
+    let fee = 1000u64; // 0.001 QUA
+    let nonce = 1u64;
+    let timestamp = 1711603299u64; // fixed for test determinism
     let lock_time = 0u64;
 
     // STEP 1: Wallet builds payload (mirrors popup.js payloadBytes)
@@ -136,7 +136,10 @@ fn test_full_wallet_to_node_flow() {
 
     // STEP 2: Wallet computes canonical hash and signs (mirrors wasm sign_transaction)
     let signing_hash = canonical_signing_hash(&payload);
-    let sig = falcon_sign(&signing_hash, &falcon_rust::falcon512::SecretKey::from_bytes(&sk_bytes).unwrap());
+    let sig = falcon_sign(
+        &signing_hash,
+        &falcon_rust::falcon512::SecretKey::from_bytes(&sk_bytes).unwrap(),
+    );
     let sig_bytes = sig.to_bytes();
 
     // WASM sign_transaction output = sig_bytes || hash  (mirrors our lib.rs fix)
@@ -151,7 +154,10 @@ fn test_full_wallet_to_node_flow() {
 
     // STEP 3: Node verifies — mirrors Transaction::verify() → verify_signature_strict()
     let node_hash = canonical_signing_hash(&payload);
-    assert_eq!(signing_hash, node_hash, "Node must compute same hash as wallet");
+    assert_eq!(
+        signing_hash, node_hash,
+        "Node must compute same hash as wallet"
+    );
 
     // verify_signature_strict splits blob: sig = blob[..len-32], hash = blob[len-32..]
     let ok = verify_signature_strict(&node_hash, &blob, &pk_bytes);

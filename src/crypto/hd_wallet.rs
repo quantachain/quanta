@@ -1,14 +1,14 @@
-use bip39::{Mnemonic, Language};
-use sha3::{Sha3_256, Digest};
-use hmac::{Hmac, Mac};
-use serde::{Deserialize, Serialize};
-use rand::RngCore;
-use zeroize::{Zeroize, Zeroizing};
+use crate::crypto::signatures::FalconKeypair;
+use bip39::{Language, Mnemonic};
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng, AeadCore},
+    aead::{Aead, AeadCore, KeyInit, OsRng},
     ChaCha20Poly1305, Nonce as ChaCha20Nonce,
 };
-use crate::crypto::signatures::FalconKeypair;
+use hmac::{Hmac, Mac};
+use rand::RngCore;
+use serde::{Deserialize, Serialize};
+use sha3::{Digest, Sha3_256};
+use zeroize::{Zeroize, Zeroizing};
 
 type HmacSha256 = Hmac<Sha3_256>;
 
@@ -160,7 +160,9 @@ impl HDWallet {
     /// - Decryption failure (wrong wallet or corrupted data)
     #[allow(dead_code)]
     pub fn get_keypair(&self, index: u32) -> Result<FalconKeypair, String> {
-        let account = self.accounts.iter()
+        let account = self
+            .accounts
+            .iter()
             .find(|a| a.index == index)
             .ok_or_else(|| format!("Account {} not found in HD wallet", index))?;
 
@@ -234,8 +236,8 @@ impl HDWallet {
     /// per-account encrypted secret keys (double-encrypted: once by the HD
     /// derivation key, again by the export password).
     pub fn export_encrypted(&self, password: &str) -> Result<Vec<u8>, String> {
-        use argon2::{Argon2, PasswordHasher};
         use argon2::password_hash::SaltString;
+        use argon2::{Argon2, PasswordHasher};
 
         let salt = SaltString::generate(&mut OsRng);
         let argon2 = Argon2::default();
@@ -251,8 +253,8 @@ impl HDWallet {
 
         let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
 
-        let wallet_data = serde_json::to_vec(self)
-            .map_err(|e| format!("Serialization failed: {}", e))?;
+        let wallet_data =
+            serde_json::to_vec(self).map_err(|e| format!("Serialization failed: {}", e))?;
 
         let ciphertext = cipher
             .encrypt(&nonce, wallet_data.as_ref())
@@ -272,8 +274,8 @@ impl HDWallet {
 
     /// Import wallet from bytes produced by `export_encrypted`.
     pub fn import_encrypted(encrypted_data: &[u8], password: &str) -> Result<Self, String> {
-        use argon2::{Argon2, PasswordHasher};
         use argon2::password_hash::SaltString;
+        use argon2::{Argon2, PasswordHasher};
 
         if encrypted_data.len() < 4 {
             return Err("Invalid encrypted data: too short".into());
@@ -291,10 +293,8 @@ impl HDWallet {
         }
 
         let salt_bytes = &encrypted_data[4..4 + salt_len];
-        let salt_str = std::str::from_utf8(salt_bytes)
-            .map_err(|_| "Invalid salt encoding")?;
-        let salt = SaltString::from_b64(salt_str)
-            .map_err(|e| format!("Invalid salt: {}", e))?;
+        let salt_str = std::str::from_utf8(salt_bytes).map_err(|_| "Invalid salt encoding")?;
+        let salt = SaltString::from_b64(salt_str).map_err(|e| format!("Invalid salt: {}", e))?;
 
         let nonce_start = 4 + salt_len;
         let nonce = &encrypted_data[nonce_start..nonce_start + 12];
@@ -338,7 +338,10 @@ impl HDWallet {
             println!(" Passphrase: [SET] (plausible deniability enabled)         ");
         }
         println!("");
-        println!(" Accounts: {}                                               ", self.accounts.len());
+        println!(
+            " Accounts: {}                                               ",
+            self.accounts.len()
+        );
         println!("");
 
         for account in &self.accounts {
@@ -351,7 +354,11 @@ impl HDWallet {
             println!(" {} (#{}): {}", label, account.index, sk_status);
             let addr = &account.address;
             let tail = addr.len().saturating_sub(6);
-            println!(" Address: {}...{}      ", &addr[..12.min(addr.len())], &addr[tail..]);
+            println!(
+                " Address: {}...{}      ",
+                &addr[..12.min(addr.len())],
+                &addr[tail..]
+            );
             println!(" Pub Key: {} bytes", account.public_key.len());
             println!("");
         }

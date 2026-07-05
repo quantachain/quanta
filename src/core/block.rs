@@ -1,8 +1,8 @@
-use serde::{Serialize, Deserialize};
+use crate::core::merkle::MerkleTree;
 use crate::core::transaction::Transaction;
 use crate::crypto::{double_sha3, FALCON512_SIG_MAX_BYTES, FALCON512_SIG_MIN_BYTES};
-use crate::core::merkle::MerkleTree;
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // BFT Block — Quanta v2
@@ -16,7 +16,17 @@ use chrono::Utc;
 /// Consensus is BFT (Tendermint-style) from genesis.
 /// All integrity is provided by Falcon-512 signatures from the epoch committee,
 /// NOT by hash-puzzle PoW.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, std::hash::Hash, codec::Encode, codec::Decode)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    std::hash::Hash,
+    codec::Encode,
+    codec::Decode,
+)]
 pub struct Block {
     // ---- Chain structure ----
     /// Block height (0 = genesis).
@@ -203,7 +213,9 @@ impl Block {
         if self.merkle_root != computed_root {
             tracing::warn!(
                 "Block {}: Merkle root mismatch: block={} computed={}",
-                self.index, self.merkle_root, computed_root
+                self.index,
+                self.merkle_root,
+                computed_root
             );
             return false;
         }
@@ -216,7 +228,11 @@ impl Block {
             if sig.len() < FALCON512_SIG_MIN_BYTES || sig.len() > FALCON512_SIG_MAX_BYTES {
                 tracing::warn!(
                     "Block {}: bft_signatures[{}] length {} is outside Falcon-512 bounds [{}, {}]",
-                    self.index, i, sig.len(), FALCON512_SIG_MIN_BYTES, FALCON512_SIG_MAX_BYTES
+                    self.index,
+                    i,
+                    sig.len(),
+                    FALCON512_SIG_MIN_BYTES,
+                    FALCON512_SIG_MAX_BYTES
                 );
                 return false;
             }
@@ -226,7 +242,9 @@ impl Block {
         if self.bft_signatures.len() != self.bft_signers.len() {
             tracing::warn!(
                 "Block {}: bft_signatures.len() ({}) != bft_signers.len() ({})",
-                self.index, self.bft_signatures.len(), self.bft_signers.len()
+                self.index,
+                self.bft_signatures.len(),
+                self.bft_signers.len()
             );
             return false;
         }
@@ -236,21 +254,26 @@ impl Block {
             if self.previous_hash != prev.hash {
                 tracing::warn!(
                     "Block {}: previous_hash mismatch (expected {})",
-                    self.index, prev.hash
+                    self.index,
+                    prev.hash
                 );
                 return false;
             }
             if self.index != prev.index + 1 {
                 tracing::warn!(
                     "Block {}: index {} is not parent {} + 1",
-                    self.index, self.index, prev.index
+                    self.index,
+                    self.index,
+                    prev.index
                 );
                 return false;
             }
             if self.timestamp <= prev.timestamp {
                 tracing::warn!(
                     "Block {}: timestamp {} not after parent timestamp {}",
-                    self.index, self.timestamp, prev.timestamp
+                    self.index,
+                    self.timestamp,
+                    prev.timestamp
                 );
                 return false;
             }
@@ -258,7 +281,8 @@ impl Block {
             if self.timestamp > now + 7200 {
                 tracing::warn!(
                     "Block {}: timestamp {} is more than 2 hours in the future",
-                    self.index, self.timestamp
+                    self.index,
+                    self.timestamp
                 );
                 return false;
             }
@@ -317,7 +341,10 @@ mod tests {
     #[test]
     fn genesis_is_valid() {
         let genesis = Block::genesis();
-        assert!(genesis.is_valid(None), "Genesis block must pass is_valid(None)");
+        assert!(
+            genesis.is_valid(None),
+            "Genesis block must pass is_valid(None)"
+        );
     }
 
     #[test]

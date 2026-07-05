@@ -1,3 +1,6 @@
+use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
+use crate::crypto::signatures::{canonical_signing_hash, FalconKeypair, FALCON512_PUBKEY_BYTES};
+use std::hint::black_box;
 /// Quanta PQC Benchmark — Falcon-512 Cryptographic Performance
 ///
 /// Measures raw cryptographic latency for:
@@ -7,25 +10,23 @@
 ///   - SHA3-256 canonical hash throughput
 ///
 /// All values reported as mean ± std-dev over N iterations.
-
 use std::time::Instant;
-use std::hint::black_box;
-use crate::crypto::signatures::{FalconKeypair, canonical_signing_hash, FALCON512_PUBKEY_BYTES};
-use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
 
 /// Run all cryptographic benchmarks.
 pub fn run(iterations: usize) -> BenchmarkSection {
     println!("  [1/6] Cryptographic Performance (Falcon-512)...");
 
-    let keygen_stat     = bench_keygen(iterations);
-    let sign_stat       = bench_sign(iterations);
-    let verify_warm     = bench_verify_warm(iterations);
-    let verify_cold     = bench_verify_cold((iterations / 10).max(20)); // cold-path is slower
-    let hash_stat       = bench_sha3(iterations * 10);  // faster, so more iterations
-    let sig_size_stat   = bench_sig_size(iterations);
+    let keygen_stat = bench_keygen(iterations);
+    let sign_stat = bench_sign(iterations);
+    let verify_warm = bench_verify_warm(iterations);
+    let verify_cold = bench_verify_cold((iterations / 10).max(20)); // cold-path is slower
+    let hash_stat = bench_sha3(iterations * 10); // faster, so more iterations
+    let sig_size_stat = bench_sig_size(iterations);
 
-    println!("        keygen  {:.3} ms | sign {:.3} ms | verify-warm {:.3} µs | verify-cold {:.3} µs",
-        keygen_stat.mean_ms, sign_stat.mean_ms, verify_warm.mean_ms, verify_cold.mean_ms);
+    println!(
+        "        keygen  {:.3} ms | sign {:.3} ms | verify-warm {:.3} µs | verify-cold {:.3} µs",
+        keygen_stat.mean_ms, sign_stat.mean_ms, verify_warm.mean_ms, verify_cold.mean_ms
+    );
 
     BenchmarkSection {
         name: "Cryptographic Performance (Falcon-512)".to_string(),
@@ -86,12 +87,17 @@ fn bench_verify_warm(n: usize) -> BenchmarkStat {
     for _ in 0..n {
         let t = Instant::now();
         let _ok = black_box(crate::crypto::signatures::verify_signature_strict(
-            black_box(&hash), black_box(&signed), black_box(&kp.public_key),
+            black_box(&hash),
+            black_box(&signed),
+            black_box(&kp.public_key),
         ));
         samples.push(t.elapsed().as_secs_f64() * 1_000_000.0); // µs
     }
     let mut s = stat_us("Falcon-512 Verify (warm/LRU-hit)", "µs/op", &samples);
-    s.note = Some("Cache-warm path: same 1.6 KB key+sig reused. Represents in-pipeline LRU cache hits.".to_string());
+    s.note = Some(
+        "Cache-warm path: same 1.6 KB key+sig reused. Represents in-pipeline LRU cache hits."
+            .to_string(),
+    );
     s
 }
 
@@ -109,11 +115,13 @@ fn bench_verify_cold(n: usize) -> BenchmarkStat {
     let mut samples = Vec::with_capacity(n);
     for _ in 0..n {
         // Fresh heap copies — defeats L1/L2 data cache for key + sig bytes
-        let pk_cold  = kp.public_key.clone();
+        let pk_cold = kp.public_key.clone();
         let sig_cold = signed.clone();
         let t = Instant::now();
         let _ok = black_box(crate::crypto::signatures::verify_signature_strict(
-            black_box(&hash), black_box(&sig_cold), black_box(&pk_cold),
+            black_box(&hash),
+            black_box(&sig_cold),
+            black_box(&pk_cold),
         ));
         samples.push(t.elapsed().as_secs_f64() * 1_000_000.0); // µs
     }
@@ -152,7 +160,10 @@ fn bench_sig_size(n: usize) -> BenchmarkStat {
         sizes.push(sig.len() as f64);
     }
     let mut s = stat(
-        &format!("Falcon-512 Signature Size (pubkey={} B fixed)", FALCON512_PUBKEY_BYTES),
+        &format!(
+            "Falcon-512 Signature Size (pubkey={} B fixed)",
+            FALCON512_PUBKEY_BYTES
+        ),
         "bytes",
         &sizes,
     );
@@ -191,7 +202,11 @@ pub(crate) fn stat(name: &str, unit: &str, samples: &[f64]) -> BenchmarkStat {
         p50,
         p95,
         p99,
-        throughput: if mean > 0.0 { Some(1000.0 / mean) } else { None },
+        throughput: if mean > 0.0 {
+            Some(1000.0 / mean)
+        } else {
+            None
+        },
         note: None,
     }
 }
@@ -202,6 +217,10 @@ pub(crate) fn stat(name: &str, unit: &str, samples: &[f64]) -> BenchmarkStat {
 pub(crate) fn stat_us(name: &str, unit: &str, samples: &[f64]) -> BenchmarkStat {
     let mut s = stat(name, unit, samples);
     // Override the 1000/mean throughput with the correct 1_000_000/mean for µs
-    s.throughput = if s.mean_ms > 0.0 { Some(1_000_000.0 / s.mean_ms) } else { None };
+    s.throughput = if s.mean_ms > 0.0 {
+        Some(1_000_000.0 / s.mean_ms)
+    } else {
+        None
+    };
     s
 }

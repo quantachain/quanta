@@ -1,8 +1,8 @@
 use crate::core::block::Block;
 use crate::core::transaction::Transaction;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 use std::io::Read;
+use std::net::SocketAddr;
 
 /// P2P protocol messages for blockchain network communication
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -119,14 +119,12 @@ impl NetworkMessage {
             message,
         }
     }
-    
+
     /// Verify message has correct network magic
     pub fn verify(&self) -> bool {
         self.magic == NETWORK_MAGIC
     }
 }
-
-
 
 /// Serialize a P2P message with network magic bytes for transmission.
 ///
@@ -136,15 +134,14 @@ impl NetworkMessage {
 pub fn serialize_message(msg: &P2PMessage) -> Result<Vec<u8>, String> {
     // 1. Wrap with magic bytes (prevents testnet/mainnet mixing)
     let wrapped = NetworkMessage::create(msg.clone());
-    
+
     // 2. Serialize wrapped message to bincode
-    let serialized = bincode::serialize(&wrapped)
-        .map_err(|e| format!("Serialization error: {}", e))?;
-    
+    let serialized =
+        bincode::serialize(&wrapped).map_err(|e| format!("Serialization error: {}", e))?;
+
     // 3. Compress with Zstd (Level 3) only for messages > 1KB
     if serialized.len() > 1024 {
-        zstd::encode_all(serialized.as_slice(), 3)
-            .map_err(|e| format!("Compression error: {}", e))
+        zstd::encode_all(serialized.as_slice(), 3).map_err(|e| format!("Compression error: {}", e))
     } else {
         Ok(serialized)
     }
@@ -163,12 +160,12 @@ pub fn deserialize_message(data: &[u8]) -> Result<P2PMessage, String> {
 
     // 1. Try to decompress (detect zstd magic bytes)
     // Zstd magic: 0xFD2FB528 (LE) -> [0x28, 0xB5, 0x2F, 0xFD]
-    let is_compressed = data.len() >= 4 &&
-        data[0] == 0x28 && data[1] == 0xB5 && data[2] == 0x2F && data[3] == 0xFD;
+    let is_compressed =
+        data.len() >= 4 && data[0] == 0x28 && data[1] == 0xB5 && data[2] == 0x2F && data[3] == 0xFD;
 
     let decompressed = if is_compressed {
-        let mut decoder = zstd::stream::Decoder::new(data)
-            .map_err(|e| format!("Decompression error: {}", e))?;
+        let mut decoder =
+            zstd::stream::Decoder::new(data).map_err(|e| format!("Decompression error: {}", e))?;
         // HIGH-6 FIX: Pre-allocate with strict cap; take() = MAX exactly (no +1)
         let mut decomp_data = Vec::with_capacity(MAX_MESSAGE_SIZE);
         std::io::Read::take(&mut decoder, MAX_MESSAGE_SIZE as u64)
@@ -184,8 +181,8 @@ pub fn deserialize_message(data: &[u8]) -> Result<P2PMessage, String> {
     };
 
     // 2. Deserialize the NetworkMessage wrapper
-    let wrapped: NetworkMessage = bincode::deserialize(&decompressed)
-        .map_err(|e| format!("Deserialization error: {}", e))?;
+    let wrapped: NetworkMessage =
+        bincode::deserialize(&decompressed).map_err(|e| format!("Deserialization error: {}", e))?;
 
     // 3. CRIT-6: Verify network magic bytes — reject cross-network messages
     if !wrapped.verify() {
@@ -198,4 +195,3 @@ pub fn deserialize_message(data: &[u8]) -> Result<P2PMessage, String> {
 
     Ok(wrapped.message)
 }
-

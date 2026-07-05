@@ -1,7 +1,7 @@
+use crate::core::ChainNetwork;
+use config::{Config, ConfigError, File};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use config::{Config, ConfigError, File};
-use crate::core::ChainNetwork;
 
 /// Node storage/sync mode
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -41,7 +41,9 @@ pub struct QuantaConfig {
 }
 
 impl QuantaConfig {
-    fn default_engine() -> ConsensusEngine { ConsensusEngine::Bft }
+    fn default_engine() -> ConsensusEngine {
+        ConsensusEngine::Bft
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,8 +62,12 @@ pub struct NodeConfig {
 }
 
 impl NodeConfig {
-    fn default_mode() -> NodeMode { NodeMode::Archive }
-    fn default_prune_days() -> u64 { 30 }
+    fn default_mode() -> NodeMode {
+        NodeMode::Archive
+    }
+    fn default_prune_days() -> u64 {
+        30
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,7 +76,6 @@ pub struct NetworkConfig {
     pub bootstrap_nodes: Vec<String>,
     pub dns_seeds: Vec<String>,
 }
-
 
 /// Node-local security preferences (can differ between nodes)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,7 +91,6 @@ pub struct SecurityConfig {
     /// Require TLS for API (PRODUCTION: true)
     pub require_tls: bool,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricsConfig {
@@ -122,10 +126,10 @@ impl Default for QuantaConfig {
             security: SecurityConfig {
                 max_mempool_size: 5000,
                 transaction_expiry_seconds: 86400,
-                enable_rate_limiting: true,  // PRODUCTION: Always enable
-                rate_limit_per_minute: 60,   // 60 requests/min per IP
-                enable_peer_banning: true,   // Auto-ban malicious peers
-                require_tls: false,          // Set true for public nodes
+                enable_rate_limiting: true, // PRODUCTION: Always enable
+                rate_limit_per_minute: 60,  // 60 requests/min per IP
+                enable_peer_banning: true,  // Auto-ban malicious peers
+                require_tls: false,         // Set true for public nodes
             },
 
             metrics: MetricsConfig {
@@ -146,10 +150,10 @@ impl QuantaConfig {
             .add_source(
                 config::Environment::with_prefix("QUANTA")
                     .separator("__")
-                    .try_parsing(true)
+                    .try_parsing(true),
             )
             .build()?;
-        
+
         config.try_deserialize()
     }
 
@@ -190,23 +194,31 @@ impl QuantaConfig {
         if no_network {
             config.node.no_network = true;
         }
-        
+
         // Handle Network Type Override
         if let Some(net) = network_name {
             match net.as_str() {
                 "testnet" => {
                     config.network_type = ChainNetwork::Testnet;
                     // Auto-configure testnet defaults if not explicitly set
-                    if config.node.network_port == 8333 { config.node.network_port = 18333; }
-                    if config.node.api_port == 3000 { config.node.api_port = 13000; }
-                    if config.node.rpc_port == 7782 { config.node.rpc_port = 17782; }
-                    if config.node.db_path == "./quanta_data" { config.node.db_path = "./quanta_data_testnet".to_string(); }
-                    
+                    if config.node.network_port == 8333 {
+                        config.node.network_port = 18333;
+                    }
+                    if config.node.api_port == 3000 {
+                        config.node.api_port = 13000;
+                    }
+                    if config.node.rpc_port == 7782 {
+                        config.node.rpc_port = 17782;
+                    }
+                    if config.node.db_path == "./quanta_data" {
+                        config.node.db_path = "./quanta_data_testnet".to_string();
+                    }
+
                     // Add testnet seed
-                },
+                }
                 "mainnet" => {
                     config.network_type = ChainNetwork::Mainnet;
-                },
+                }
                 _ => {} // Unknown network, keep default or config file value
             }
         }
@@ -221,7 +233,7 @@ impl QuantaConfig {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         std::fs::write(path, toml_string)
     }
-    
+
     /// Validate configuration for sanity and safety
     #[allow(dead_code)]
     pub fn validate(&self) -> Result<(), String> {
@@ -232,21 +244,20 @@ impl QuantaConfig {
         if self.node.api_port == self.metrics.port {
             return Err("API port and metrics port must differ".into());
         }
-        
 
         // Security limits
         if self.security.max_mempool_size == 0 {
             return Err("Max mempool size must be > 0".into());
         }
-        
+
         // Network sanity
         if self.network.max_peers == 0 {
             return Err("Max peers must be > 0 (unless running solo)".into());
         }
-        
+
         Ok(())
     }
-    
+
     /// Print effective configuration on startup (debugging lifesaver)
     #[allow(dead_code)]
     pub fn print_effective_config(&self) {

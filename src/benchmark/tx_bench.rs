@@ -1,3 +1,11 @@
+use crate::benchmark::crypto_bench::stat;
+use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
+use crate::consensus::performance::verify_transactions_parallel;
+use crate::core::transaction::{SignatureScheme, Transaction, TransactionType};
+use crate::core::TESTNET_NETWORK_ID;
+use crate::crypto::signatures::FalconKeypair;
+use chrono::Utc;
+use std::hint::black_box;
 /// Quanta PQC Benchmark — Transaction Throughput
 ///
 /// Measures:
@@ -7,16 +15,7 @@
 ///   - Parallel verify throughput (rayon, all physical cores)
 ///   - Parallel speedup factor
 ///   - Transaction wire size (serialized bincode, min/max/mean)
-
 use std::time::Instant;
-use std::hint::black_box;
-use crate::crypto::signatures::FalconKeypair;
-use crate::core::transaction::{Transaction, TransactionType, SignatureScheme};
-use crate::core::TESTNET_NETWORK_ID;
-use crate::consensus::performance::verify_transactions_parallel;
-use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
-use crate::benchmark::crypto_bench::stat;
-use chrono::Utc;
 
 /// Batch sizes to test — mirrors realistic network conditions.
 const BATCH_SIZES: &[usize] = &[50, 100, 500, 1_000, 2_000];
@@ -26,7 +25,9 @@ pub fn run(iterations: usize) -> BenchmarkSection {
 
     // Generate keypairs once — key generation is not what we're measuring here
     let num_wallets = 20;
-    let wallets: Vec<FalconKeypair> = (0..num_wallets).map(|_| FalconKeypair::generate()).collect();
+    let wallets: Vec<FalconKeypair> = (0..num_wallets)
+        .map(|_| FalconKeypair::generate())
+        .collect();
 
     let mut stats = Vec::new();
 
@@ -64,16 +65,13 @@ pub fn run(iterations: usize) -> BenchmarkSection {
             .collect();
 
         // Wire size
-        let sizes: Vec<f64> = signed_txs.iter()
+        let sizes: Vec<f64> = signed_txs
+            .iter()
             .filter_map(|tx| bincode::serialize(tx).ok())
             .map(|b| b.len() as f64)
             .collect();
         if !sizes.is_empty() {
-            let size_stat = stat(
-                &format!("Tx Wire Size (batch {})", batch),
-                "bytes",
-                &sizes,
-            );
+            let size_stat = stat(&format!("Tx Wire Size (batch {})", batch), "bytes", &sizes);
             stats.push(size_stat);
         }
 
@@ -93,12 +91,16 @@ pub fn run(iterations: usize) -> BenchmarkSection {
         // black_box prevents LLVM from eliding verify results
         let n_verify_runs = 10usize;
         // Warmup pass (not measured)
-        for tx in &signed_txs { let _ = black_box(tx.verify()); }
+        for tx in &signed_txs {
+            let _ = black_box(tx.verify());
+        }
         let serial_verify_ms = {
             let mut total = 0.0f64;
             for _ in 0..n_verify_runs {
                 let t = Instant::now();
-                for tx in &signed_txs { let _ = black_box(tx.verify()); }
+                for tx in &signed_txs {
+                    let _ = black_box(tx.verify());
+                }
                 total += t.elapsed().as_secs_f64() * 1000.0;
             }
             total / n_verify_runs as f64
@@ -120,7 +122,11 @@ pub fn run(iterations: usize) -> BenchmarkSection {
         };
         let par_verify_tps = batch as f64 / (par_verify_ms / 1000.0);
 
-        let speedup = if par_verify_ms > 0.0 { serial_verify_ms / par_verify_ms } else { 1.0 };
+        let speedup = if par_verify_ms > 0.0 {
+            serial_verify_ms / par_verify_ms
+        } else {
+            1.0
+        };
         let cores = num_cpus::get_physical().max(1);
 
         stats.push(BenchmarkStat {
@@ -192,7 +198,7 @@ fn make_unsigned_tx(kp: &FalconKeypair, nonce: u64) -> Transaction {
     let mut tx = Transaction::new(
         kp.get_address(),
         "0xbenchmark000000000000000000000000000000".to_string(),
-        1_000_000,  // 1 QUA
+        1_000_000, // 1 QUA
         Utc::now().timestamp(),
     );
     tx.nonce = nonce;

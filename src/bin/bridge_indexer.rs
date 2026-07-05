@@ -34,20 +34,24 @@ async fn main() {
                 eprintln!("Error fetching blocks: {}", e);
             }
         }
-        
+
         sleep(Duration::from_secs(5)).await;
     }
 }
 
 async fn fetch_latest_blocks(client: &reqwest::Client) -> Result<Vec<Block>, String> {
-    let resp = client.get(API_URL).send().await.map_err(|e| e.to_string())?;
-    
+    let resp = client
+        .get(API_URL)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
     if !resp.status().is_success() {
         return Err(format!("API returned error status: {}", resp.status()));
     }
-    
+
     let json: Value = resp.json().await.map_err(|e| e.to_string())?;
-    
+
     if let Some(blocks_val) = json.get("blocks") {
         let blocks: Vec<Block> = serde_json::from_value(blocks_val.clone())
             .map_err(|e| format!("Failed to parse blocks: {}", e))?;
@@ -70,9 +74,14 @@ fn process_block(block: &Block) {
                 println!("[BRIDGE ALERT] Stablecoin Intent Detected!");
                 println!("  Quanta TxHash: {}", tx.hash());
                 println!("  Block Height : {}", block.index);
-                println!("  Action       : Transfer {} {} to {} on {}", 
-                    intent.amount, intent.token, intent.recipient, intent.dest_chain);
-                println!("  -- A bridge partner would execute this on {} now --\n", intent.dest_chain);
+                println!(
+                    "  Action       : Transfer {} {} to {} on {}",
+                    intent.amount, intent.token, intent.recipient, intent.dest_chain
+                );
+                println!(
+                    "  -- A bridge partner would execute this on {} now --\n",
+                    intent.dest_chain
+                );
             }
             Err(_) => {
                 // Payload is not a StablecoinIntent, could be something else (e.g. Agent Job Hash)

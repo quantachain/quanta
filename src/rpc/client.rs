@@ -26,12 +26,7 @@ impl RpcClient {
             id: 1,
         };
 
-        let response = self
-            .client
-            .post(&self.url)
-            .json(&request)
-            .send()
-            .await?;
+        let response = self.client.post(&self.url).json(&request).send().await?;
 
         let rpc_response: JsonRpcResponse = response.json().await?;
         Ok(rpc_response)
@@ -39,7 +34,7 @@ impl RpcClient {
 
     pub async fn get_node_status(&self) -> Result<NodeStatus, Box<dyn Error>> {
         let response = self.call("node_status", serde_json::json!({})).await?;
-        
+
         if let Some(error) = response.error {
             return Err(format!("RPC Error: {}", error.message).into());
         }
@@ -48,12 +43,11 @@ impl RpcClient {
         Ok(status)
     }
 
-
     pub async fn get_block(&self, height: u64) -> Result<BlockInfo, Box<dyn Error>> {
         let response = self
             .call("get_block", serde_json::json!({ "height": height }))
             .await?;
-        
+
         if let Some(error) = response.error {
             return Err(format!("RPC Error: {}", error.message).into());
         }
@@ -67,7 +61,7 @@ impl RpcClient {
         let response = self
             .call("get_balance", serde_json::json!({ "address": address }))
             .await?;
-        
+
         if let Some(error) = response.error {
             return Err(format!("RPC Error: {}", error.message).into());
         }
@@ -77,7 +71,7 @@ impl RpcClient {
 
     pub async fn get_peers(&self) -> Result<Vec<PeerInfo>, Box<dyn Error>> {
         let response = self.call("get_peers", serde_json::json!({})).await?;
-        
+
         if let Some(error) = response.error {
             return Err(format!("RPC Error: {}", error.message).into());
         }
@@ -88,13 +82,11 @@ impl RpcClient {
 
     pub async fn shutdown(&self) -> Result<(), Box<dyn Error>> {
         let response = self.call("shutdown", serde_json::json!({})).await?;
-        
+
         if let Some(error) = response.error {
             return Err(format!("RPC Error: {}", error.message).into());
         }
 
         Ok(())
     }
-
-
 }

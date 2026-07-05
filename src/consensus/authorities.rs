@@ -7,7 +7,6 @@
 /// Validators register via `Stake` transactions; the committee for each
 /// epoch is derived deterministically from the on-chain state — no static
 /// key list is needed.
-
 use crate::core::transaction::AccountState;
 use falcon_rust::falcon512::PublicKey;
 

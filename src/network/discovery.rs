@@ -37,7 +37,7 @@ impl PeerDiscovery {
             dns_seeds: Vec::new(),
         }
     }
-    
+
     /// Create with DNS seeds
     pub fn with_dns_seeds(seed_nodes: Vec<SocketAddr>, dns_seeds: Vec<String>) -> Self {
         Self {
@@ -50,23 +50,25 @@ impl PeerDiscovery {
     /// Resolve DNS seeds to socket addresses
     pub async fn resolve_dns_seeds(&self) -> Vec<SocketAddr> {
         let mut resolved = Vec::new();
-        
+
         for dns_seed in &self.dns_seeds {
             info!("Resolving DNS seed: {}", dns_seed);
-            
+
             // Try with standard port if not specified
             let lookup_addr = if dns_seed.contains(':') {
                 dns_seed.clone()
             } else {
                 format!("{}:8333", dns_seed) // Default Quanta P2P port
             };
-            
-            match tokio::task::spawn_blocking(move || {
-                lookup_addr.to_socket_addrs()
-            }).await {
+
+            match tokio::task::spawn_blocking(move || lookup_addr.to_socket_addrs()).await {
                 Ok(Ok(addrs)) => {
                     let addresses: Vec<SocketAddr> = addrs.collect();
-                    info!("DNS seed {} resolved to {} addresses", dns_seed, addresses.len());
+                    info!(
+                        "DNS seed {} resolved to {} addresses",
+                        dns_seed,
+                        addresses.len()
+                    );
                     resolved.extend(addresses);
                 }
                 Ok(Err(e)) => {
@@ -77,12 +79,12 @@ impl PeerDiscovery {
                 }
             }
         }
-        
+
         // Add resolved addresses to known peers
         for addr in &resolved {
             self.add_peer_with_source(*addr, PeerSource::Seed).await;
         }
-        
+
         resolved
     }
 
@@ -93,9 +95,10 @@ impl PeerDiscovery {
 
     /// Add a known peer with metadata
     pub async fn add_peer(&self, addr: SocketAddr) {
-        self.add_peer_with_source(addr, PeerSource::Discovered).await;
+        self.add_peer_with_source(addr, PeerSource::Discovered)
+            .await;
     }
-    
+
     /// Add a peer with specific source
     pub async fn add_peer_with_source(&self, addr: SocketAddr, source: PeerSource) {
         let mut peers = self.known_peers.write().await;
@@ -111,7 +114,7 @@ impl PeerDiscovery {
             }
         });
     }
-    
+
     /// Update peer last seen time and improve reputation
     pub async fn update_peer_seen(&self, addr: SocketAddr) {
         let mut peers = self.known_peers.write().await;
@@ -121,18 +124,18 @@ impl PeerDiscovery {
             meta.reputation = (meta.reputation + 1).min(100); // Increase reputation (cap at 100)
         }
     }
-    
+
     /// Mark peer as failed (decreases reputation, may result in ban)
     pub async fn mark_peer_failed(&self, addr: SocketAddr) {
         let mut peers = self.known_peers.write().await;
         if let Some(meta) = peers.get_mut(&addr) {
             meta.failures += 1;
             meta.reputation -= 5; // Decrease reputation on failure
-            
+
             let failures = meta.failures;
             let reputation = meta.reputation;
             let is_seed = meta.source == PeerSource::Seed;
-            
+
             // Ban logic: 3 strikes with low reputation
             if (failures > 3 && reputation < -20) || failures > 10 {
                 if !is_seed {
@@ -142,19 +145,30 @@ impl PeerDiscovery {
                     let ban_duration = 60; // 60 seconds
                     let ban_until = chrono::Utc::now().timestamp() + ban_duration;
                     meta.banned_until = Some(ban_until);
-                    warn!("Peer {} BANNED for 60 seconds (reputation: {}, failures: {})", 
-                        addr, reputation, failures);
+                    warn!(
+                        "Peer {} BANNED for 60 seconds (reputation: {}, failures: {})",
+                        addr, reputation, failures
+                    );
                 } else {
-                    warn!("Seed node {} has {} failures (not banning seed)", addr, failures);
+                    warn!(
+                        "Seed node {} has {} failures (not banning seed)",
+                        addr, failures
+                    );
                 }
             } else {
-                warn!("Peer {} failed (reputation: {}, failures: {})", addr, reputation, failures);
+                warn!(
+                    "Peer {} failed (reputation: {}, failures: {})",
+                    addr, reputation, failures
+                );
             }
-            
+
             // Remove if reputation too low and not a seed
             if reputation < -50 && !is_seed {
                 peers.remove(&addr);
-                warn!("Removed peer {} after reputation dropped to {}", addr, reputation);
+                warn!(
+                    "Removed peer {} after reputation dropped to {}",
+                    addr, reputation
+                );
             }
         }
     }
@@ -163,7 +177,7 @@ impl PeerDiscovery {
     pub async fn get_known_peers(&self) -> Vec<SocketAddr> {
         self.known_peers.read().await.keys().copied().collect()
     }
-    
+
     /// Get peer metadata
     pub async fn get_peer_meta(&self, addr: &SocketAddr) -> Option<PeerMeta> {
         self.known_peers.read().await.get(addr).cloned()
@@ -179,10 +193,10 @@ impl PeerDiscovery {
     /// Get random peers for connection (prioritizes healthy peers)
     pub async fn get_random_peers(&self, count: usize) -> Vec<SocketAddr> {
         use rand::seq::SliceRandom;
-        
+
         let peers = self.known_peers.read().await;
         let now = chrono::Utc::now().timestamp();
-        
+
         // Filter healthy peers (seen recently, low failures, not banned, good reputation)
         let mut healthy: Vec<SocketAddr> = peers
             .values()
@@ -190,15 +204,14 @@ impl PeerDiscovery {
                 // Not currently banned
                 let not_banned = meta.banned_until.map_or(true, |ban_until| now > ban_until);
                 // Good reputation and recent activity
-                let healthy = meta.failures < 3 
-                    && meta.reputation > -10 
-                    && (now - meta.last_seen) < 3600; // Active in last hour
-                
+                let healthy =
+                    meta.failures < 3 && meta.reputation > -10 && (now - meta.last_seen) < 3600; // Active in last hour
+
                 not_banned && healthy
             })
             .map(|meta| meta.address)
             .collect();
-        
+
         // Add seeds if we don't have enough healthy peers
         if healthy.len() < count {
             for seed in &self.seed_nodes {
@@ -207,10 +220,10 @@ impl PeerDiscovery {
                 }
             }
         }
-        
+
         let mut rng = rand::thread_rng();
         healthy.shuffle(&mut rng);
-        
+
         // Deduplicate before returning
         let mut unique = Vec::new();
         for addr in healthy {
@@ -221,10 +234,10 @@ impl PeerDiscovery {
                 }
             }
         }
-        
+
         unique
     }
-    
+
     /// Check if peer is currently banned
     pub async fn is_banned(&self, addr: &SocketAddr) -> bool {
         let peers = self.known_peers.read().await;
@@ -240,7 +253,7 @@ impl PeerDiscovery {
     /// Bootstrap discovery from seed nodes (deduplicated)
     pub async fn bootstrap(&self) -> Vec<SocketAddr> {
         let mut peers = self.known_peers.write().await;
-        
+
         // Only add seeds if not already present
         for &seed in &self.seed_nodes {
             peers.entry(seed).or_insert_with(|| PeerMeta {
@@ -252,26 +265,30 @@ impl PeerDiscovery {
                 banned_until: None,
             });
         }
-        
+
         info!("Bootstrapped with {} seed nodes", self.seed_nodes.len());
         self.seed_nodes.clone()
     }
-    
+
     /// Process Addr message from peer (with spam protection)
     pub async fn process_addr_message(&self, addrs: Vec<SocketAddr>, max_addrs: usize) {
         if addrs.len() > max_addrs {
-            warn!("Received too many addresses ({}), capping to {}", addrs.len(), max_addrs);
+            warn!(
+                "Received too many addresses ({}), capping to {}",
+                addrs.len(),
+                max_addrs
+            );
         }
-        
+
         let mut peers = self.known_peers.write().await;
         let now = chrono::Utc::now().timestamp();
-        
+
         for addr in addrs.into_iter().take(max_addrs) {
             // Validate routable IP (reject private unless allowed)
             if !is_routable_addr(&addr) {
                 continue;
             }
-            
+
             peers.entry(addr).or_insert_with(|| PeerMeta {
                 address: addr,
                 last_seen: now,
@@ -287,19 +304,18 @@ impl PeerDiscovery {
 /// Check if address is routable (not private/loopback unless allowed)
 fn is_routable_addr(addr: &SocketAddr) -> bool {
     let ip = addr.ip();
-    
+
     // Allow loopback for local testing
     if ip.is_loopback() {
         return true;
     }
-    
+
     // Reject private IPs (can be made configurable)
     match ip {
         std::net::IpAddr::V4(ipv4) => {
             // Reject: 10.x.x.x, 192.168.x.x
             // ALLOW 172.16-31.x.x to support Docker bridge networks for local testnets!
-            !(ipv4.octets()[0] == 10
-                || (ipv4.octets()[0] == 192 && ipv4.octets()[1] == 168))
+            !(ipv4.octets()[0] == 10 || (ipv4.octets()[0] == 192 && ipv4.octets()[1] == 168))
         }
         std::net::IpAddr::V6(ipv6) => {
             // Reject private/link-local
@@ -315,7 +331,7 @@ mod tests {
     #[test]
     fn test_address_bucketing_distribution() {
         let discovery = PeerDiscovery::with_dns_seeds(vec![], vec![]);
-        
+
         // Note: process_addr_message actually uses `is_routable_addr` which filters loopback/private IPs
         // To properly test locally, we need to bypass is_routable_addr or use public IPs.
         // Let's use public IPs for the test to ensure they are added to the buckets.
@@ -331,9 +347,12 @@ mod tests {
 
         futures::executor::block_on(discovery.process_addr_message(public_subnet1, 10));
         futures::executor::block_on(discovery.process_addr_message(public_subnet2, 10));
-        
+
         let selected = futures::executor::block_on(discovery.get_random_peers(2));
         assert!(selected.len() <= 2);
-        assert!(!selected.is_empty(), "Should select peers from the discovery pool");
+        assert!(
+            !selected.is_empty(),
+            "Should select peers from the discovery pool"
+        );
     }
 }

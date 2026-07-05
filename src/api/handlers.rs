@@ -1,26 +1,27 @@
-use axum::{
-    extract::{State, Json, Path, Query},
-    routing::{get, post},
-    Router, http::StatusCode,
-    http::Method,
-    response::IntoResponse,
-};
-use tower_http::cors::CorsLayer;
-use tower::ServiceBuilder;
-use axum::middleware::{self, Next};
+use crate::consensus::blockchain::{AddressTransaction, Blockchain, BlockchainStats};
+use crate::core::transaction::Transaction;
 use axum::extract::ConnectInfo;
 use axum::extract::Request;
+use axum::middleware::{self, Next};
 use axum::response::Response;
-use std::net::SocketAddr;
-use std::time::{Duration, Instant};
-use std::num::NonZeroUsize;
+use axum::{
+    extract::{Json, Path, Query, State},
+    http::Method,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+    Router,
+};
 use lru::LruCache;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use crate::consensus::blockchain::{Blockchain, BlockchainStats, AddressTransaction};
-use crate::core::transaction::Transaction;
+use tower::ServiceBuilder;
+use tower_http::cors::CorsLayer;
 
 use crate::consensus::mempool::NodeMetrics;
 use crate::core::block::Block;
@@ -31,7 +32,6 @@ pub struct ApiState {
     pub blockchain: Arc<RwLock<Blockchain>>,
     pub metrics: Option<Arc<crate::consensus::mempool::MetricsCollector>>,
     pub network: Option<Arc<crate::network::Network>>,
-
 }
 
 /// Response with transaction hash
@@ -47,9 +47,7 @@ pub struct TransactionResponse {
 // -----------------------------------------------------------------------
 
 /// Get blockchain stats
-async fn get_stats(
-    State(state): State<Arc<ApiState>>,
-) -> Json<BlockchainStats> {
+async fn get_stats(State(state): State<Arc<ApiState>>) -> Json<BlockchainStats> {
     let blockchain = state.blockchain.read().await;
     Json(blockchain.get_stats())
 }
@@ -305,7 +303,10 @@ async fn submit_signed_transaction(
             Json(TransactionResponse {
                 success: false,
                 tx_hash: None,
-                error: Some("Transaction must be pre-signed (signature and public_key required)".to_string()),
+                error: Some(
+                    "Transaction must be pre-signed (signature and public_key required)"
+                        .to_string(),
+                ),
             }),
         );
     }
@@ -345,8 +346,6 @@ async fn submit_signed_transaction(
 // Mining
 // -----------------------------------------------------------------------
 
-
-
 // -----------------------------------------------------------------------
 // Validation / Peers / Metrics
 // -----------------------------------------------------------------------
@@ -357,9 +356,7 @@ pub struct ValidateResponse {
     pub is_valid: bool,
 }
 
-async fn validate_chain(
-    State(state): State<Arc<ApiState>>,
-) -> Json<ValidateResponse> {
+async fn validate_chain(State(state): State<Arc<ApiState>>) -> Json<ValidateResponse> {
     let blockchain = state.blockchain.read().await;
     Json(ValidateResponse {
         is_valid: blockchain.is_valid(),
@@ -381,9 +378,7 @@ pub struct PeerInfoResponse {
     pub connected_for: i64,
 }
 
-async fn get_peers(
-    State(state): State<Arc<ApiState>>,
-) -> Json<PeersResponse> {
+async fn get_peers(State(state): State<Arc<ApiState>>) -> Json<PeersResponse> {
     if let Some(ref network) = state.network {
         let peers_info = network.get_peers_info().await;
         let peers: Vec<PeerInfoResponse> = peers_info
@@ -395,7 +390,7 @@ async fn get_peers(
                 connected_for: chrono::Utc::now().timestamp() - p.connected_at,
             })
             .collect();
-        
+
         Json(PeersResponse {
             peer_count: peers.len(),
             peers,
@@ -427,28 +422,27 @@ pub struct ValidatorsResponse {
     pub validators: Vec<ValidatorInfoResponse>,
 }
 
-async fn get_validators(
-    State(state): State<Arc<ApiState>>,
-) -> Json<ValidatorsResponse> {
+async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsResponse> {
     let blockchain = state.blockchain.read().await;
     let account_state = blockchain.get_account_state_read();
     let validators_map = account_state.get_validators();
-    
-    let mut validators: Vec<ValidatorInfoResponse> = validators_map.iter().map(|(addr, info)| {
-        ValidatorInfoResponse {
+
+    let mut validators: Vec<ValidatorInfoResponse> = validators_map
+        .iter()
+        .map(|(addr, info)| ValidatorInfoResponse {
             address: addr.clone(),
             falcon_pk_hex: hex::encode(&info.falcon_pk),
             stake_microunits: info.stake,
             registered_epoch: info.registered_epoch,
             active: info.active,
-        }
-    }).collect();
-    
+        })
+        .collect();
+
     // Sort by stake descending
     validators.sort_by(|a, b| b.stake_microunits.cmp(&a.stake_microunits));
-    
+
     let active_count = validators.iter().filter(|v| v.active).count();
-    
+
     Json(ValidatorsResponse {
         active_count,
         validators,
@@ -456,15 +450,13 @@ async fn get_validators(
 }
 
 /// Get node metrics (Prometheus format)
-async fn get_metrics(
-    State(state): State<Arc<ApiState>>,
-) -> impl IntoResponse {
+async fn get_metrics(State(state): State<Arc<ApiState>>) -> impl IntoResponse {
     let metrics = if let Some(ref metrics) = state.metrics {
         metrics.get_metrics().await
     } else {
         NodeMetrics::default()
     };
-    
+
     let s = format!(
         "# HELP quanta_peer_count Number of connected peers\n\
          # TYPE quanta_peer_count gauge\n\
@@ -504,8 +496,11 @@ async fn get_metrics(
     );
 
     (
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")],
-        s
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
+        s,
     )
 }
 
@@ -525,7 +520,6 @@ async fn get_block(
     }
 }
 
-
 /// Get mempool transactions
 #[derive(Serialize)]
 pub struct MempoolResponse {
@@ -533,12 +527,10 @@ pub struct MempoolResponse {
     pub transactions: Vec<Transaction>,
 }
 
-async fn get_mempool(
-    State(state): State<Arc<ApiState>>,
-) -> Json<MempoolResponse> {
+async fn get_mempool(State(state): State<Arc<ApiState>>) -> Json<MempoolResponse> {
     let blockchain = state.blockchain.read().await;
     let transactions = blockchain.get_pending_transactions().clone();
-    
+
     Json(MempoolResponse {
         transaction_count: transactions.len(),
         transactions,
@@ -560,23 +552,21 @@ pub struct HealthResponse {
 
 static START_TIME: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
-async fn health_check(
-    State(state): State<Arc<ApiState>>,
-) -> Json<HealthResponse> {
+async fn health_check(State(state): State<Arc<ApiState>>) -> Json<HealthResponse> {
     let blockchain = state.blockchain.read().await;
     let stats = blockchain.get_stats();
-    
+
     let peers_count = if let Some(ref network) = state.network {
         network.get_peer_count().await
     } else {
         0
     };
-    
+
     let uptime = START_TIME
         .get_or_init(|| std::time::Instant::now())
         .elapsed()
         .as_secs();
-    
+
     Json(HealthResponse {
         status: "healthy".to_string(),
         chain_height: stats.chain_length as u64,
@@ -590,23 +580,25 @@ async fn health_check(
 // Rate limiting middleware
 // -----------------------------------------------------------------------
 
-static RATE_LIMITS: std::sync::OnceLock<Mutex<LruCache<std::net::IpAddr, (u32, Instant)>>> = std::sync::OnceLock::new();
+static RATE_LIMITS: std::sync::OnceLock<Mutex<LruCache<std::net::IpAddr, (u32, Instant)>>> =
+    std::sync::OnceLock::new();
 
 /// Custom Rate Limiter (CRIT-2 FIX) — 10 requests/sec per IP burst limit.
-/// SECURITY: Wrapped in LruCache (max 100,000 IPs) instead of DashMap to 
+/// SECURITY: Wrapped in LruCache (max 100,000 IPs) instead of DashMap to
 /// prevent memory exhaustion (OOM) under distributed botnet attacks.
 async fn rate_limiter(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     request: Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let limits = RATE_LIMITS.get_or_init(|| Mutex::new(LruCache::new(NonZeroUsize::new(100_000).unwrap())));
-    
+    let limits =
+        RATE_LIMITS.get_or_init(|| Mutex::new(LruCache::new(NonZeroUsize::new(100_000).unwrap())));
+
     let allow = {
         let mut cache = limits.lock();
         let ip = addr.ip();
         let now = Instant::now();
-        
+
         match cache.get_mut(&ip) {
             Some((count, time)) => {
                 if now.duration_since(*time) > Duration::from_secs(1) {
@@ -642,11 +634,10 @@ pub fn create_router(
     metrics: Option<Arc<crate::consensus::mempool::MetricsCollector>>,
     network: Option<Arc<crate::network::Network>>,
 ) -> Router {
-    let state = Arc::new(ApiState { 
+    let state = Arc::new(ApiState {
         blockchain,
         metrics,
         network,
-
     });
 
     // Allow both localhost dev and the public block explorer origins.
@@ -668,40 +659,38 @@ pub fn create_router(
 
     Router::new()
         // ── Health / Monitoring ──────────────────────────────────────────
-        .route("/health",           get(health_check))
-        .route("/api/stats",        get(get_stats))
-        .route("/api/validate",     get(validate_chain))
-        .route("/api/peers",        get(get_peers))
-        .route("/api/validators",   get(get_validators))
-        .route("/api/metrics",      get(get_metrics))
+        .route("/health", get(health_check))
+        .route("/api/stats", get(get_stats))
+        .route("/api/validate", get(validate_chain))
+        .route("/api/peers", get(get_peers))
+        .route("/api/validators", get(get_validators))
+        .route("/api/metrics", get(get_metrics))
         // ── Blocks ──────────────────────────────────────────────────────
-        .route("/api/block/:height",    get(get_block))
-        .route("/api/blocks/latest",    get(get_latest_blocks))
+        .route("/api/block/:height", get(get_block))
+        .route("/api/blocks/latest", get(get_latest_blocks))
         // ── Mempool ─────────────────────────────────────────────────────
-        .route("/api/mempool",          get(get_mempool))
+        .route("/api/mempool", get(get_mempool))
         // ── Transactions ────────────────────────────────────────────────
         .route("/api/transactions/submit", post(submit_signed_transaction))
-        .route("/api/tx/:hash",            get(get_tx_handler))
+        .route("/api/tx/:hash", get(get_tx_handler))
         // ── Addresses / Balances ─────────────────────────────────────────
         // POST form kept for backward-compat with existing wallets
-        .route("/api/balance",              post(get_balance))
+        .route("/api/balance", post(get_balance))
         // GET-style routes for block explorer deep-links
-        .route("/api/balance/:address",     get(get_balance_by_path))
-        .route("/api/address/:address",     get(get_address_info))
+        .route("/api/balance/:address", get(get_balance_by_path))
+        .route("/api/address/:address", get(get_address_info))
         .route("/api/address/:address/txs", get(get_address_transactions))
-
         // ── AI Contracts ────────────────────────────────────────────────
-        .route("/api/contracts/:address",        get(get_contract))
+        .route("/api/contracts/:address", get(get_contract))
         .route("/api/contracts/:address/events", get(get_contract_events))
-        .route("/api/agents",                    get(list_agents))
+        .route("/api/agents", get(list_agents))
         .layer(
             ServiceBuilder::new()
                 .layer(middleware::from_fn(rate_limiter))
-                .layer(cors)
+                .layer(cors),
         )
         .with_state(state)
 }
-
 
 /// Start the API server.
 ///
@@ -719,8 +708,12 @@ pub async fn start_server(
     // CRIT-1 FIX: Only bind to 0.0.0.0 when TLS is active; otherwise localhost only.
     let bind_host = if tls_enabled { "0.0.0.0" } else { "127.0.0.1" };
     let addr = format!("{}:{}", bind_host, port);
-    
-    tracing::info!("QUANTA API server starting on {} (TLS={})", addr, tls_enabled);
+
+    tracing::info!(
+        "QUANTA API server starting on {} (TLS={})",
+        addr,
+        tls_enabled
+    );
     tracing::info!("Endpoints:");
     tracing::info!("   GET  /health                        - Health check");
     tracing::info!("   GET  /api/stats                     - Blockchain statistics");
@@ -739,16 +732,18 @@ pub async fn start_server(
     tracing::info!("   GET  /api/peers                     - Connected peers");
     tracing::info!("   GET  /api/validators                - Registered validators");
     tracing::info!("   GET  /api/metrics                   - Prometheus metrics");
-    
+
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .expect("Failed to bind server");
-    
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .expect("Server error");
-}
 
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("Server error");
+}
 
 // ---------------------------------------------------------------------------
 // AI Contract API Handlers
@@ -763,16 +758,24 @@ async fn get_contract(
     let blockchain = state.blockchain.read().await;
     let acc = blockchain.get_account_state_read();
     match acc.get_contract(&address) {
-        Some(c) => (StatusCode::OK, Json(serde_json::json!({
-            "address":     address,
-            "owner":       c.owner,
-            "template_id": c.template_id,
-            "deployed_at": c.deployed_at,
-            "storage":     c.storage,
-            "event_count": c.events.len(),
-            "events":      c.events,
-        }))).into_response(),
-        None => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Contract not found" }))).into_response(),
+        Some(c) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "address":     address,
+                "owner":       c.owner,
+                "template_id": c.template_id,
+                "deployed_at": c.deployed_at,
+                "storage":     c.storage,
+                "event_count": c.events.len(),
+                "events":      c.events,
+            })),
+        )
+            .into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Contract not found" })),
+        )
+            .into_response(),
     }
 }
 
@@ -785,11 +788,19 @@ async fn get_contract_events(
     let blockchain = state.blockchain.read().await;
     let acc = blockchain.get_account_state_read();
     match acc.get_contract(&address) {
-        Some(c) => (StatusCode::OK, Json(serde_json::json!({
-            "address": address,
-            "events":  c.events,
-        }))).into_response(),
-        None => (StatusCode::NOT_FOUND, Json(serde_json::json!({ "error": "Contract not found" }))).into_response(),
+        Some(c) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "address": address,
+                "events":  c.events,
+            })),
+        )
+            .into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Contract not found" })),
+        )
+            .into_response(),
     }
 }
 
@@ -797,7 +808,9 @@ async fn get_contract_events(
 /// Lists all Agent Registry contracts, optionally filtered by service_type.
 /// Powers the AI agent marketplace discovery page on QuaScan.
 #[derive(Deserialize)]
-struct AgentQuery { service_type: Option<String> }
+struct AgentQuery {
+    service_type: Option<String>,
+}
 
 async fn list_agents(
     State(state): State<Arc<ApiState>>,
@@ -805,27 +818,36 @@ async fn list_agents(
 ) -> impl IntoResponse {
     let blockchain = state.blockchain.read().await;
     let acc = blockchain.get_account_state_read();
-    let agents: Vec<serde_json::Value> = acc.contracts
+    let agents: Vec<serde_json::Value> = acc
+        .contracts
         .iter()
         .filter(|(_, c)| c.template_id == crate::core::contracts::TEMPLATE_AGENT_REGISTRY)
         .filter(|(_, c)| {
             if let Some(ref stype) = q.service_type {
-                c.storage.get("service_type").map(|s| s == stype).unwrap_or(false)
+                c.storage
+                    .get("service_type")
+                    .map(|s| s == stype)
+                    .unwrap_or(false)
             } else {
                 true
             }
         })
-        .map(|(addr, c)| serde_json::json!({
-            "contract_address": addr,
-            "agent_address":    c.storage.get("agent_address"),
-            "name":             c.storage.get("name"),
-            "service_type":     c.storage.get("service_type"),
-            "price_per_call":   c.storage.get("price_per_call"),
-            "endpoint_hash":    c.storage.get("endpoint_hash"),
-            "active":           c.storage.get("active"),
-            "registered_at":    c.storage.get("registered_at"),
-        }))
+        .map(|(addr, c)| {
+            serde_json::json!({
+                "contract_address": addr,
+                "agent_address":    c.storage.get("agent_address"),
+                "name":             c.storage.get("name"),
+                "service_type":     c.storage.get("service_type"),
+                "price_per_call":   c.storage.get("price_per_call"),
+                "endpoint_hash":    c.storage.get("endpoint_hash"),
+                "active":           c.storage.get("active"),
+                "registered_at":    c.storage.get("registered_at"),
+            })
+        })
         .collect();
     let count = agents.len();
-    (StatusCode::OK, Json(serde_json::json!({ "agents": agents, "count": count })))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "agents": agents, "count": count })),
+    )
 }

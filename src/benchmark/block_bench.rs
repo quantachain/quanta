@@ -1,3 +1,11 @@
+use crate::benchmark::crypto_bench::{stat, stat_us};
+use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
+use crate::benchmark::tx_bench::make_signed_tx;
+use crate::core::block::Block;
+use crate::core::merkle::MerkleTree;
+use crate::core::transaction::Transaction;
+use crate::crypto::signatures::FalconKeypair;
+use std::hint::black_box;
 /// Quanta v2 BFT Benchmark — Block Construction & Compression
 ///
 /// Measures:
@@ -9,16 +17,7 @@
 ///
 /// NOTE: PoW hashrate benchmarks removed in v2. Quanta v2 uses BFT consensus
 /// from genesis. There is no mining or PoW difficulty.
-
 use std::time::Instant;
-use std::hint::black_box;
-use crate::core::block::Block;
-use crate::core::transaction::Transaction;
-use crate::crypto::signatures::FalconKeypair;
-use crate::core::merkle::MerkleTree;
-use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
-use crate::benchmark::crypto_bench::{stat, stat_us};
-use crate::benchmark::tx_bench::make_signed_tx;
 
 /// Tx counts to test for Merkle / block construction
 const TX_COUNTS: &[usize] = &[1, 10, 100, 500, 1200];
@@ -45,7 +44,11 @@ pub fn run(iterations: usize, _full_pow_solve: bool) -> BenchmarkSection {
             let _h = black_box(genesis.calculate_hash());
             samples.push(t.elapsed().as_secs_f64() * 1_000_000.0); // µs
         }
-        let mut s = stat_us("Block Hash Computation (SHA3-256 double)", "µs/op", &samples);
+        let mut s = stat_us(
+            "Block Hash Computation (SHA3-256 double)",
+            "µs/op",
+            &samples,
+        );
         s.note = Some("SHA3-256(SHA3-256(header)) — used for BFT block ID".to_string());
         stats.push(s);
     }
@@ -98,9 +101,17 @@ pub fn run(iterations: usize, _full_pow_solve: bool) -> BenchmarkSection {
             decompress_samples.push(t2.elapsed().as_secs_f64() * 1000.0);
         }
 
-        let ratio = if compressed_size > 0 { raw_bytes as f64 / compressed_size as f64 } else { 1.0 };
+        let ratio = if compressed_size > 0 {
+            raw_bytes as f64 / compressed_size as f64
+        } else {
+            1.0
+        };
 
-        let mut cs = stat(&format!("Block Compress zstd-L3 ({} txs)", n_tx), "ms", &compress_samples);
+        let mut cs = stat(
+            &format!("Block Compress zstd-L3 ({} txs)", n_tx),
+            "ms",
+            &compress_samples,
+        );
         cs.note = Some(format!(
             "raw={} KB → compressed={} KB  ratio={:.2}×  savings={:.1} KB/block",
             raw_bytes / 1024,
@@ -110,12 +121,25 @@ pub fn run(iterations: usize, _full_pow_solve: bool) -> BenchmarkSection {
         ));
         stats.push(cs);
 
-        let mut ds = stat(&format!("Block Decompress ({} txs)", n_tx), "ms", &decompress_samples);
-        ds.note = Some(format!("Compressed={} KB → raw={} KB", compressed_size / 1024, raw_bytes / 1024));
+        let mut ds = stat(
+            &format!("Block Decompress ({} txs)", n_tx),
+            "ms",
+            &decompress_samples,
+        );
+        ds.note = Some(format!(
+            "Compressed={} KB → raw={} KB",
+            compressed_size / 1024,
+            raw_bytes / 1024
+        ));
         stats.push(ds);
 
-        println!("        block({} tx): raw={} KB  compressed={} KB  ratio={:.2}×",
-            n_tx, raw_bytes / 1024, compressed_size / 1024, ratio);
+        println!(
+            "        block({} tx): raw={} KB  compressed={} KB  ratio={:.2}×",
+            n_tx,
+            raw_bytes / 1024,
+            compressed_size / 1024,
+            ratio
+        );
     }
 
     // ── BFT Precommit Signing ─────────────────────────────────────────────────

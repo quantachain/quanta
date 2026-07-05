@@ -1,20 +1,20 @@
-use crate::core::block::Block;
 use crate::consensus::blockchain::Blockchain;
+use crate::core::block::Block;
+use crate::core::transaction::Transaction;
 use crate::network::peer::{Peer, PeerManager};
 use crate::network::protocol::{P2PMessage, PROTOCOL_VERSION};
-use crate::core::transaction::Transaction;
 use crate::network::PeerDiscovery;
+use lru::LruCache;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::{interval, Duration};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
-use lru::LruCache;
-use std::num::NonZeroUsize;
 
 /// Maximum blocks requested per sync batch (HIGH-2 FIX: prevents height-forgery storm)
 const MAX_SYNC_BATCH: u64 = 500;
@@ -56,8 +56,8 @@ pub struct Network {
     // A node only re-propagates a block/tx the FIRST time it sees it.
     // LRU(1024) keeps ~10+ minutes of blocks at 30s block time.
     seen_blocks: Arc<Mutex<LruCache<String, ()>>>,
-    seen_txs:    Arc<Mutex<LruCache<String, ()>>>,
-    seen_bft:    Arc<Mutex<LruCache<String, std::time::Instant>>>,
+    seen_txs: Arc<Mutex<LruCache<String, ()>>>,
+    seen_bft: Arc<Mutex<LruCache<String, std::time::Instant>>>,
     discovery: Arc<PeerDiscovery>,
     /// SYNC FIX: Track whether a sync operation is currently in progress.
     /// When true, broadcast blocks that are "too far ahead" will NOT
@@ -94,8 +94,12 @@ impl Network {
             // 1024 entries ≈ 30+ minutes of blocks at 30s block time
             seen_blocks: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(1024).unwrap()))),
             // 10k tx entries ≈ handles a full mempool cycle without re-flooding
-            seen_txs: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(10_000).unwrap()))),
-            seen_bft: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(10_000).unwrap()))),
+            seen_txs: Arc::new(Mutex::new(LruCache::new(
+                NonZeroUsize::new(10_000).unwrap(),
+            ))),
+            seen_bft: Arc::new(Mutex::new(LruCache::new(
+                NonZeroUsize::new(10_000).unwrap(),
+            ))),
             discovery,
             syncing: Arc::new(AtomicBool::new(false)),
             sync_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
@@ -105,11 +109,10 @@ impl Network {
         }
     }
 
-
     /// Start the network node
     pub async fn start(self: Arc<Self>) -> Result<(), String> {
         info!("Starting network node on {}", self.config.listen_addr);
-        
+
         // Start listening for incoming connections
         let listen_handle = {
             let network = Arc::clone(&self);
@@ -135,14 +138,16 @@ impl Network {
                 network.maintain_peers().await;
             })
         };
-        
+
         // BW-FIX-2: Heartbeat now uses the PING_INTERVAL_SECS constant (60s) defined in
         // protocol.rs, not a hardcoded 10s. The old 10s value was 6× faster than the
         // protocol spec, generating ~360 Ping/Pong pairs/hour across a 7-node cluster.
         let heartbeat_handle = {
             let network = Arc::clone(&self);
             tokio::spawn(async move {
-                let mut interval = interval(Duration::from_secs(crate::network::protocol::PING_INTERVAL_SECS));
+                let mut interval = interval(Duration::from_secs(
+                    crate::network::protocol::PING_INTERVAL_SECS,
+                ));
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 loop {
                     interval.tick().await;
@@ -169,12 +174,16 @@ impl Network {
                 loop {
                     interval.tick().await;
                     let peers = network.peer_manager.get_peers().await;
-                    if peers.is_empty() { continue; }
+                    if peers.is_empty() {
+                        continue;
+                    }
                     // Pick a random peer to request mempool from.
                     let idx = (chrono::Utc::now().timestamp() as usize) % peers.len();
                     if let Some(peer) = peers.get(idx) {
-                        tracing::debug!("Periodic mempool sync: requesting from {}", 
-                            peer.address().await);
+                        tracing::debug!(
+                            "Periodic mempool sync: requesting from {}",
+                            peer.address().await
+                        );
                         let _ = peer.send_message(P2PMessage::GetMempool).await;
                     }
                 }
@@ -207,10 +216,16 @@ impl Network {
         }
 
         info!("Network node started successfully");
-        
+
         // Wait for handles
-        let _ = tokio::join!(listen_handle, processor_handle, maintenance_handle, heartbeat_handle, mempool_sync_handle);
-        
+        let _ = tokio::join!(
+            listen_handle,
+            processor_handle,
+            maintenance_handle,
+            heartbeat_handle,
+            mempool_sync_handle
+        );
+
         Ok(())
     }
 
@@ -219,9 +234,9 @@ impl Network {
         let listener = TcpListener::bind(self.config.listen_addr)
             .await
             .map_err(|e| format!("Failed to bind listener: {}", e))?;
-        
+
         info!("Listening for connections on {}", self.config.listen_addr);
-        
+
         loop {
             match listener.accept().await {
                 Ok((stream, addr)) => {
@@ -231,7 +246,11 @@ impl Network {
                     let current_count = self.peer_manager.peer_count().await;
                     if current_count >= self.config.max_peers {
                         // Drop stream immediately — TCP RST is sent on drop.
-                        tracing::debug!("Inbound connection from {} rejected: peer limit {} reached", addr, self.config.max_peers);
+                        tracing::debug!(
+                            "Inbound connection from {} rejected: peer limit {} reached",
+                            addr,
+                            self.config.max_peers
+                        );
                         drop(stream);
                         continue;
                     }
@@ -254,7 +273,10 @@ impl Network {
                                 let cumulative_work = blockchain.cumulative_work_at(height);
                                 drop(blockchain);
 
-                                if let Ok(_) = peer.handshake(PROTOCOL_VERSION, height, cumulative_work, node_id).await {
+                                if let Ok(_) = peer
+                                    .handshake(PROTOCOL_VERSION, height, cumulative_work, node_id)
+                                    .await
+                                {
                                     match peer_manager.add_peer(Arc::clone(&peer)).await {
                                         Ok(_) => {
                                             // BETA FIX: Add the peer's IP to discovery with the default port
@@ -266,7 +288,12 @@ impl Network {
                                             // Request known peers from this new connection to discover the rest of the network
                                             let _ = peer.send_message(P2PMessage::GetAddr).await;
 
-                                            Self::start_peer_receive_task(peer, message_tx, peer_manager).await;
+                                            Self::start_peer_receive_task(
+                                                peer,
+                                                message_tx,
+                                                peer_manager,
+                                            )
+                                            .await;
                                         }
                                         Err(e) => {
                                             // FLAP-FIX: Send an explicit Disconnect before dropping the stream.
@@ -275,7 +302,10 @@ impl Network {
                                             // causing the 'Connection reset' flapping loop.
                                             // A Disconnect message tells the remote that the rejection was
                                             // intentional so it can back off gracefully.
-                                            debug!("Inbound peer {} rejected ({}); sending Disconnect", addr, e);
+                                            debug!(
+                                                "Inbound peer {} rejected ({}); sending Disconnect",
+                                                addr, e
+                                            );
                                             let _ = peer.send_message(P2PMessage::Disconnect).await;
                                         }
                                     }
@@ -298,7 +328,7 @@ impl Network {
     async fn start_peer_receive_task(
         peer: Arc<Peer>,
         message_tx: mpsc::Sender<(SocketAddr, P2PMessage)>,
-        peer_manager: Arc<PeerManager>
+        peer_manager: Arc<PeerManager>,
     ) {
         let addr = peer.address().await;
         tokio::spawn(async move {
@@ -324,29 +354,33 @@ impl Network {
         });
     }
 
-
-
     /// Connect to a peer
     pub async fn connect_to_peer(&self, addr: SocketAddr) -> Result<(), String> {
         info!("Connecting to peer {}", addr);
-        
+
         let stream = TcpStream::connect(addr)
             .await
             .map_err(|e| format!("Failed to connect: {}", e))?;
-        
+
         let peer = Arc::new(Peer::new(stream, addr).await?);
-        
+
         // Perform handshake
         let blockchain = self.blockchain.read().await;
         let height = blockchain.get_height();
         let cumulative_work = blockchain.cumulative_work_at(height);
         drop(blockchain);
-        
-        peer.handshake(PROTOCOL_VERSION, height, cumulative_work, self.config.node_id.clone()).await?;
-        
+
+        peer.handshake(
+            PROTOCOL_VERSION,
+            height,
+            cumulative_work,
+            self.config.node_id.clone(),
+        )
+        .await?;
+
         // Add to peer manager
         self.peer_manager.add_peer(Arc::clone(&peer)).await?;
-        
+
         // Request known peers from this new connection to discover the rest of the network
         let _ = peer.send_message(P2PMessage::GetAddr).await;
 
@@ -355,7 +389,12 @@ impl Network {
         // the peer-flapping bug (reconnects every ~10s) this caused full mempool
         // transfers at 10-second intervals, adding hundreds of MB/hour per node pair.
         // The periodic 30s mempool sync loop already handles convergence once connected.
-        let local_mempool_size = self.blockchain.read().await.get_pending_transactions().len();
+        let local_mempool_size = self
+            .blockchain
+            .read()
+            .await
+            .get_pending_transactions()
+            .len();
         if local_mempool_size == 0 {
             let _ = peer.send_message(P2PMessage::GetMempool).await;
         }
@@ -364,8 +403,9 @@ impl Network {
         Self::start_peer_receive_task(
             peer,
             self.message_tx.clone(),
-            Arc::clone(&self.peer_manager)
-        ).await;
+            Arc::clone(&self.peer_manager),
+        )
+        .await;
 
         info!("Connected to peer {}", addr);
         Ok(())
@@ -374,7 +414,7 @@ impl Network {
     /// Process incoming messages (PARALLELIZED - spawn handler per message)
     async fn process_messages(self: Arc<Self>) {
         let mut rx = self.message_rx.write().await;
-        
+
         while let Some((addr, msg)) = rx.recv().await {
             // Find the peer object to pass to the handler for strike management
             let mut peer_opt = None;
@@ -395,7 +435,12 @@ impl Network {
     }
 
     /// Handle a single message
-    async fn handle_message(&self, addr: SocketAddr, msg: P2PMessage, peer: Option<Arc<Peer>>) -> Result<(), String> {
+    async fn handle_message(
+        &self,
+        addr: SocketAddr,
+        msg: P2PMessage,
+        peer: Option<Arc<Peer>>,
+    ) -> Result<(), String> {
         match msg {
             P2PMessage::NewTx(tx) => {
                 self.handle_new_transaction(tx, peer).await?;
@@ -403,11 +448,16 @@ impl Network {
             P2PMessage::Block(block) => {
                 self.handle_new_block(block, peer).await?;
             }
-            P2PMessage::GetBlocks { start_height, end_height } => {
-                self.handle_get_blocks(addr, start_height, end_height, peer.clone()).await?;
+            P2PMessage::GetBlocks {
+                start_height,
+                end_height,
+            } => {
+                self.handle_get_blocks(addr, start_height, end_height, peer.clone())
+                    .await?;
             }
             P2PMessage::GetHeaders { start_height } => {
-                self.handle_get_headers(addr, start_height, peer.clone()).await?;
+                self.handle_get_headers(addr, start_height, peer.clone())
+                    .await?;
             }
             P2PMessage::Headers(headers) => {
                 self.handle_headers(headers, peer).await?;
@@ -415,8 +465,14 @@ impl Network {
             P2PMessage::GetHeight => {
                 self.handle_get_height(addr).await?;
             }
-            P2PMessage::Height { height, cumulative_work } => {
-                debug!("Peer {} has height {} (work {})", addr, height, cumulative_work);
+            P2PMessage::Height {
+                height,
+                cumulative_work,
+            } => {
+                debug!(
+                    "Peer {} has height {} (work {})",
+                    addr, height, cumulative_work
+                );
                 if let Some(p) = &peer {
                     p.update_height(height, cumulative_work).await;
                 }
@@ -449,9 +505,9 @@ impl Network {
             }
             P2PMessage::AlephBFTMessage(data) => {
                 let tx_opt = self.aleph_bft_tx.read().await;
-                
-                // CRITICAL FIX: If the channel is not registered yet, drop the message 
-                // WITHOUT caching it in the LRU. This allows the node to process the 
+
+                // CRITICAL FIX: If the channel is not registered yet, drop the message
+                // WITHOUT caching it in the LRU. This allows the node to process the
                 // inevitable retry broadcast once AlephBFT has actually started.
                 if tx_opt.is_none() {
                     tracing::trace!("AlephBFT channel not registered yet, skipping local delivery but continuing gossip.");
@@ -460,7 +516,7 @@ impl Network {
                 // BETA FIX: Hash the BFT message to prevent infinite gossip loops
                 use sha3::{Digest, Sha3_256};
                 let hash = hex::encode(Sha3_256::digest(&data));
-                
+
                 let already_seen = {
                     let mut seen = self.seen_bft.lock().unwrap();
                     let now = std::time::Instant::now();
@@ -492,7 +548,9 @@ impl Network {
                 // HIGH FIX: Relay the message to all peers! This eliminates the need
                 // for a "Full Mesh" network topology and allows the network to scale
                 // massively without hardcoding bootstrap IPs.
-                self.peer_manager.broadcast(P2PMessage::AlephBFTMessage(data)).await;
+                self.peer_manager
+                    .broadcast(P2PMessage::AlephBFTMessage(data))
+                    .await;
             }
             _ => {
                 debug!("Unhandled message type from {}", addr);
@@ -502,7 +560,11 @@ impl Network {
     }
 
     /// Handle new transaction
-    async fn handle_new_transaction(&self, tx: Transaction, peer: Option<Arc<Peer>>) -> Result<(), String> {
+    async fn handle_new_transaction(
+        &self,
+        tx: Transaction,
+        peer: Option<Arc<Peer>>,
+    ) -> Result<(), String> {
         // BETA FIX: Deduplication — only add + re-broadcast if not seen before
         let tx_hash = tx.hash();
         let already_seen = {
@@ -521,14 +583,17 @@ impl Network {
                 return Ok(()); // Already in mempool
             }
         }
-        
+
         // Add to pending transactions
         if let Err(e) = blockchain.add_transaction(tx.clone()) {
             warn!("Rejected transaction from peer: {}", e);
             if let Some(p) = peer {
                 // Invalid tx: +10 points (10 bad txs = ban)
                 if p.add_misbehavior(10).await {
-                    warn!("Banning peer {} for repeated invalid transactions (score ≥ 100)", p.address().await);
+                    warn!(
+                        "Banning peer {} for repeated invalid transactions (score ≥ 100)",
+                        p.address().await
+                    );
                     p.disconnect().await;
                     self.peer_manager.remove_peer(p.address().await).await;
                 }
@@ -597,8 +662,11 @@ impl Network {
         let bc = self.blockchain.write().await;
         match bc.add_network_block(block.clone()) {
             Ok(_) => {
-                info!("Block {} accepted at height {} — re-broadcasting to peers",
-                    &block.hash[..8], block.index);
+                info!(
+                    "Block {} accepted at height {} — re-broadcasting to peers",
+                    &block.hash[..8],
+                    block.index
+                );
                 drop(bc);
                 // BETA FIX: Re-broadcast so nodes NOT directly connected to the miner
                 // also receive the block (essential for mesh topology with 6+ nodes).
@@ -611,7 +679,10 @@ impl Network {
                 if let Some(p) = peer {
                     // Invalid block is a SERIOUS violation: +50 points (2 = ban)
                     if p.add_misbehavior(50).await {
-                        warn!("Banning peer {} for invalid network blocks (score ≥ 100)", p.address().await);
+                        warn!(
+                            "Banning peer {} for invalid network blocks (score ≥ 100)",
+                            p.address().await
+                        );
                         p.disconnect().await;
                         self.peer_manager.remove_peer(p.address().await).await;
                     }
@@ -629,7 +700,13 @@ impl Network {
     /// (which would stall mining and other operations on the seed node and
     /// could cause the send-side write half to queue up behind a Ping, making
     /// the receiver think the connection went silent).
-    async fn handle_get_blocks(&self, addr: SocketAddr, start: u64, end: u64, peer: Option<Arc<Peer>>) -> Result<(), String> {
+    async fn handle_get_blocks(
+        &self,
+        addr: SocketAddr,
+        start: u64,
+        end: u64,
+        peer: Option<Arc<Peer>>,
+    ) -> Result<(), String> {
         // HIGH-2 FIX: Clamp batch to MAX_SYNC_BATCH regardless of what peer claims
         let end = {
             let blockchain = self.blockchain.read().await;
@@ -675,7 +752,12 @@ impl Network {
     /// Sending a single ~100 KB compressed message is fast and does not need
     /// special sub-batching, but releasing the lock before the write keeps
     /// other tasks (especially mining) responsive on busy seed nodes.
-    async fn handle_get_headers(&self, addr: SocketAddr, start: u64, peer: Option<Arc<Peer>>) -> Result<(), String> {
+    async fn handle_get_headers(
+        &self,
+        addr: SocketAddr,
+        start: u64,
+        peer: Option<Arc<Peer>>,
+    ) -> Result<(), String> {
         let headers = {
             let blockchain = self.blockchain.read().await;
             let height = blockchain.get_height();
@@ -708,14 +790,19 @@ impl Network {
             // blockchain read lock released here
         };
 
-        info!("Serving {} headers [{}-{}] to peer {}",
-            headers.len(), start,
-            headers.last().map(|h| h.index).unwrap_or(start), addr);
+        info!(
+            "Serving {} headers [{}-{}] to peer {}",
+            headers.len(),
+            start,
+            headers.last().map(|h| h.index).unwrap_or(start),
+            addr
+        );
 
         if let Some(p) = peer {
             let _ = p.send_message(P2PMessage::Headers(headers)).await;
         } else {
-            self.send_to_peer(addr, P2PMessage::Headers(headers)).await?;
+            self.send_to_peer(addr, P2PMessage::Headers(headers))
+                .await?;
         }
         Ok(())
     }
@@ -728,7 +815,11 @@ impl Network {
     /// 2. Unsolicited single-header gossip — a peer broadcasts a newly-mined
     ///    block header (see broadcast_block). If we do not already have that
     ///    block, trigger an immediate GetBlocks request for it.
-    async fn handle_headers(&self, headers: Vec<crate::network::protocol::BlockHeader>, peer: Option<Arc<Peer>>) -> Result<(), String> {
+    async fn handle_headers(
+        &self,
+        headers: Vec<crate::network::protocol::BlockHeader>,
+        peer: Option<Arc<Peer>>,
+    ) -> Result<(), String> {
         if headers.is_empty() {
             return Ok(());
         }
@@ -742,11 +833,16 @@ impl Network {
             // a small forward window (avoids requesting far-future orphans).
             if h.index > our_height && h.index <= our_height + 5 {
                 if let Some(p) = peer {
-                    debug!("Gossip header for block {} — requesting full block", h.index);
-                    let _ = p.send_message(P2PMessage::GetBlocks {
-                        start_height: h.index,
-                        end_height:   h.index,
-                    }).await;
+                    debug!(
+                        "Gossip header for block {} — requesting full block",
+                        h.index
+                    );
+                    let _ = p
+                        .send_message(P2PMessage::GetBlocks {
+                            start_height: h.index,
+                            end_height: h.index,
+                        })
+                        .await;
                 }
             }
             return Ok(());
@@ -764,8 +860,15 @@ impl Network {
         // get_height() reads from storage — correct even after thousands of blocks
         let height = blockchain.get_height();
         let cumulative_work = blockchain.cumulative_work_at(height);
-        
-        self.send_to_peer(addr, P2PMessage::Height { height, cumulative_work }).await
+
+        self.send_to_peer(
+            addr,
+            P2PMessage::Height {
+                height,
+                cumulative_work,
+            },
+        )
+        .await
     }
 
     /// Handle get mempool request — HIGH-3 FIX: cap response to 100 txs
@@ -783,17 +886,16 @@ impl Network {
         self.send_to_peer(addr, P2PMessage::Mempool(txs)).await
     }
 
-
     /// Send message to specific peer
     async fn send_to_peer(&self, addr: SocketAddr, msg: P2PMessage) -> Result<(), String> {
         let peers = self.peer_manager.get_peers().await;
-        
+
         for peer in peers {
             if peer.address().await == addr {
                 return peer.send_message(msg).await;
             }
         }
-        
+
         Err("Peer not found".to_string())
     }
 
@@ -813,7 +915,9 @@ impl Network {
         // cumulative_work is not available without a blockchain read; peers
         // will compute their own value after fetching the full block.
         header.cumulative_work = 0;
-        self.peer_manager.broadcast(P2PMessage::Headers(vec![header])).await;
+        self.peer_manager
+            .broadcast(P2PMessage::Headers(vec![header]))
+            .await;
     }
 
     /// Register a channel sender for incoming AlephBFT messages.
@@ -824,7 +928,9 @@ impl Network {
 
     /// Broadcast an AlephBFT message to all connected peers
     pub async fn broadcast_aleph_bft(&self, data: Vec<u8>) {
-        self.peer_manager.broadcast(P2PMessage::AlephBFTMessage(data)).await;
+        self.peer_manager
+            .broadcast(P2PMessage::AlephBFTMessage(data))
+            .await;
     }
 
     /// BW-FIX-4: Send an AlephBFT message to a SPECIFIC validator peer identified by
@@ -856,7 +962,9 @@ impl Network {
             "Unicast target {} not connected — broadcasting AlephBFT msg as fallback",
             validator_address
         );
-        self.peer_manager.broadcast(P2PMessage::AlephBFTMessage(data)).await;
+        self.peer_manager
+            .broadcast(P2PMessage::AlephBFTMessage(data))
+            .await;
     }
 
     /// Synchronize blockchain from peers
@@ -874,16 +982,18 @@ impl Network {
     /// the common ancestor and switch to the network's heavier chain.
     pub async fn sync_blockchain(&self) -> Result<(), String> {
         let peers = self.peer_manager.get_peers().await;
-        if peers.is_empty() { return Ok(()); }
-        
+        if peers.is_empty() {
+            return Ok(());
+        }
+
         info!("Starting HEADERS-FIRST blockchain synchronization");
-        
+
         // Ask all peers for their current height & work
         for peer in &peers {
             let _ = peer.send_message(P2PMessage::GetHeight).await;
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
-        
+
         // Find best peer based on cumulative_work, with a height-gap safety net.
         // The safety net handles cases where cumulative_work tracking drifts
         // slightly after repeated shallow reorgs — without it the node loops
@@ -896,22 +1006,26 @@ impl Network {
         let mut max_work = local_work;
         let mut best_peer: Option<Arc<Peer>> = None;
         let mut target_height = 0;
-        
+
         for peer in &peers {
             let info = peer.get_info().await;
             let height_gap = info.height.saturating_sub(our_height);
             // Select peer if it has: more cumulative work, OR same work with
             // more height, OR is significantly ahead by block count (> 5 blocks).
-            let better_work   = info.cumulative_work > max_work;
-            let tiebreak      = info.cumulative_work == max_work && info.height > target_height;
-            let far_ahead     = height_gap > 5;
+            let better_work = info.cumulative_work > max_work;
+            let tiebreak = info.cumulative_work == max_work && info.height > target_height;
+            let far_ahead = height_gap > 5;
             if better_work || tiebreak || far_ahead {
-                if info.cumulative_work > max_work { max_work = info.cumulative_work; }
-                if info.height > target_height      { target_height = info.height; }
+                if info.cumulative_work > max_work {
+                    max_work = info.cumulative_work;
+                }
+                if info.height > target_height {
+                    target_height = info.height;
+                }
                 best_peer = Some(Arc::clone(peer));
             }
         }
-        
+
         let peer = match best_peer {
             Some(p) => p,
             None => {
@@ -919,12 +1033,17 @@ impl Network {
                 return Ok(());
             }
         };
-        
+
         self.syncing.store(true, Ordering::SeqCst);
-        
+
         let _our_height = self.blockchain.read().await.get_height();
-        info!("Syncing from peer {} (target work: {}, height: {})", peer.address().await, max_work, target_height);
-        
+        info!(
+            "Syncing from peer {} (target work: {}, height: {})",
+            peer.address().await,
+            max_work,
+            target_height
+        );
+
         // Re-read actual chain height each iteration — after a deep_reorg the chain height
         // is the reorg tip, which may differ from what we started with.
         let mut stall_count = 0;
@@ -936,7 +1055,9 @@ impl Network {
         loop {
             // Always re-read the actual chain height — it changes after every reorg/apply.
             let current_sync_height = self.blockchain.read().await.get_height();
-            if current_sync_height >= target_height { break; }
+            if current_sync_height >= target_height {
+                break;
+            }
 
             // Step 1: Request Headers.
             // On the first pass search back up to 500 blocks to find a possible fork point.
@@ -954,7 +1075,12 @@ impl Network {
                 hb.clear();
             }
 
-            if let Err(e) = peer.send_message(P2PMessage::GetHeaders { start_height: search_start }).await {
+            if let Err(e) = peer
+                .send_message(P2PMessage::GetHeaders {
+                    start_height: search_start,
+                })
+                .await
+            {
                 warn!("Header request failed: {}", e);
                 break;
             }
@@ -967,23 +1093,27 @@ impl Network {
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 wait += 1;
                 let sz = self.header_buffer.lock().await.len();
-                if sz > 0 || wait >= 60 { break; } // 30 s timeout
+                if sz > 0 || wait >= 60 {
+                    break;
+                } // 30 s timeout
             }
-            
+
             let headers: Vec<crate::network::protocol::BlockHeader> = {
                 let mut hb = self.header_buffer.lock().await;
                 let mut h: Vec<_> = hb.drain(..).collect();
                 h.sort_by_key(|x| x.index);
                 h
             };
-            
+
             if headers.is_empty() {
                 stall_count += 1;
-                if stall_count >= 3 { break; }
+                if stall_count >= 3 {
+                    break;
+                }
                 continue;
             }
             stall_count = 0;
-            
+
             // Step 2: Validate Headers & Find Fork Point
             let bc = self.blockchain.read().await;
             let mut fork_point = None;
@@ -996,26 +1126,32 @@ impl Network {
                 }
             }
             drop(bc);
-            
+
             let request_start = fork_point.unwrap_or(headers[0].index);
             let request_end = headers.last().unwrap().index;
-            
+
             if request_start > request_end {
                 // All headers in this batch are already part of our chain.
                 // current_sync_height was refreshed at the top of the loop from the
                 // actual chain height, so the next iteration will correctly advance
                 // the search window forward.
-                info!("Sync: all headers [{}-{}] already applied, advancing window", request_start, request_end);
+                info!(
+                    "Sync: all headers [{}-{}] already applied, advancing window",
+                    request_start, request_end
+                );
                 continue;
             }
-            
+
             // BFT header sanity check: every unseen header must reference a
             // non-zero hash (i.e. it was actually computed, not zero-initialised).
             // NOTE: sig_count is NOT checked here — AlephBFT embeds signatures
             // in the full block body, not in the gossip header. Checking
             // sig_count == 0 on headers would incorrectly reject all valid BFT
             // blocks and was the root cause of the "stuck at height 1" bug.
-            let unseen_headers: Vec<_> = headers.into_iter().filter(|h| h.index >= request_start).collect();
+            let unseen_headers: Vec<_> = headers
+                .into_iter()
+                .filter(|h| h.index >= request_start)
+                .collect();
             let mut valid_headers = true;
             for h in &unseen_headers {
                 if h.index > 0 && h.hash.is_empty() {
@@ -1023,13 +1159,15 @@ impl Network {
                     break;
                 }
             }
-            
+
             if !valid_headers {
-                warn!("Peer sent headers with empty hashes - aborting sync (peer may be corrupted)");
+                warn!(
+                    "Peer sent headers with empty hashes - aborting sync (peer may be corrupted)"
+                );
                 peer.add_misbehavior(50).await;
                 break;
             }
-            
+
             // Step 3: Request Full Blocks for the validated headers.
             // CAP to 50 blocks per request — PQC blocks are ~2 MB each.
             // 50 blocks ≈ 100 MB which transfers within ~30s on a typical VPS link.
@@ -1037,7 +1175,10 @@ impl Network {
             // it less likely to be closed by the seed node's liveness checker.
             const BLOCK_BATCH_CAP: u64 = 50;
             let batch_end = request_end.min(request_start + BLOCK_BATCH_CAP - 1);
-            info!("Headers validated. Requesting full blocks [{}-{}]", request_start, batch_end);
+            info!(
+                "Headers validated. Requesting full blocks [{}-{}]",
+                request_start, batch_end
+            );
             {
                 let mut sb = self.sync_buffer.lock().await;
                 sb.clear();
@@ -1048,7 +1189,13 @@ impl Network {
             // whose index is BELOW the current chain tip.
             *self.sync_request_range.lock().await = Some((request_start, batch_end));
 
-            if let Err(e) = peer.send_message(P2PMessage::GetBlocks { start_height: request_start, end_height: batch_end }).await {
+            if let Err(e) = peer
+                .send_message(P2PMessage::GetBlocks {
+                    start_height: request_start,
+                    end_height: batch_end,
+                })
+                .await
+            {
                 *self.sync_request_range.lock().await = None;
                 warn!("Block request failed: {}", e);
                 break;
@@ -1083,17 +1230,25 @@ impl Network {
                     if ping_tick % 30 == 0 {
                         let nonce: u64 = rand::random();
                         let _ = peer.send_message(P2PMessage::Ping(nonce)).await;
-                        debug!("Sync keep-alive ping sent to {} ({}/{} blocks received)",
-                            peer.address().await, sz, expected);
+                        debug!(
+                            "Sync keep-alive ping sent to {} ({}/{} blocks received)",
+                            peer.address().await,
+                            sz,
+                            expected
+                        );
                     }
                     if idle_count >= idle_timeout_iters {
-                        warn!("Block download idle timeout after {}s — received {}/{} blocks",
-                            idle_timeout_iters / 2, sz, expected);
+                        warn!(
+                            "Block download idle timeout after {}s — received {}/{} blocks",
+                            idle_timeout_iters / 2,
+                            sz,
+                            expected
+                        );
                         break;
                     }
                 }
             }
-            
+
             let blocks: Vec<Block> = {
                 let mut sb = self.sync_buffer.lock().await;
                 let mut b: Vec<_> = sb.drain(..).collect();
@@ -1102,12 +1257,12 @@ impl Network {
             };
             // Clear the range — blocks arriving now are NOT part of this batch.
             *self.sync_request_range.lock().await = None;
-            
+
             if blocks.is_empty() {
                 warn!("Peer did not yield requested blocks");
                 break;
             }
-            
+
             // SYNC FIX: If we timed out and only got a partial batch, DO NOT attempt a deep reorg.
             // A deep reorg on a partial batch will almost always fail validation mid-way, and the
             // node will waste massive I/O rolling back and restoring state for no reason.
@@ -1119,7 +1274,7 @@ impl Network {
                     break;
                 }
             }
-            
+
             // Step 4: Apply Blocks
             let bc_height = self.blockchain.read().await.get_height();
             if request_start < bc_height {
@@ -1146,16 +1301,19 @@ impl Network {
                     }
                 }
             }
-            
+
             // current_sync_height is refreshed at the top of the loop from the actual
             // chain height, so we do NOT set it here — doing so would use request_end
             // (capped by the 500-header window) instead of the real post-reorg height,
             // which was the root cause of the post-reorg stall bug.
         }
-        
+
         self.syncing.store(false, Ordering::SeqCst);
         *self.sync_request_range.lock().await = None; // ensure cleared on any exit path
-        info!("Sync cycle complete. Current height: {}", self.blockchain.read().await.get_height());
+        info!(
+            "Sync cycle complete. Current height: {}",
+            self.blockchain.read().await.get_height()
+        );
         Ok(())
     }
 
@@ -1222,7 +1380,9 @@ impl Network {
                                 network.discovery.update_peer_seen(addr).await;
                             }
                             Err(e) => {
-                                if e.contains("Already connected") || e.contains("Too many connections") {
+                                if e.contains("Already connected")
+                                    || e.contains("Too many connections")
+                                {
                                     // We are connected (or rejected safely), so update seen time
                                     network.discovery.update_peer_seen(addr).await;
                                 } else {
@@ -1240,7 +1400,7 @@ impl Network {
     pub async fn peer_count(&self) -> usize {
         self.peer_manager.peer_count().await
     }
-    
+
     /// Get peer count (alias for health check)
     pub async fn get_peer_count(&self) -> usize {
         self.peer_count().await
@@ -1250,14 +1410,14 @@ impl Network {
     pub async fn get_peers_info(&self) -> Vec<crate::network::peer::PeerInfo> {
         let peers = self.peer_manager.get_peers().await;
         let mut info = Vec::new();
-        
+
         for peer in peers {
             info.push(peer.get_info().await);
         }
-        
+
         info
     }
-    
+
     /// Send heartbeat pings to all peers (keeps connections alive during mining)
     async fn send_heartbeats(&self) {
         let peers = self.peer_manager.get_peers().await;

@@ -1,34 +1,45 @@
-use std::sync::Arc;
+use aleph_bft::{
+    default_config, run_session, Config as AlephConfig, LocalIO, NodeCount, NodeIndex, SpawnHandle,
+    Terminator,
+};
 use std::sync::atomic::{AtomicI64, Ordering};
-use tokio::sync::{watch, RwLock};
-use tracing::{info, warn, error};
-use aleph_bft::{run_session, Config as AlephConfig, LocalIO, SpawnHandle, Terminator, NodeIndex, NodeCount, default_config};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::{watch, RwLock};
+use tracing::{error, info, warn};
 
 use crate::consensus::Blockchain;
 use crate::core::block::Block;
 use crate::crypto::wallet::QuantumWallet;
 use crate::network::Network;
 
-use super::aleph_keychain::{QuantaKeychain, QuantaHasher, FalconSignature};
 use super::aleph_data::{QuantaDataProvider, QuantaFinalizationHandler};
+use super::aleph_keychain::{FalconSignature, QuantaHasher, QuantaKeychain};
 use super::aleph_network::QuantaNetworkBridge;
 
 #[derive(Clone)]
 pub struct QuantaSpawnHandle;
 
 impl SpawnHandle for QuantaSpawnHandle {
-    fn spawn(&self, _name: &'static str, task: impl core::future::Future<Output = ()> + Send + 'static) {
+    fn spawn(
+        &self,
+        _name: &'static str,
+        task: impl core::future::Future<Output = ()> + Send + 'static,
+    ) {
         tokio::spawn(task);
     }
-    
-    fn spawn_essential(&self, _name: &'static str, task: impl core::future::Future<Output = ()> + Send + 'static) -> aleph_bft::TaskHandle {
+
+    fn spawn_essential(
+        &self,
+        _name: &'static str,
+        task: impl core::future::Future<Output = ()> + Send + 'static,
+    ) -> aleph_bft::TaskHandle {
         let (tx, rx) = tokio::sync::oneshot::channel();
         tokio::spawn(async move {
             task.await;
             let _ = tx.send(());
         });
-        
+
         Box::pin(async move {
             if rx.await.is_err() {
                 tracing::error!("AlephBFT essential task panicked or exited unexpectedly!");
@@ -96,7 +107,7 @@ pub async fn run_bft_proposer(
         }
         (comm, pubkeys)
     };
-    
+
     if committee.is_empty() {
         warn!("BFT Proposer: no active validators — exiting BFT loop.");
         return;
@@ -104,7 +115,7 @@ pub async fn run_bft_proposer(
 
     let my_address = wallet.address.clone();
     let node_idx_opt = committee.iter().position(|addr| *addr == my_address);
-    
+
     let node_idx = match node_idx_opt {
         Some(idx) => NodeIndex(idx),
         None => {
@@ -112,14 +123,16 @@ pub async fn run_bft_proposer(
             return;
         }
     };
-    
+
     let node_count = NodeCount(committee.len());
-    info!("BFT Proposer: I am validator {} out of {}", node_idx.0, node_count.0);
+    info!(
+        "BFT Proposer: I am validator {} out of {}",
+        node_idx.0, node_count.0
+    );
 
     // DUPLICATE-APPLY FIX: Single persistent consumer task outside the
     // restart loop — prevents N zombie consumers after N restarts.
-    let (persistent_tx, mut persistent_rx) =
-        tokio::sync::mpsc::unbounded_channel::<Block>();
+    let (persistent_tx, mut persistent_rx) = tokio::sync::mpsc::unbounded_channel::<Block>();
     let shared_tx: Arc<std::sync::Mutex<Option<tokio::sync::mpsc::UnboundedSender<Block>>>> =
         Arc::new(std::sync::Mutex::new(Some(persistent_tx)));
 
@@ -133,7 +146,8 @@ pub async fn run_bft_proposer(
             if block.index <= last_applied_height {
                 tracing::trace!(
                     "BFT Proposer: ignoring duplicate delivery for height {} (already at {})",
-                    block.index, last_applied_height
+                    block.index,
+                    last_applied_height
                 );
                 continue;
             }
@@ -146,7 +160,10 @@ pub async fn run_bft_proposer(
 
             let bc = bc_for_finalization.write().await;
             if let Err(e) = bc.add_network_block(block.clone()) {
-                error!("BFT Proposer: failed to apply finalized block {}: {}", block.index, e);
+                error!(
+                    "BFT Proposer: failed to apply finalized block {}: {}",
+                    block.index, e
+                );
             } else {
                 info!("✓ BFT block {} applied to local chain.", block.index);
                 last_applied_height = block.index;
@@ -186,15 +203,19 @@ pub async fn run_bft_proposer(
                 let bc = blockchain.read().await;
                 bc.get_height()
             };
-            
+
             let peers = network_ref.get_peers_info().await;
             let max_peer_height = peers.iter().map(|p| p.height).max().unwrap_or(0);
-            
+
             if current_height >= max_peer_height.saturating_sub(2) {
                 break;
             }
-            
-            tracing::info!("BFT Proposer: waiting for sync (at height {}, network at {})...", current_height, max_peer_height);
+
+            tracing::info!(
+                "BFT Proposer: waiting for sync (at height {}, network at {})...",
+                current_height,
+                max_peer_height
+            );
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
 
@@ -206,7 +227,12 @@ pub async fn run_bft_proposer(
         let session_id: u64 = current_height / SESSION_LENGTH;
 
         // 1. Setup Keychain
-        let keychain = QuantaKeychain::new(wallet.clone(), node_idx, node_count, committee_pubkeys.clone());
+        let keychain = QuantaKeychain::new(
+            wallet.clone(),
+            node_idx,
+            node_count,
+            committee_pubkeys.clone(),
+        );
 
         // 2. Setup Data Provider & Finalization Handler
         let data_provider = QuantaDataProvider::new(
@@ -214,7 +240,7 @@ pub async fn run_bft_proposer(
             my_address.clone(),
             last_finalized_ts.clone(),
         );
-        
+
         let (session_tx, session_rx) = tokio::sync::mpsc::unbounded_channel::<Block>();
         let finalization_handler = QuantaFinalizationHandler::new(session_tx.clone());
 
@@ -237,25 +263,33 @@ pub async fn run_bft_proposer(
         // broadcasting every unicast message to all validators.
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         network_ref.register_aleph_bft_tx(tx).await;
-        let network_bridge: QuantaNetworkBridge<aleph_bft::NetworkData<QuantaHasher, Block, FalconSignature, aleph_bft::SignatureSet<FalconSignature>>> = QuantaNetworkBridge::new(
+        let network_bridge: QuantaNetworkBridge<
+            aleph_bft::NetworkData<
+                QuantaHasher,
+                Block,
+                FalconSignature,
+                aleph_bft::SignatureSet<FalconSignature>,
+            >,
+        > = QuantaNetworkBridge::new(
             network_ref.clone(),
             rx,
             node_idx.0,
-            committee.clone(),  // BW-FIX-4: committee[i] = wallet address of validator i
+            committee.clone(), // BW-FIX-4: committee[i] = wallet address of validator i
         );
-
 
         // 4. Setup LocalIO with per-session backup files.
         //
         // FIX (Bug 2): backup file is named by session_id, not a single
         // shared file.  Each session gets its own fresh file; when a new
         // session starts the old file is deleted (see cleanup below).
-        use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
         use std::path::Path;
+        use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-        let backup_path = Path::new(&data_dir)
-            .join(format!("alephbft_backup_{}.dat", session_id));
-        info!("BFT Proposer: session_id={} backup={:?}", session_id, backup_path);
+        let backup_path = Path::new(&data_dir).join(format!("alephbft_backup_{}.dat", session_id));
+        info!(
+            "BFT Proposer: session_id={} backup={:?}",
+            session_id, backup_path
+        );
 
         // Open file for saving (append-within-session is fine; it's the
         // cross-session accumulation that killed performance).
@@ -266,14 +300,14 @@ pub async fn run_bft_proposer(
             .open(&backup_path)
             .await
             .expect("Failed to open AlephBFT backup file for writing");
-            
+
         let unit_saver = file_for_saving.compat_write();
 
         // Open file for loading.
         let file_for_loading = tokio::fs::File::open(&backup_path)
             .await
             .expect("Failed to open AlephBFT backup file for reading");
-            
+
         let unit_loader = file_for_loading.compat();
 
         let local_io = LocalIO::new(data_provider, finalization_handler, unit_saver, unit_loader);
@@ -291,20 +325,24 @@ pub async fn run_bft_proposer(
         let config = default_config(
             node_count,
             node_idx,
-            session_id,                                   // FIX Bug 1: increments per epoch
-            MAX_ROUNDS_PER_SESSION as u16,                // FIX Bug 3: caps round number (u16)
+            session_id,                    // FIX Bug 1: increments per epoch
+            MAX_ROUNDS_PER_SESSION as u16, // FIX Bug 3: caps round number (u16)
             Duration::from_millis(500),
-        ).expect("Valid default config");
-        
+        )
+        .expect("Valid default config");
+
         let spawn_handle = QuantaSpawnHandle;
         let (terminator_tx, terminator_rx) = futures::channel::oneshot::channel();
         let terminator = Terminator::create_root(terminator_rx, "QuantaBFT");
 
-        info!("BFT Proposer: running aleph_bft::run_session (session_id={}, height={})…", session_id, current_height);
-        
+        info!(
+            "BFT Proposer: running aleph_bft::run_session (session_id={}, height={})…",
+            session_id, current_height
+        );
+
         let target_height_for_next_session = (session_id + 1) * SESSION_LENGTH;
         let bc_for_monitor = blockchain.clone();
-        
+
         let mut session_task = tokio::spawn(async move {
             run_session(
                 config,
@@ -313,7 +351,8 @@ pub async fn run_bft_proposer(
                 keychain,
                 spawn_handle,
                 terminator,
-            ).await;
+            )
+            .await;
         });
 
         let mut terminator_tx_opt = Some(terminator_tx);
@@ -344,20 +383,32 @@ pub async fn run_bft_proposer(
         let new_session_id = new_height / SESSION_LENGTH;
 
         if new_session_id > session_id {
-            let old_backup = Path::new(&data_dir)
-                .join(format!("alephbft_backup_{}.dat", session_id));
+            let old_backup =
+                Path::new(&data_dir).join(format!("alephbft_backup_{}.dat", session_id));
             if let Err(e) = tokio::fs::remove_file(&old_backup).await {
                 if e.kind() != std::io::ErrorKind::NotFound {
-                    warn!("BFT Proposer: could not remove backup {:?}: {}", old_backup, e);
+                    warn!(
+                        "BFT Proposer: could not remove backup {:?}: {}",
+                        old_backup, e
+                    );
                 }
             } else {
-                info!("BFT Proposer: cleared backup {:?} — next session starts from round 0", old_backup);
+                info!(
+                    "BFT Proposer: cleared backup {:?} — next session starts from round 0",
+                    old_backup
+                );
             }
-            
-            info!("BFT Proposer: rotated to session {} (chain height {})", new_session_id, new_height);
+
+            info!(
+                "BFT Proposer: rotated to session {} (chain height {})",
+                new_session_id, new_height
+            );
         }
 
-        warn!("BFT Proposer: session {} ended. Restarting in 1 second…", session_id);
+        warn!(
+            "BFT Proposer: session {} ended. Restarting in 1 second…",
+            session_id
+        );
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
 }

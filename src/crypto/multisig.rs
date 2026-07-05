@@ -2,14 +2,14 @@
 use crate::core::transaction::Transaction;
 use crate::crypto::signatures::{verify_signature_strict, FalconKeypair};
 use serde::{Deserialize, Serialize};
-use sha3::{Sha3_256, Digest};
+use sha3::{Digest, Sha3_256};
 
 /// Multi-signature transaction requiring M-of-N signatures
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct MultiSigTransaction {
     pub base_tx: Transaction,
-    pub required_signatures: usize,  // M
-    pub public_keys: Vec<Vec<u8>>,   // N public keys
+    pub required_signatures: usize,       // M
+    pub public_keys: Vec<Vec<u8>>,        // N public keys
     pub signatures: Vec<Option<Vec<u8>>>, // Collected signatures
 }
 
@@ -26,11 +26,17 @@ impl MultiSigTransaction {
         if required_signatures > public_keys.len() {
             return Err(format!(
                 "Required signatures ({}) cannot exceed total keys ({})",
-                required_signatures, public_keys.len()
+                required_signatures,
+                public_keys.len()
             ));
         }
         let signatures = vec![None; public_keys.len()];
-        Ok(Self { base_tx, required_signatures, public_keys, signatures })
+        Ok(Self {
+            base_tx,
+            required_signatures,
+            public_keys,
+            signatures,
+        })
     }
 
     /// Add a signature from one of the signers (verifies immediately)
@@ -60,7 +66,10 @@ impl MultiSigTransaction {
             return false;
         }
         let signing_hash = self.base_tx.get_signing_data();
-        let valid = self.signatures.iter().enumerate()
+        let valid = self
+            .signatures
+            .iter()
+            .enumerate()
             .filter_map(|(i, sig_opt)| sig_opt.as_ref().map(|sig| (i, sig)))
             .filter(|(i, sig)| verify_signature_strict(&signing_hash, sig, &self.public_keys[*i]))
             .count();
@@ -69,7 +78,11 @@ impl MultiSigTransaction {
 
     /// Get the canonical multisig address for this keyset
     pub fn get_multisig_address(&self) -> String {
-        multisig_address(&self.public_keys, self.required_signatures, self.public_keys.len())
+        multisig_address(
+            &self.public_keys,
+            self.required_signatures,
+            self.public_keys.len(),
+        )
     }
 
     /// Returns (collected, required) signature counts
@@ -148,7 +161,11 @@ impl TreasuryMultisig {
             k2.public_key.clone(),
         ];
         let address = multisig_address(&public_keys, 2, 3);
-        let setup = TreasuryMultisig { public_keys, required: 2, address };
+        let setup = TreasuryMultisig {
+            public_keys,
+            required: 2,
+            address,
+        };
         (setup, [k0, k1, k2])
     }
 
@@ -156,7 +173,11 @@ impl TreasuryMultisig {
     pub fn from_public_keys(pk0: Vec<u8>, pk1: Vec<u8>, pk2: Vec<u8>) -> Self {
         let public_keys = vec![pk0, pk1, pk2];
         let address = multisig_address(&public_keys, 2, 3);
-        TreasuryMultisig { public_keys, required: 2, address }
+        TreasuryMultisig {
+            public_keys,
+            required: 2,
+            address,
+        }
     }
 
     /// Create a spending proposal (unsigned MultiSigTransaction) for the given transfer.
@@ -170,16 +191,16 @@ impl TreasuryMultisig {
         timestamp: i64,
     ) -> MultiSigTransaction {
         let base_tx = Transaction {
-            sender:     self.address.clone(),
-            recipient:  to,
-            amount:     amount_microunits,
+            sender: self.address.clone(),
+            recipient: to,
+            amount: amount_microunits,
             timestamp,
-            signature:  vec![],
-            public_key: vec![],  // Multisig — no single pubkey
+            signature: vec![],
+            public_key: vec![], // Multisig — no single pubkey
             fee,
             nonce,
             lock_time: 0,
-            tx_type:    crate::core::transaction::TransactionType::Transfer,
+            tx_type: crate::core::transaction::TransactionType::Transfer,
             sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
             network_id: 0, // Default Testnet; caller should set to config.network_type.network_id()
             payload: vec![],
@@ -187,8 +208,8 @@ impl TreasuryMultisig {
         MultiSigTransaction {
             base_tx,
             required_signatures: self.required,
-            public_keys:  self.public_keys.clone(),
-            signatures:   vec![None; self.public_keys.len()],
+            public_keys: self.public_keys.clone(),
+            signatures: vec![None; self.public_keys.len()],
         }
     }
 
@@ -295,7 +316,11 @@ impl TreasuryMultisigV2 {
     /// println!("Treasury address: {}", setup.address);
     /// ```
     pub fn generate(total: usize) -> (Self, Vec<FalconKeypair>) {
-        assert!(total >= Self::REQUIRED, "total_signers must be >= {}", Self::REQUIRED);
+        assert!(
+            total >= Self::REQUIRED,
+            "total_signers must be >= {}",
+            Self::REQUIRED
+        );
 
         let keypairs: Vec<FalconKeypair> = (0..total).map(|_| FalconKeypair::generate()).collect();
         let public_keys: Vec<Vec<u8>> = keypairs.iter().map(|kp| kp.public_key.clone()).collect();
@@ -319,7 +344,8 @@ impl TreasuryMultisigV2 {
         if total < Self::REQUIRED {
             return Err(format!(
                 "Need at least {} public keys for a 3-of-N treasury (got {})",
-                Self::REQUIRED, total
+                Self::REQUIRED,
+                total
             ));
         }
         let address = multisig_address(&public_keys, Self::REQUIRED, total);
@@ -344,16 +370,16 @@ impl TreasuryMultisigV2 {
         timestamp: i64,
     ) -> MultiSigTransaction {
         let base_tx = Transaction {
-            sender:     self.address.clone(),
-            recipient:  to,
-            amount:     amount_microunits,
+            sender: self.address.clone(),
+            recipient: to,
+            amount: amount_microunits,
             timestamp,
-            signature:  vec![],
+            signature: vec![],
             public_key: vec![], // Multisig — no single pubkey
             fee,
             nonce,
             lock_time: 0,
-            tx_type:    crate::core::transaction::TransactionType::Transfer,
+            tx_type: crate::core::transaction::TransactionType::Transfer,
             sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
             network_id: 0, // Default Testnet; caller should set to config.network_type.network_id()
             payload: vec![],
@@ -361,8 +387,8 @@ impl TreasuryMultisigV2 {
         MultiSigTransaction {
             base_tx,
             required_signatures: self.required,
-            public_keys:         self.public_keys.clone(),
-            signatures:          vec![None; self.public_keys.len()],
+            public_keys: self.public_keys.clone(),
+            signatures: vec![None; self.public_keys.len()],
         }
     }
 
@@ -406,27 +432,27 @@ impl TreasuryMultisigV2 {
 /// `ThreeOfN` covers the general 3-of-N treasury policy.
 #[derive(Debug, Clone, Copy)]
 pub enum MultiSigType {
-    TwoOfThree,       // 2-of-3 (legacy treasury)
-    ThreeOfFive,      // 3-of-5
-    FourOfSeven,      // 4-of-7
-    ThreeOfN(usize),  // 3-of-N (arbitrary N ≥ 3)
+    TwoOfThree,      // 2-of-3 (legacy treasury)
+    ThreeOfFive,     // 3-of-5
+    FourOfSeven,     // 4-of-7
+    ThreeOfN(usize), // 3-of-N (arbitrary N ≥ 3)
 }
 
 impl MultiSigType {
     pub fn required_signatures(&self) -> usize {
         match self {
-            MultiSigType::TwoOfThree    => 2,
-            MultiSigType::ThreeOfFive   => 3,
-            MultiSigType::FourOfSeven   => 4,
-            MultiSigType::ThreeOfN(_)   => 3,
+            MultiSigType::TwoOfThree => 2,
+            MultiSigType::ThreeOfFive => 3,
+            MultiSigType::FourOfSeven => 4,
+            MultiSigType::ThreeOfN(_) => 3,
         }
     }
     pub fn total_signers(&self) -> usize {
         match self {
-            MultiSigType::TwoOfThree    => 3,
-            MultiSigType::ThreeOfFive   => 5,
-            MultiSigType::FourOfSeven   => 7,
-            MultiSigType::ThreeOfN(n)   => *n,
+            MultiSigType::TwoOfThree => 3,
+            MultiSigType::ThreeOfFive => 5,
+            MultiSigType::FourOfSeven => 7,
+            MultiSigType::ThreeOfN(n) => *n,
         }
     }
 }
@@ -464,7 +490,10 @@ mod tests {
         let setup = TreasuryMultisigV2::from_public_keys(pks).expect("Valid keyset");
 
         assert_eq!(setup.address, addr_from_address_fn);
-        assert!(setup.address.starts_with("ms"), "Multisig address must start with 'ms'");
+        assert!(
+            setup.address.starts_with("ms"),
+            "Multisig address must start with 'ms'"
+        );
         assert_eq!(setup.required, 3);
         assert_eq!(setup.total_signers, 5);
     }
@@ -478,27 +507,27 @@ mod tests {
 
         let mut proposal = setup.propose_spend(
             "0xdeadbeef".to_string(),
-            5_000_000,  // 5 QUA
+            5_000_000, // 5 QUA
             1_000,
             1,
             1_700_000_000,
         );
 
         // Sign with keys 0, 2, 4 (any 3 of the 5)
-        TreasuryMultisigV2::sign_proposal(&mut proposal, 0, &keypairs[0])
-            .expect("Sign with key 0");
-        TreasuryMultisigV2::sign_proposal(&mut proposal, 2, &keypairs[2])
-            .expect("Sign with key 2");
+        TreasuryMultisigV2::sign_proposal(&mut proposal, 0, &keypairs[0]).expect("Sign with key 0");
+        TreasuryMultisigV2::sign_proposal(&mut proposal, 2, &keypairs[2]).expect("Sign with key 2");
 
         // 2 signatures — not yet complete
         assert!(!proposal.is_complete(), "2 sigs should not satisfy 3-of-5");
 
-        TreasuryMultisigV2::sign_proposal(&mut proposal, 4, &keypairs[4])
-            .expect("Sign with key 4");
+        TreasuryMultisigV2::sign_proposal(&mut proposal, 4, &keypairs[4]).expect("Sign with key 4");
 
         // 3 signatures — complete and valid
         assert!(proposal.is_complete(), "3 sigs should satisfy 3-of-5");
-        assert!(proposal.verify(), "3-of-5 proposal with valid sigs must verify");
+        assert!(
+            proposal.verify(),
+            "3-of-5 proposal with valid sigs must verify"
+        );
 
         let (collected, required) = proposal.signature_progress();
         assert_eq!(collected, 3);
@@ -513,31 +542,23 @@ mod tests {
     fn test_treasury_v2_threshold_enforcement() {
         let (setup, keypairs) = TreasuryMultisigV2::generate(7); // 3-of-7
 
-        let mut proposal = setup.propose_spend(
-            "0xrecipient".to_string(),
-            1_000_000,
-            500,
-            2,
-            1_700_000_001,
-        );
+        let mut proposal =
+            setup.propose_spend("0xrecipient".to_string(), 1_000_000, 500, 2, 1_700_000_001);
 
         // 0 sigs
         assert!(!proposal.is_complete());
         assert!(!proposal.verify());
 
         // 1 sig
-        TreasuryMultisigV2::sign_proposal(&mut proposal, 3, &keypairs[3])
-            .expect("Sign");
+        TreasuryMultisigV2::sign_proposal(&mut proposal, 3, &keypairs[3]).expect("Sign");
         assert!(!proposal.is_complete());
 
         // 2 sigs
-        TreasuryMultisigV2::sign_proposal(&mut proposal, 6, &keypairs[6])
-            .expect("Sign");
+        TreasuryMultisigV2::sign_proposal(&mut proposal, 6, &keypairs[6]).expect("Sign");
         assert!(!proposal.is_complete(), "2 sigs must not satisfy 3-of-7");
 
         // 3 sigs → complete
-        TreasuryMultisigV2::sign_proposal(&mut proposal, 1, &keypairs[1])
-            .expect("Sign");
+        TreasuryMultisigV2::sign_proposal(&mut proposal, 1, &keypairs[1]).expect("Sign");
         assert!(proposal.is_complete(), "3 sigs must satisfy 3-of-7");
         assert!(proposal.verify());
     }
@@ -597,8 +618,16 @@ mod tests {
         let k1 = FalconKeypair::generate();
         let k2 = FalconKeypair::generate();
 
-        let order_a = vec![k0.public_key.clone(), k1.public_key.clone(), k2.public_key.clone()];
-        let order_b = vec![k2.public_key.clone(), k0.public_key.clone(), k1.public_key.clone()];
+        let order_a = vec![
+            k0.public_key.clone(),
+            k1.public_key.clone(),
+            k2.public_key.clone(),
+        ];
+        let order_b = vec![
+            k2.public_key.clone(),
+            k0.public_key.clone(),
+            k1.public_key.clone(),
+        ];
 
         assert_eq!(
             multisig_address(&order_a, 3, 3),

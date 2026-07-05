@@ -1,3 +1,10 @@
+use crate::benchmark::crypto_bench::stat;
+use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
+use crate::core::transaction::{SignatureScheme, Transaction, TransactionType};
+use crate::core::TESTNET_NETWORK_ID;
+use chrono::Utc;
+use falcon_rust::falcon512::{self as fr, SecretKey as FrSK};
+use sha3::{Digest, Sha3_256};
 /// Quanta PQC Benchmark — Live Node Network Stress Test
 ///
 /// Fires N concurrent HTTP transactions at a running local node via the REST API.
@@ -8,15 +15,7 @@
 ///   - Concurrent throughput (reqwest async, tokio tasks)
 ///   - Mempool acceptance rate under flood
 ///   - Error rate breakdown (invalid sig / nonce / balance / rate-limit)
-
 use std::time::Instant;
-use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
-use crate::benchmark::crypto_bench::stat;
-use crate::core::transaction::{Transaction, TransactionType, SignatureScheme};
-use crate::core::TESTNET_NETWORK_ID;
-use chrono::Utc;
-use falcon_rust::falcon512::{self as fr, SecretKey as FrSK};
-use sha3::{Sha3_256, Digest};
 
 /// Domain tag — must match SIGNING_DOMAIN in signatures.rs and quanta-wasm.
 const SIGNING_DOMAIN: &[u8] = b"QUANTA_TX_V1:";
@@ -65,14 +64,22 @@ fn load_wallet_from_file(path: &str, index: usize) -> Option<(Vec<u8>, Vec<u8>)>
     Some((pk, sk))
 }
 
-pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wallet_index: usize) -> BenchmarkSection {
+pub async fn run(
+    node_url: &str,
+    tx_count: usize,
+    wallet_file: Option<&str>,
+    wallet_index: usize,
+) -> BenchmarkSection {
     println!("  [6/6] Live Node Network Stress Test → {}", node_url);
 
     // Load wallet: (pk_bytes, sk_bytes) from file, or generate a throwaway key.
     let (pk_bytes, sk_bytes) = if let Some(path) = wallet_file {
         match load_wallet_from_file(path, wallet_index) {
             Some(pair) => {
-                println!("        Loaded wallet index {} from {} (falcon-rust compatible)", wallet_index, path);
+                println!(
+                    "        Loaded wallet index {} from {} (falcon-rust compatible)",
+                    wallet_index, path
+                );
                 pair
             }
             None => {
@@ -104,17 +111,28 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
         if let Ok(resp) = client.get(&url).send().await {
             if let Ok(j) = resp.json::<serde_json::Value>().await {
                 j["nonce"].as_u64().unwrap_or(0)
-            } else { 0 }
-        } else { 0 }
+            } else {
+                0
+            }
+        } else {
+            0
+        }
     };
-    println!("        On-chain nonce: {} — submitting from nonce {}", start_nonce, start_nonce + 1);
+    println!(
+        "        On-chain nonce: {} — submitting from nonce {}",
+        start_nonce,
+        start_nonce + 1
+    );
 
     let sequential_count = tx_count.min(10); // 10 × 120ms = 1.2s, well within 10 req/sec
-    println!("        Sequential latency test ({} txs at 120ms spacing)...", sequential_count);
+    println!(
+        "        Sequential latency test ({} txs at 120ms spacing)...",
+        sequential_count
+    );
     let mut latency_samples: Vec<f64> = Vec::new();
     let mut success_count = 0usize;
-    let mut error_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-
+    let mut error_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
 
     for i in 0..sequential_count {
         // Sleep FIRST — ensures we stay under the 10 req/sec rate limit before each request.
@@ -127,7 +145,10 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
 
         // Local sanity check: verify before sending.
         if !tx.verify() {
-            eprintln!("        ⚠️  [CHECK 1] local verify FAILED at nonce={} — signing bug!", start_nonce + i as u64 + 1);
+            eprintln!(
+                "        ⚠️  [CHECK 1] local verify FAILED at nonce={} — signing bug!",
+                start_nonce + i as u64 + 1
+            );
         }
 
         let url = format!("{}/api/transactions/submit", node_url);
@@ -153,9 +174,13 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
                 }
             }
             Err(e) => {
-                let key = if e.is_connect() { "connection_refused".to_string() }
-                          else if e.is_timeout() { "timeout".to_string() }
-                          else { "network_error".to_string() };
+                let key = if e.is_connect() {
+                    "connection_refused".to_string()
+                } else if e.is_timeout() {
+                    "timeout".to_string()
+                } else {
+                    "network_error".to_string()
+                };
                 *error_counts.entry(key).or_insert(0) += 1;
             }
         }
@@ -164,7 +189,11 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
     let mut stats = Vec::new();
 
     if !latency_samples.is_empty() {
-        let mut s = stat("Tx Submission Latency (sequential)", "ms/op", &latency_samples);
+        let mut s = stat(
+            "Tx Submission Latency (sequential)",
+            "ms/op",
+            &latency_samples,
+        );
         s.note = Some(format!(
             "success={}/{} | errors: {:?}",
             success_count, sequential_count, error_counts
@@ -173,7 +202,11 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
     }
 
     // ── Concurrent flood test ─────────────────────────────────────────────────
-    println!("        Concurrent flood test ({} tasks × {} txs)...", CONCURRENT_TASKS, tx_count / CONCURRENT_TASKS);
+    println!(
+        "        Concurrent flood test ({} tasks × {} txs)...",
+        CONCURRENT_TASKS,
+        tx_count / CONCURRENT_TASKS
+    );
     let txs_per_task = (tx_count / CONCURRENT_TASKS).max(1);
     let flood_start = Instant::now();
     let mut handles = Vec::new();
@@ -190,7 +223,8 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
             let mut task_success = 0usize;
             let mut task_errors = 0usize;
             for i in 0..txs_per_task {
-                let tx = build_test_tx(&pk_clone, &sk_clone, &addr_clone, base_nonce + i as u64 + 1);
+                let tx =
+                    build_test_tx(&pk_clone, &sk_clone, &addr_clone, base_nonce + i as u64 + 1);
                 match client_clone.post(&url).json(&tx).send().await {
                     Ok(r) if r.status().is_success() => task_success += 1,
                     _ => task_errors += 1,
@@ -231,16 +265,27 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
         )),
     });
 
-    println!("        Flood result: {:.0} tx/sec  success={}  errors={}",
-        concurrent_tps, total_success, total_errors);
+    println!(
+        "        Flood result: {:.0} tx/sec  success={}  errors={}",
+        concurrent_tps, total_success, total_errors
+    );
 
     // ── Node health check ─────────────────────────────────────────────────────
     let health_url = format!("{}/api/stats", node_url);
     if let Ok(resp) = client.get(&health_url).send().await {
         if let Ok(json) = resp.json::<serde_json::Value>().await {
-            let height = json.get("chain_length").and_then(|v| v.as_u64()).unwrap_or(0);
-            let epoch = json.get("current_epoch").and_then(|v| v.as_u64()).unwrap_or(0);
-            let mempool = json.get("pending_transactions").and_then(|v| v.as_u64()).unwrap_or(0);
+            let height = json
+                .get("chain_length")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let epoch = json
+                .get("current_epoch")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let mempool = json
+                .get("pending_transactions")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
             stats.push(BenchmarkStat {
                 name: "Node Live State Snapshot".to_string(),
                 unit: "info".to_string(),
@@ -258,7 +303,10 @@ pub async fn run(node_url: &str, tx_count: usize, wallet_file: Option<&str>, wal
                     height, epoch, mempool, node_url
                 )),
             });
-            println!("        Live node: height={} epoch={} mempool={}", height, epoch, mempool);
+            println!(
+                "        Live node: height={} epoch={} mempool={}",
+                height, epoch, mempool
+            );
         }
     }
 
@@ -329,10 +377,17 @@ fn build_test_tx(pk_bytes: &[u8], sk_bytes: &[u8], sender: &str, nonce: u64) -> 
 }
 
 fn extract_error_key(body: &str) -> String {
-    if body.contains("insufficient") { "insufficient_balance".to_string() }
-    else if body.contains("nonce") { "invalid_nonce".to_string() }
-    else if body.contains("signature") { "invalid_signature".to_string() }
-    else if body.contains("rate") { "rate_limited".to_string() }
-    else if body.contains("mempool") { "mempool_full".to_string() }
-    else { format!("other({})", &body[..body.len().min(40)]) }
+    if body.contains("insufficient") {
+        "insufficient_balance".to_string()
+    } else if body.contains("nonce") {
+        "invalid_nonce".to_string()
+    } else if body.contains("signature") {
+        "invalid_signature".to_string()
+    } else if body.contains("rate") {
+        "rate_limited".to_string()
+    } else if body.contains("mempool") {
+        "mempool_full".to_string()
+    } else {
+        format!("other({})", &body[..body.len().min(40)])
+    }
 }

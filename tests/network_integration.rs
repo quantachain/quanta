@@ -8,7 +8,9 @@ async fn test_ddos_protection_bans_rapidly() {
     let discovery = PeerDiscovery::with_dns_seeds(vec![], vec![]);
     let malicious_ip: SocketAddr = "10.0.0.99:8333".parse().unwrap();
 
-    discovery.add_peer_with_source(malicious_ip, PeerSource::Discovered).await;
+    discovery
+        .add_peer_with_source(malicious_ip, PeerSource::Discovered)
+        .await;
 
     assert!(!discovery.is_banned(&malicious_ip).await);
     let meta = discovery.get_peer_meta(&malicious_ip).await.unwrap();
@@ -32,6 +34,8 @@ async fn test_genesis_replay_attack_rejected() {
     bad_genesis.hash = "0".repeat(64);
 
     let correct_hash = "527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d";
-    assert_ne!(bad_genesis.hash, correct_hash,
-        "A fake genesis block must not match the hardcoded chain genesis hash");
+    assert_ne!(
+        bad_genesis.hash, correct_hash,
+        "A fake genesis block must not match the hardcoded chain genesis hash"
+    );
 }

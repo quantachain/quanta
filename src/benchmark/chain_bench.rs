@@ -1,3 +1,15 @@
+use crate::benchmark::crypto_bench::{stat, stat_us};
+use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
+use crate::benchmark::tx_bench::make_signed_tx;
+use crate::consensus::performance::verify_transactions_parallel;
+use crate::core::block::Block;
+use crate::core::transaction::{AccountBalance, AccountState, LockedBalance, Transaction};
+use crate::core::ChainNetwork;
+use crate::crypto::signatures::FalconKeypair;
+use lru::LruCache;
+use std::hint::black_box;
+use std::num::NonZeroUsize;
+use std::sync::Mutex;
 /// Quanta PQC Benchmark — Chain Validation & State
 ///
 /// Measures:
@@ -7,20 +19,7 @@
 ///   - Parallel verify speedup vs serial (realistic block of 1200 txs)
 ///   - LRU signature cache hit-rate simulation
 ///   - Transaction hash throughput (mempool dedup path)
-
 use std::time::Instant;
-use std::hint::black_box;
-use crate::core::block::Block;
-use crate::core::transaction::{Transaction, AccountState, AccountBalance, LockedBalance};
-use crate::core::ChainNetwork;
-use crate::crypto::signatures::FalconKeypair;
-use crate::consensus::performance::verify_transactions_parallel;
-use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
-use crate::benchmark::crypto_bench::{stat, stat_us};
-use crate::benchmark::tx_bench::make_signed_tx;
-use lru::LruCache;
-use std::num::NonZeroUsize;
-use std::sync::Mutex;
 
 pub fn run(iterations: usize) -> BenchmarkSection {
     println!("  [5/6] Chain Validation & State...");
@@ -37,13 +36,21 @@ pub fn run(iterations: usize) -> BenchmarkSection {
             let _root = state.calculate_state_root();
             samples.push(t.elapsed().as_secs_f64() * 1000.0);
         }
-        let mut s = stat(&format!("State Root ({} accounts)", n_accounts), "ms", &samples);
+        let mut s = stat(
+            &format!("State Root ({} accounts)", n_accounts),
+            "ms",
+            &samples,
+        );
         s.note = Some(format!(
             "SHA3-256 over sorted {} addresses + balances + nonces — deterministic across all nodes",
             n_accounts
         ));
         stats.push(s);
-        println!("        state_root({} accounts): {:.2} ms", n_accounts, samples.iter().sum::<f64>() / samples.len() as f64);
+        println!(
+            "        state_root({} accounts): {:.2} ms",
+            n_accounts,
+            samples.iter().sum::<f64>() / samples.len() as f64
+        );
     }
 
     // ── Coinbase unlock throughput ─────────────────────────────────────────────
@@ -57,14 +64,22 @@ pub fn run(iterations: usize) -> BenchmarkSection {
             samples.push(t.elapsed().as_secs_f64() * 1000.0);
         }
         let mut s = stat("Coinbase Unlock (10K locked entries)", "ms", &samples);
-        s.note = Some("Called once per block; scans and unlocks matured coinbase rewards".to_string());
+        s.note =
+            Some("Called once per block; scans and unlocks matured coinbase rewards".to_string());
         stats.push(s);
     }
 
     // ── Block is_valid() pipeline ─────────────────────────────────────────────────
     {
         let genesis = Block::genesis();
-        let child = Block::new_bft(1, vec![], genesis.hash.clone(), 0, 0, "0xbenchmark".to_string());
+        let child = Block::new_bft(
+            1,
+            vec![],
+            genesis.hash.clone(),
+            0,
+            0,
+            "0xbenchmark".to_string(),
+        );
 
         let n_iters = iterations.min(200);
         let mut samples = Vec::with_capacity(n_iters);
@@ -74,7 +89,10 @@ pub fn run(iterations: usize) -> BenchmarkSection {
             samples.push(t.elapsed().as_secs_f64() * 1_000_000.0); // µs
         }
         let mut s = stat_us("Block Validation Pipeline (is_valid)", "µs/op", &samples);
-        s.note = Some("Hash integrity + BFT fields + Merkle root + chain linkage (excludes tx sig verify)".to_string());
+        s.note = Some(
+            "Hash integrity + BFT fields + Merkle root + chain linkage (excludes tx sig verify)"
+                .to_string(),
+        );
         stats.push(s);
     }
 
@@ -92,34 +110,54 @@ pub fn run(iterations: usize) -> BenchmarkSection {
         let n_reps = 9usize;
 
         // Warmup both paths so thread-pool spin-up is excluded from measurement.
-        for tx in &txs { let _ = black_box(tx.verify()); }
+        for tx in &txs {
+            let _ = black_box(tx.verify());
+        }
         let _ = black_box(verify_transactions_parallel(&txs));
 
         // Serial — collect per-run samples
-        let serial_samples: Vec<f64> = (0..n_reps).map(|_| {
-            let t = Instant::now();
-            for tx in &txs { let _ = black_box(tx.verify()); }
-            t.elapsed().as_secs_f64() * 1000.0
-        }).collect();
+        let serial_samples: Vec<f64> = (0..n_reps)
+            .map(|_| {
+                let t = Instant::now();
+                for tx in &txs {
+                    let _ = black_box(tx.verify());
+                }
+                t.elapsed().as_secs_f64() * 1000.0
+            })
+            .collect();
 
         // Parallel — collect per-run samples
-        let par_samples: Vec<f64> = (0..n_reps).map(|_| {
-            let t = Instant::now();
-            let _ = black_box(verify_transactions_parallel(&txs));
-            t.elapsed().as_secs_f64() * 1000.0
-        }).collect();
+        let par_samples: Vec<f64> = (0..n_reps)
+            .map(|_| {
+                let t = Instant::now();
+                let _ = black_box(verify_transactions_parallel(&txs));
+                t.elapsed().as_secs_f64() * 1000.0
+            })
+            .collect();
 
         let cores = num_cpus::get_physical().max(1);
         let serial_mean = serial_samples.iter().sum::<f64>() / n_reps as f64;
-        let par_mean    = par_samples.iter().sum::<f64>()    / n_reps as f64;
-        let speedup     = if par_mean > 0.0 { serial_mean / par_mean } else { 1.0 };
-        let efficiency  = speedup / cores as f64 * 100.0;
+        let par_mean = par_samples.iter().sum::<f64>() / n_reps as f64;
+        let speedup = if par_mean > 0.0 {
+            serial_mean / par_mean
+        } else {
+            1.0
+        };
+        let efficiency = speedup / cores as f64 * 100.0;
 
-        let mut s_serial = stat(&format!("Block Verify Serial ({} txs)", n_tx), "ms", &serial_samples);
+        let mut s_serial = stat(
+            &format!("Block Verify Serial ({} txs)", n_tx),
+            "ms",
+            &serial_samples,
+        );
         s_serial.throughput = Some(n_tx as f64 / (serial_mean / 1000.0));
         stats.push(s_serial);
 
-        let mut s_par = stat(&format!("Block Verify Parallel/{} cores ({} txs)", cores, n_tx), "ms", &par_samples);
+        let mut s_par = stat(
+            &format!("Block Verify Parallel/{} cores ({} txs)", cores, n_tx),
+            "ms",
+            &par_samples,
+        );
         s_par.throughput = Some(n_tx as f64 / (par_mean / 1000.0));
         s_par.note = Some(format!(
             "Speedup: {:.2}×  Core efficiency: {:.1}%  (theoretical max: {}×)  [{} reps, post-warmup]",
@@ -127,8 +165,10 @@ pub fn run(iterations: usize) -> BenchmarkSection {
         ));
         stats.push(s_par);
 
-        println!("        verify({} txs): serial={:.3}ms  parallel={:.3}ms  speedup={:.2}×  ({} reps)",
-            n_tx, serial_mean, par_mean, speedup, n_reps);
+        println!(
+            "        verify({} txs): serial={:.3}ms  parallel={:.3}ms  speedup={:.2}×  ({} reps)",
+            n_tx, serial_mean, par_mean, speedup, n_reps
+        );
     }
 
     // ── LRU cache hit-rate simulation ─────────────────────────────────────────
@@ -206,7 +246,10 @@ pub fn run(iterations: usize) -> BenchmarkSection {
             p95: (elapsed_ms / n_iters as f64) * 1000.0,
             p99: (elapsed_ms / n_iters as f64) * 1000.0,
             throughput: Some(n_iters as f64 / (elapsed_ms / 1000.0)),
-            note: Some("Covers all tx fields except signature — used for Merkle leaves & mempool IDs".to_string()),
+            note: Some(
+                "Covers all tx fields except signature — used for Merkle leaves & mempool IDs"
+                    .to_string(),
+            ),
         });
     }
 

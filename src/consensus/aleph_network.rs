@@ -1,8 +1,8 @@
-use codec::{Encode, Decode};
 use aleph_bft::{Network as AlephNetwork, Recipient};
-use tokio::sync::mpsc;
 use async_trait::async_trait;
+use codec::{Decode, Encode};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 use crate::network::Network;
 
@@ -53,7 +53,9 @@ impl<D> QuantaNetworkBridge<D> {
 }
 
 #[async_trait]
-impl<D: Encode + Decode + Send + std::fmt::Debug + 'static> AlephNetwork<D> for QuantaNetworkBridge<D> {
+impl<D: Encode + Decode + Send + std::fmt::Debug + 'static> AlephNetwork<D>
+    for QuantaNetworkBridge<D>
+{
     fn send(&self, data: D, recipient: Recipient) {
         let mut encoded = Vec::new();
 
@@ -107,19 +109,25 @@ impl<D: Encode + Decode + Send + std::fmt::Debug + 'static> AlephNetwork<D> for 
     async fn next_event(&mut self) -> Option<D> {
         let mut rx = self.aleph_rx.lock().await;
         while let Some(data) = rx.recv().await {
-            if data.is_empty() { continue; }
+            if data.is_empty() {
+                continue;
+            }
             let r_type = data[0];
             let payload_start = if r_type == 0 { 1 } else { 5 };
 
             if r_type == 1 {
-                if data.len() < 5 { continue; }
+                if data.len() < 5 {
+                    continue;
+                }
                 let target_idx = u32::from_le_bytes(data[1..5].try_into().unwrap());
                 if target_idx as usize != self.my_node_index {
                     continue; // intended for someone else — filtered on receive side too
                 }
             }
 
-            if data.len() < payload_start { continue; }
+            if data.len() < payload_start {
+                continue;
+            }
 
             // Decode the data into D
             match D::decode(&mut &data[payload_start..]) {

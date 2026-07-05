@@ -1,16 +1,18 @@
 pub mod block;
-pub mod transaction;
-pub mod merkle;
 pub mod contracts;
+pub mod merkle;
+pub mod transaction;
 
 #[allow(unused_imports)]
 pub use block::Block;
 #[allow(unused_imports)]
-pub use transaction::{Transaction, TransactionType, AccountState, AccountBalance, SignatureScheme};
-#[allow(unused_imports)]
 pub use merkle::MerkleTree;
+#[allow(unused_imports)]
+pub use transaction::{
+    AccountBalance, AccountState, SignatureScheme, Transaction, TransactionType,
+};
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Chain network identity
@@ -43,4 +45,3 @@ impl ChainNetwork {
         }
     }
 }
-

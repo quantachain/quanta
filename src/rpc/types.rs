@@ -39,7 +39,6 @@ pub struct NodeStatus {
     pub version: String,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockInfo {
     pub height: u64,

@@ -14,7 +14,6 @@ use zeroize::Zeroize;
 use falcon_rust::falcon512 as fr;
 use falcon_rust::falcon512::{PublicKey as FrPublicKey, Signature as FrSignature};
 
-
 // ---------------------------------------------------------------------------
 // Falcon-512 exact byte sizes
 // ---------------------------------------------------------------------------
@@ -29,7 +28,7 @@ pub const FALCON512_PUBKEY_BYTES: usize = 897;
 /// so transaction sizes are unchanged. Verification now uses falcon-rust
 /// to avoid the C FFI incompatibility with the WASM wallet.
 pub const FALCON512_SIG_MAX_BYTES: usize = 698; // 666 sig + 32 hash
-pub const FALCON512_SIG_MIN_BYTES: usize = 33;  // at least 1 sig byte + 32 hash bytes
+pub const FALCON512_SIG_MIN_BYTES: usize = 33; // at least 1 sig byte + 32 hash bytes
 
 /// Domain separation tag — MUST match `SIGNING_DOMAIN` in quanta-wasm/src/lib.rs.
 pub const SIGNING_DOMAIN: &[u8] = b"QUANTA_TX_V1:";
@@ -92,12 +91,14 @@ impl FalconKeypair {
         if pk_bytes.len() != FALCON512_PUBKEY_BYTES {
             return Err(format!(
                 "Invalid Falcon-512 public key: {} bytes (expected {})",
-                pk_bytes.len(), FALCON512_PUBKEY_BYTES
+                pk_bytes.len(),
+                FALCON512_PUBKEY_BYTES
             ));
         }
         if sk_bytes.is_empty() || sk_bytes.len() > 2048 {
             return Err(format!(
-                "Invalid Falcon-512 secret key length: {} bytes", sk_bytes.len()
+                "Invalid Falcon-512 secret key length: {} bytes",
+                sk_bytes.len()
             ));
         }
         Ok(Self {
@@ -200,21 +201,25 @@ pub fn canonical_signing_hash(data: &[u8]) -> [u8; 32] {
 ///                The browser WASM wallet sends this format.
 ///                NOT a pqcrypto SignedMessage blob.
 /// `public_key` — 897-byte Falcon-512 public key.
-pub fn verify_signature_strict(
-    message: &[u8],
-    signed_msg: &[u8],
-    public_key: &[u8],
-) -> bool {
+pub fn verify_signature_strict(message: &[u8], signed_msg: &[u8], public_key: &[u8]) -> bool {
     // Pre-check 1: public key must be exactly 897 bytes.
     if public_key.len() != FALCON512_PUBKEY_BYTES {
-        tracing::debug!("Falcon-512 verify: pubkey len {} != {}", public_key.len(), FALCON512_PUBKEY_BYTES);
+        tracing::debug!(
+            "Falcon-512 verify: pubkey len {} != {}",
+            public_key.len(),
+            FALCON512_PUBKEY_BYTES
+        );
         return false;
     }
     // Pre-check 2: signed_msg = sig_bytes || hash_bytes (32).
     // Must be at least 33 bytes (1 sig byte + 32 hash) and at most 698 (666 + 32).
     if signed_msg.len() < FALCON512_SIG_MIN_BYTES || signed_msg.len() > FALCON512_SIG_MAX_BYTES {
-        tracing::debug!("Falcon-512 verify: blob len {} out of bounds [{}, {}]",
-            signed_msg.len(), FALCON512_SIG_MIN_BYTES, FALCON512_SIG_MAX_BYTES);
+        tracing::debug!(
+            "Falcon-512 verify: blob len {} out of bounds [{}, {}]",
+            signed_msg.len(),
+            FALCON512_SIG_MIN_BYTES,
+            FALCON512_SIG_MAX_BYTES
+        );
         return false;
     }
 
@@ -234,15 +239,23 @@ pub fn verify_signature_strict(
     // which is the raw Falcon-512 compressed signature.
     let pk = match FrPublicKey::from_bytes(public_key) {
         Ok(pk) => pk,
-        Err(_) => { tracing::debug!("Falcon-512 verify: pk parse failed"); return false; }
+        Err(_) => {
+            tracing::debug!("Falcon-512 verify: pk parse failed");
+            return false;
+        }
     };
     let sig = match FrSignature::from_bytes(raw_sig) {
         Ok(s) => s,
-        Err(_) => { tracing::debug!("Falcon-512 verify: sig parse failed"); return false; }
+        Err(_) => {
+            tracing::debug!("Falcon-512 verify: sig parse failed");
+            return false;
+        }
     };
 
     let ok = fr::verify(message, &sig, &pk);
-    if !ok { tracing::debug!("Falcon-512 verify: cryptographic check failed"); }
+    if !ok {
+        tracing::debug!("Falcon-512 verify: cryptographic check failed");
+    }
     ok
 }
 
@@ -325,7 +338,11 @@ mod tests {
         let tx_data = b"sender:recipient:1000:1234567890:1000:1";
         let (_, signed, hash) = make_canonical_signed(tx_data);
         let attacker_kp = FalconKeypair::generate();
-        assert!(!verify_signature_strict(&hash, &signed, &attacker_kp.public_key));
+        assert!(!verify_signature_strict(
+            &hash,
+            &signed,
+            &attacker_kp.public_key
+        ));
     }
 
     #[test]

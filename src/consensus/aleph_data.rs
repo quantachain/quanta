@@ -1,11 +1,11 @@
-use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, Ordering};
-use tokio::sync::RwLock;
-use async_trait::async_trait;
 use aleph_bft::DataProvider;
+use async_trait::async_trait;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-use crate::core::block::Block;
 use crate::consensus::blockchain::Blockchain;
+use crate::core::block::Block;
 
 /// Target block slot duration in seconds.
 const SLOT_SECONDS: i64 = 6;
@@ -63,13 +63,13 @@ impl DataProvider for QuantaDataProvider {
         // -----------------------------------------------------------------------
         loop {
             let now_unix = chrono::Utc::now().timestamp();
-            let last_ts  = self.last_finalized_ts.load(Ordering::Acquire);
-            let elapsed  = now_unix.saturating_sub(last_ts);
+            let last_ts = self.last_finalized_ts.load(Ordering::Acquire);
+            let elapsed = now_unix.saturating_sub(last_ts);
 
             if elapsed >= SLOT_SECONDS {
                 break;
             }
-            
+
             let delay = (SLOT_SECONDS - elapsed) as u64;
             tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
         }
@@ -78,7 +78,9 @@ impl DataProvider for QuantaDataProvider {
         // BUILD BLOCK TEMPLATE
         // -----------------------------------------------------------------------
         let bc = self.blockchain.read().await;
-        let elapsed = chrono::Utc::now().timestamp().saturating_sub(self.last_finalized_ts.load(Ordering::Acquire));
+        let elapsed = chrono::Utc::now()
+            .timestamp()
+            .saturating_sub(self.last_finalized_ts.load(Ordering::Acquire));
         match bc.create_block_template(self.my_address.clone()) {
             Ok(block) => {
                 tracing::info!(

@@ -5,8 +5,7 @@
 ///   2. A Markdown file (human-readable, for papers and presentations)
 ///
 /// Both files are written to `./benchmark_results/`.
-
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 use sysinfo::System;
 
@@ -70,16 +69,33 @@ pub fn run_all_benchmarks(
 ) -> (BenchmarkReport, Vec<BenchmarkSection>) {
     let sys_info = collect_system_info();
     println!("\n╔══════════════════════════════════════════════════════════════════╗");
-    println!("║         QUANTA PQC BENCHMARK SUITE  v{}                    ║", env!("CARGO_PKG_VERSION"));
+    println!(
+        "║         QUANTA PQC BENCHMARK SUITE  v{}                    ║",
+        env!("CARGO_PKG_VERSION")
+    );
     println!("╠══════════════════════════════════════════════════════════════════╣");
-    println!("║  CPU:  {:<57}║", &sys_info.cpu_brand[..sys_info.cpu_brand.len().min(57)]);
-    println!("║  Cores: {} physical / {} logical    RAM: {:.1} GB             ║",
-        sys_info.cpu_cores_physical, sys_info.cpu_cores_logical, sys_info.total_ram_gb);
-    println!("║  OS:   {:<57}║", &sys_info.os[..sys_info.os.len().min(57)]);
-    println!("║  Rust: {:<57}║", &sys_info.rust_version[..sys_info.rust_version.len().min(57)]);
+    println!(
+        "║  CPU:  {:<57}║",
+        &sys_info.cpu_brand[..sys_info.cpu_brand.len().min(57)]
+    );
+    println!(
+        "║  Cores: {} physical / {} logical    RAM: {:.1} GB             ║",
+        sys_info.cpu_cores_physical, sys_info.cpu_cores_logical, sys_info.total_ram_gb
+    );
+    println!(
+        "║  OS:   {:<57}║",
+        &sys_info.os[..sys_info.os.len().min(57)]
+    );
+    println!(
+        "║  Rust: {:<57}║",
+        &sys_info.rust_version[..sys_info.rust_version.len().min(57)]
+    );
     println!("╠══════════════════════════════════════════════════════════════════╣");
-    println!("║  Iterations: {:5}   Full-PoW solve: {:5}                     ║",
-        iterations, if full_pow_solve { "YES" } else { "NO" });
+    println!(
+        "║  Iterations: {:5}   Full-PoW solve: {:5}                     ║",
+        iterations,
+        if full_pow_solve { "YES" } else { "NO" }
+    );
     println!("╚══════════════════════════════════════════════════════════════════╝\n");
 
     let sections: Vec<BenchmarkSection> = vec![
@@ -107,7 +123,13 @@ pub fn run_all_benchmarks(
 /// Write JSON report to disk.
 pub fn write_json(report: &BenchmarkReport, dir: &str) -> std::io::Result<String> {
     std::fs::create_dir_all(dir)?;
-    let ts = report.generated_at.replace(':', "-").replace('T', "_").chars().take(19).collect::<String>();
+    let ts = report
+        .generated_at
+        .replace(':', "-")
+        .replace('T', "_")
+        .chars()
+        .take(19)
+        .collect::<String>();
     let path = format!("{}/quanta_benchmark_{}.json", dir, ts);
     let json = serde_json::to_string_pretty(report)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
@@ -118,7 +140,13 @@ pub fn write_json(report: &BenchmarkReport, dir: &str) -> std::io::Result<String
 /// Write Markdown report to disk.
 pub fn write_markdown(report: &BenchmarkReport, dir: &str) -> std::io::Result<String> {
     std::fs::create_dir_all(dir)?;
-    let ts = report.generated_at.replace(':', "-").replace('T', "_").chars().take(19).collect::<String>();
+    let ts = report
+        .generated_at
+        .replace(':', "-")
+        .replace('T', "_")
+        .chars()
+        .take(19)
+        .collect::<String>();
     let path = format!("{}/quanta_benchmark_{}.md", dir, ts);
     std::fs::write(&path, render_markdown(report))?;
     Ok(path)
@@ -133,14 +161,23 @@ fn render_markdown(r: &BenchmarkReport) -> String {
     md.push_str(&format!("# {}\n\n", r.title));
     md.push_str(&format!("> **Generated:** {}  \n", r.generated_at));
     md.push_str(&format!("> **Quanta Version:** `{}`  \n", r.quanta_version));
-    md.push_str(&format!("> **Iterations per test:** `{}`  \n\n", r.benchmark_iterations));
+    md.push_str(&format!(
+        "> **Iterations per test:** `{}`  \n\n",
+        r.benchmark_iterations
+    ));
 
     // System info
     md.push_str("## System Information\n\n");
     md.push_str("| Field | Value |\n|---|---|\n");
     md.push_str(&format!("| CPU | {} |\n", r.system.cpu_brand));
-    md.push_str(&format!("| Physical Cores | {} |\n", r.system.cpu_cores_physical));
-    md.push_str(&format!("| Logical Threads | {} |\n", r.system.cpu_cores_logical));
+    md.push_str(&format!(
+        "| Physical Cores | {} |\n",
+        r.system.cpu_cores_physical
+    ));
+    md.push_str(&format!(
+        "| Logical Threads | {} |\n",
+        r.system.cpu_cores_logical
+    ));
     md.push_str(&format!("| RAM | {:.1} GB |\n", r.system.total_ram_gb));
     md.push_str(&format!("| OS | {} |\n", r.system.os));
     md.push_str(&format!("| Rust | {} |\n\n", r.system.rust_version));
@@ -153,7 +190,10 @@ fn render_markdown(r: &BenchmarkReport) -> String {
     // Each section
     for (i, section) in r.sections.iter().enumerate() {
         md.push_str(&format!("## {}. {}\n\n", i + 1, section.name));
-        md.push_str(&format!("{}\n\n", section.description.replace('\n', "  \n")));
+        md.push_str(&format!(
+            "{}\n\n",
+            section.description.replace('\n', "  \n")
+        ));
 
         if section.stats.is_empty() {
             md.push_str("*No measurements recorded.*\n\n");
@@ -165,13 +205,22 @@ fn render_markdown(r: &BenchmarkReport) -> String {
         md.push_str("|---|---|---|---|---|---|---|---|---|---|---|\n");
 
         for s in &section.stats {
-            let tp = s.throughput
+            let tp = s
+                .throughput
                 .map(|t| format!("{:.0} ops/s", t))
                 .unwrap_or_else(|| "—".to_string());
             md.push_str(&format!(
                 "| {} | {} | {} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {:.3} | {} |\n",
-                s.name, s.unit, s.iterations,
-                s.mean_ms, s.stddev_ms, s.p50, s.p95, s.p99, s.min, s.max,
+                s.name,
+                s.unit,
+                s.iterations,
+                s.mean_ms,
+                s.stddev_ms,
+                s.p50,
+                s.p95,
+                s.p99,
+                s.min,
+                s.max,
                 tp,
             ));
             if let Some(ref note) = s.note {
@@ -187,7 +236,9 @@ fn render_markdown(r: &BenchmarkReport) -> String {
     md.push_str("- All timing uses `std::time::Instant` (monotonic, nanosecond resolution).\n");
     md.push_str("- Cryptographic operations use release-mode Rust (`--release`, LTO=true, codegen-units=1).\n");
     md.push_str("- Parallel benchmarks use Rayon with physical cores only (no hyperthreading).\n");
-    md.push_str("- Results are from a single unloaded machine; production server performance may differ.\n");
+    md.push_str(
+        "- Results are from a single unloaded machine; production server performance may differ.\n",
+    );
     md.push_str("- Falcon-512 signatures are variable-length (lattice-based compression);\n");
     md.push_str("  size distribution is measured over 1000 independent signatures.\n\n");
     md.push_str("## References\n\n");
@@ -208,11 +259,16 @@ fn collect_system_info() -> SystemInfo {
     sys.refresh_all();
 
     let cpu_brand = sys.global_cpu_info().brand().to_string();
-    let cpu_brand = if cpu_brand.is_empty() { "Unknown CPU".to_string() } else { cpu_brand };
+    let cpu_brand = if cpu_brand.is_empty() {
+        "Unknown CPU".to_string()
+    } else {
+        cpu_brand
+    };
 
     let total_ram_gb = sys.total_memory() as f64 / 1024.0 / 1024.0 / 1024.0;
 
-    let os = format!("{} {} {}",
+    let os = format!(
+        "{} {} {}",
         System::name().unwrap_or_else(|| "Unknown OS".to_string()),
         System::os_version().unwrap_or_else(|| "".to_string()),
         System::kernel_version().unwrap_or_else(|| "".to_string()),
@@ -258,20 +314,28 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
     let mut y = 1970u64;
     let mut d = days;
     loop {
-        let days_in_y = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
-        if d < days_in_y { break; }
+        let days_in_y = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) {
+            366
+        } else {
+            365
+        };
+        if d < days_in_y {
+            break;
+        }
         d -= days_in_y;
         y += 1;
     }
     let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
     let months = if leap {
-        [31u64,29,31,30,31,30,31,31,30,31,30,31]
+        [31u64, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     } else {
-        [31u64,28,31,30,31,30,31,31,30,31,30,31]
+        [31u64, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     };
     let mut mo = 1u64;
     for &days_in_mo in &months {
-        if d < days_in_mo { break; }
+        if d < days_in_mo {
+            break;
+        }
         d -= days_in_mo;
         mo += 1;
     }

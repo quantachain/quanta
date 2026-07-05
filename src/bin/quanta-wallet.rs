@@ -2,13 +2,12 @@
 // HD wallet is the default. Use `new-raw` only for server/programmatic key management.
 // All commands support QUANTA_WALLET_PASSWORD env var for non-interactive / AI-agent use.
 
-#[allow(deprecated)]
-use quanta::crypto::{QuantumWallet, HDWallet, TreasuryMultisigV2, MultiSigTransaction};
-use quanta::core::transaction::{Transaction, TransactionType, SignatureScheme};
-use quanta::core::contracts::{NativeContracts, EscrowInitArgs, EscrowClaimArgs, TEMPLATE_ESCROW};
-use clap::{Parser, Subcommand};
 use chrono::Utc;
-
+use clap::{Parser, Subcommand};
+use quanta::core::contracts::{EscrowClaimArgs, EscrowInitArgs, NativeContracts, TEMPLATE_ESCROW};
+use quanta::core::transaction::{SignatureScheme, Transaction, TransactionType};
+#[allow(deprecated)]
+use quanta::crypto::{HDWallet, MultiSigTransaction, QuantumWallet, TreasuryMultisigV2};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CLI Configuration (Global Config)
@@ -42,21 +41,30 @@ fn load_config() -> CliConfig {
 
 fn save_config(config: &CliConfig) {
     let data = serde_json::to_string_pretty(config).expect("Failed to serialize config");
-    std::fs::write(config_path(), data).unwrap_or_else(|e| die(&format!("Failed to save config: {}", e)));
+    std::fs::write(config_path(), data)
+        .unwrap_or_else(|e| die(&format!("Failed to save config: {}", e)));
 }
 
 fn resolve_node(cli_arg: Option<String>) -> String {
-    cli_arg.or_else(|| load_config().node).unwrap_or_else(|| "http://localhost:3000".to_string())
+    cli_arg
+        .or_else(|| load_config().node)
+        .unwrap_or_else(|| "http://localhost:3000".to_string())
 }
 
 fn resolve_wallet(cli_arg: Option<String>) -> String {
-    cli_arg.or_else(|| load_config().wallet).unwrap_or_else(|| "wallet.json".to_string())
+    cli_arg
+        .or_else(|| load_config().wallet)
+        .unwrap_or_else(|| "wallet.json".to_string())
 }
 
 const MICROUNITS_PER_QUA: u64 = 1_000_000;
 
-fn qua_to_u(qua: f64) -> u64 { (qua * MICROUNITS_PER_QUA as f64) as u64 }
-fn u_to_qua(u: u64) -> f64 { u as f64 / MICROUNITS_PER_QUA as f64 }
+fn qua_to_u(qua: f64) -> u64 {
+    (qua * MICROUNITS_PER_QUA as f64) as u64
+}
+fn u_to_qua(u: u64) -> f64 {
+    u as f64 / MICROUNITS_PER_QUA as f64
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CLI definition
@@ -88,7 +96,6 @@ struct Cli {
 #[command(rename_all = "kebab-case")]
 enum Commands {
     // ── Wallet Management ──────────────────────────────────────────────────
-
     /// [DEFAULT] Create a new HD wallet with a 24-word recovery mnemonic.
     /// Use this for all regular users and AI agents.
     New {
@@ -153,7 +160,6 @@ enum Commands {
         file: Option<String>,
     },
 
-
     /// Manage global CLI configuration (e.g. default node and wallet).
     Config {
         /// "set" or "get"
@@ -173,7 +179,6 @@ enum Commands {
     },
 
     // ── Basic Transactions ─────────────────────────────────────────────────
-
     /// Send QUA to an address.
     Send {
         #[arg(short, long)]
@@ -210,7 +215,6 @@ enum Commands {
     },
 
     // ── Staking / BFT Validator ────────────────────────────────────────────
-
     /// Register as a BFT validator by staking QUA.
     /// Your wallet's Falcon-512 public key is used for BFT signing.
     Stake {
@@ -237,7 +241,6 @@ enum Commands {
     },
 
     // ── Native Smart Contracts ─────────────────────────────────────────────
-
     /// Deploy a trustless Escrow contract.
     ///
     /// WHAT IT DOES: Locks your QUA on-chain. The beneficiary (worker AI) can
@@ -310,7 +313,6 @@ enum Commands {
     },
 
     // ── Treasury Multisig ──────────────────────────────────────────────────
-
     /// Initialize a 3-of-N treasury multisig (generates N Falcon-512 keys).
     TreasuryInit {
         #[arg(long, default_value = "treasury_setup.json")]
@@ -378,13 +380,22 @@ async fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-
         Commands::Config { action, key, value } => {
             let mut cfg = load_config();
             if action == "get" {
                 println!("Current CLI Configuration:");
-                println!("  node   = {}", cfg.node.as_deref().unwrap_or("not set (default: http://localhost:3000)"));
-                println!("  wallet = {}", cfg.wallet.as_deref().unwrap_or("not set (default: wallet.json)"));
+                println!(
+                    "  node   = {}",
+                    cfg.node
+                        .as_deref()
+                        .unwrap_or("not set (default: http://localhost:3000)")
+                );
+                println!(
+                    "  wallet = {}",
+                    cfg.wallet
+                        .as_deref()
+                        .unwrap_or("not set (default: wallet.json)")
+                );
             } else if action == "set" {
                 let k = key.unwrap_or_else(|| die("Missing config key (use 'node' or 'wallet')"));
                 let v = value.unwrap_or_else(|| die("Missing config value"));
@@ -401,7 +412,6 @@ async fn main() {
         }
 
         // ── Wallet creation ──────────────────────────────────────────────
-
         Commands::New { file, accounts } => {
             let file = resolve_wallet(file);
             let mut wallet = HDWallet::new();
@@ -430,8 +440,7 @@ async fn main() {
             // To restore a wallet created with a passphrase:
             //   export QUANTA_WALLET_PASSPHRASE="your-passphrase"
             //   quanta-wallet restore
-            let bip39_passphrase = std::env::var("QUANTA_WALLET_PASSPHRASE")
-                .unwrap_or_default();
+            let bip39_passphrase = std::env::var("QUANTA_WALLET_PASSPHRASE").unwrap_or_default();
             if !bip39_passphrase.is_empty() {
                 println!("  BIP39 passphrase: [SET via QUANTA_WALLET_PASSPHRASE]");
             }
@@ -453,7 +462,9 @@ async fn main() {
             println!("  Consider `quanta-wallet new` (HD wallet) for regular use.\n");
             let wallet = QuantumWallet::new();
             let pwd = read_new_password("raw wallet");
-            wallet.save_quantum_safe(&file, &pwd).expect("Failed to save wallet");
+            wallet
+                .save_quantum_safe(&file, &pwd)
+                .expect("Failed to save wallet");
             println!("\n Raw wallet created!");
             println!("  Address : {}", wallet.address);
             println!("  File    : {}", file);
@@ -462,7 +473,7 @@ async fn main() {
         Commands::Address { file } => {
             let file = resolve_wallet(file);
             match try_load_wallet(&file) {
-                WalletKind::Hd(w)  => {
+                WalletKind::Hd(w) => {
                     for acc in &w.accounts {
                         println!("{}", acc.address);
                     }
@@ -476,13 +487,17 @@ async fn main() {
             let file = resolve_wallet(file);
             match try_load_wallet(&file) {
                 WalletKind::Hd(w) => {
-                    eprintln!("\n  ⚠  KEEP THIS SECRET — anyone with this phrase controls your funds.\n");
+                    eprintln!(
+                        "\n  ⚠  KEEP THIS SECRET — anyone with this phrase controls your funds.\n"
+                    );
                     println!("{}", w.mnemonic);
-                    eprintln!("\n  Paste this into the wallet extension → Import Wallet → Mnemonic tab.");
+                    eprintln!(
+                        "\n  Paste this into the wallet extension → Import Wallet → Mnemonic tab."
+                    );
                 }
                 WalletKind::Raw(_) => die(
                     "Raw .qua wallets have no recovery phrase — the file IS the key.\n\
-                     Use the extension's 'Import from Private Key' panel instead."
+                     Use the extension's 'Import from Private Key' panel instead.",
                 ),
                 WalletKind::None(e) => die(&e),
             }
@@ -492,27 +507,41 @@ async fn main() {
             let wallet = resolve_wallet(wallet);
             let kp = load_keypair_for_signing(&wallet);
             let public_key_hex = hex::encode(&kp.keypair.public_key);
-            
+
             // Generate a simple JSON object string
             let json = format!(
                 "{{\n  \"address\": \"{}\",\n  \"public_key\": \"{}\"\n}}",
                 kp.address, public_key_hex
             );
-            
-            std::fs::write(&out, json).unwrap_or_else(|e| die(&format!("Failed to write {}: {}", out, e)));
+
+            std::fs::write(&out, json)
+                .unwrap_or_else(|e| die(&format!("Failed to write {}: {}", out, e)));
             println!("\n Validator keys exported successfully!");
             println!("  File      : {}", out);
             println!("  Address   : {}", kp.address);
-            println!("\n Send {} to the network coordinator to be included in the Genesis Block.", out);
+            println!(
+                "\n Send {} to the network coordinator to be included in the Genesis Block.",
+                out
+            );
         }
 
         Commands::ExportPrivateKey { file } => {
             let file = resolve_wallet(file);
             let kp = load_keypair_for_signing(&file);
-            eprintln!("\n  ⚠  KEEP THIS SECRET — anyone with the private key controls your funds.\n");
-            println!("  Public Key (Hex) : {}", hex::encode(&kp.keypair.public_key));
-            println!("  Private Key (Hex): {}", hex::encode(kp.keypair.secret_key_bytes()));
-            eprintln!("\n  Paste these into the wallet extension → Import Wallet → Private Key tab.");
+            eprintln!(
+                "\n  ⚠  KEEP THIS SECRET — anyone with the private key controls your funds.\n"
+            );
+            println!(
+                "  Public Key (Hex) : {}",
+                hex::encode(&kp.keypair.public_key)
+            );
+            println!(
+                "  Private Key (Hex): {}",
+                hex::encode(kp.keypair.secret_key_bytes())
+            );
+            eprintln!(
+                "\n  Paste these into the wallet extension → Import Wallet → Private Key tab."
+            );
         }
 
         Commands::Info { file, node } => {
@@ -523,7 +552,12 @@ async fn main() {
                     println!("\n HD Wallet ({} account(s))", w.accounts.len());
                     for acc in &w.accounts {
                         let bal = fetch_balance(&node, &acc.address).await;
-                        println!("  [{}] {} — {:.6} QUA", acc.label.as_deref().unwrap_or("?"), acc.address, u_to_qua(bal));
+                        println!(
+                            "  [{}] {} — {:.6} QUA",
+                            acc.label.as_deref().unwrap_or("?"),
+                            acc.address,
+                            u_to_qua(bal)
+                        );
                     }
                 }
                 WalletKind::Raw(w) => {
@@ -535,8 +569,13 @@ async fn main() {
         }
 
         // ── Basic transactions ────────────────────────────────────────────
-
-        Commands::Send { wallet, to, amount, fee, node } => {
+        Commands::Send {
+            wallet,
+            to,
+            amount,
+            fee,
+            node,
+        } => {
             let wallet = resolve_wallet(wallet);
             let node = resolve_node(node);
             let kp = load_keypair_for_signing(&wallet);
@@ -545,7 +584,14 @@ async fn main() {
             broadcast_and_print(&node, &tx, "Transfer", &kp.address, &to, amount, fee).await;
         }
 
-        Commands::SendWithData { wallet, to, amount, fee, data, node } => {
+        Commands::SendWithData {
+            wallet,
+            to,
+            amount,
+            fee,
+            data,
+            node,
+        } => {
             let wallet = resolve_wallet(wallet);
             let node = resolve_node(node);
             let kp = load_keypair_for_signing(&wallet);
@@ -557,26 +603,32 @@ async fn main() {
         }
 
         // ── Staking ───────────────────────────────────────────────────────
-
-        Commands::Stake { wallet, amount, fee, node } => {
+        Commands::Stake {
+            wallet,
+            amount,
+            fee,
+            node,
+        } => {
             let wallet = resolve_wallet(wallet);
             let node = resolve_node(node);
             let kp = load_keypair_for_signing(&wallet);
             let nonce = fetch_nonce(&node, &kp.address).await + 1;
             let mut tx = Transaction {
-                sender:     kp.address.clone(),
-                recipient:  kp.address.clone(), // staking is self-directed
-                amount:     qua_to_u(amount),
-                timestamp:  Utc::now().timestamp(),
-                signature:  vec![],
+                sender: kp.address.clone(),
+                recipient: kp.address.clone(), // staking is self-directed
+                amount: qua_to_u(amount),
+                timestamp: Utc::now().timestamp(),
+                signature: vec![],
                 public_key: kp.keypair.public_key.clone(),
-                fee:        qua_to_u(fee),
+                fee: qua_to_u(fee),
                 nonce,
-                lock_time:  0,
-                tx_type:    TransactionType::Stake { validator_pubkey: kp.keypair.public_key.clone() },
+                lock_time: 0,
+                tx_type: TransactionType::Stake {
+                    validator_pubkey: kp.keypair.public_key.clone(),
+                },
                 sig_scheme: SignatureScheme::Falcon512,
                 network_id: 0,
-                payload:    vec![],
+                payload: vec![],
             };
             let sig_bytes = tx.get_signing_bytes();
             tx.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
@@ -598,19 +650,19 @@ async fn main() {
             let kp = load_keypair_for_signing(&wallet);
             let nonce = fetch_nonce(&node, &kp.address).await + 1;
             let mut tx = Transaction {
-                sender:     kp.address.clone(),
-                recipient:  kp.address.clone(),
-                amount:     0,
-                timestamp:  Utc::now().timestamp(),
-                signature:  vec![],
+                sender: kp.address.clone(),
+                recipient: kp.address.clone(),
+                amount: 0,
+                timestamp: Utc::now().timestamp(),
+                signature: vec![],
                 public_key: kp.keypair.public_key.clone(),
-                fee:        qua_to_u(fee),
+                fee: qua_to_u(fee),
                 nonce,
-                lock_time:  0,
-                tx_type:    TransactionType::Unstake,
+                lock_time: 0,
+                tx_type: TransactionType::Unstake,
                 sig_scheme: SignatureScheme::Falcon512,
                 network_id: 0,
-                payload:    vec![],
+                payload: vec![],
             };
             let sig_bytes = tx.get_signing_bytes();
             tx.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
@@ -626,8 +678,15 @@ async fn main() {
         }
 
         // ── Native Contracts ──────────────────────────────────────────────
-
-        Commands::DeployEscrow { wallet, beneficiary, secret_hash, amount, fee, refund_height, node } => {
+        Commands::DeployEscrow {
+            wallet,
+            beneficiary,
+            secret_hash,
+            amount,
+            fee,
+            refund_height,
+            node,
+        } => {
             let wallet = resolve_wallet(wallet);
             let node = resolve_node(node);
             if secret_hash.len() != 64 {
@@ -640,24 +699,28 @@ async fn main() {
                 beneficiary: beneficiary.clone(),
                 secret_hash: secret_hash.clone(),
                 refund_height,
-            }).expect("Failed to encode init args");
+            })
+            .expect("Failed to encode init args");
 
             // Compute the deterministic contract address from a preview of the tx hash
             // (the node will compute this authoritatively — we show it as a preview)
             let mut tx = Transaction {
-                sender:     kp.address.clone(),
-                recipient:  String::new(), // filled below
-                amount:     qua_to_u(amount),
-                timestamp:  Utc::now().timestamp(),
-                signature:  vec![],
+                sender: kp.address.clone(),
+                recipient: String::new(), // filled below
+                amount: qua_to_u(amount),
+                timestamp: Utc::now().timestamp(),
+                signature: vec![],
                 public_key: kp.keypair.public_key.clone(),
-                fee:        qua_to_u(fee),
+                fee: qua_to_u(fee),
                 nonce,
-                lock_time:  0,
-                tx_type:    TransactionType::ContractDeploy { template_id: TEMPLATE_ESCROW, init_args },
+                lock_time: 0,
+                tx_type: TransactionType::ContractDeploy {
+                    template_id: TEMPLATE_ESCROW,
+                    init_args,
+                },
                 sig_scheme: SignatureScheme::Falcon512,
                 network_id: 0,
-                payload:    vec![],
+                payload: vec![],
             };
             let tx_hash = tx.hash();
             let contract_address = NativeContracts::generate_address(&tx_hash);
@@ -674,15 +737,26 @@ async fn main() {
                     println!("  Beneficiary    : {}", beneficiary);
                     println!("  Secret Hash    : {}", secret_hash);
                     println!("  Locked Amount  : {:.6} QUA", amount);
-                    println!("\n  Share the contract address with the worker so they can call claim.");
+                    println!(
+                        "\n  Share the contract address with the worker so they can call claim."
+                    );
                     println!("  Worker command:");
-                    println!("    quanta-wallet claim-escrow --contract {} --preimage <HEX>", contract_address);
+                    println!(
+                        "    quanta-wallet claim-escrow --contract {} --preimage <HEX>",
+                        contract_address
+                    );
                 }
                 Err(e) => die(&format!("Deploy failed: {}", e)),
             }
         }
 
-        Commands::ClaimEscrow { wallet, contract, preimage, fee, node } => {
+        Commands::ClaimEscrow {
+            wallet,
+            contract,
+            preimage,
+            fee,
+            node,
+        } => {
             let wallet = resolve_wallet(wallet);
             let node = resolve_node(node);
             let kp = load_keypair_for_signing(&wallet);
@@ -690,26 +764,27 @@ async fn main() {
 
             let call_args = serde_json::to_vec(&EscrowClaimArgs {
                 preimage: preimage.clone(),
-            }).expect("Failed to encode claim args");
+            })
+            .expect("Failed to encode claim args");
 
             let mut tx = Transaction {
-                sender:     kp.address.clone(),
-                recipient:  contract.clone(),
-                amount:     0,
-                timestamp:  Utc::now().timestamp(),
-                signature:  vec![],
+                sender: kp.address.clone(),
+                recipient: contract.clone(),
+                amount: 0,
+                timestamp: Utc::now().timestamp(),
+                signature: vec![],
                 public_key: kp.keypair.public_key.clone(),
-                fee:        qua_to_u(fee),
+                fee: qua_to_u(fee),
                 nonce,
-                lock_time:  0,
-                tx_type:    TransactionType::ContractCall {
+                lock_time: 0,
+                tx_type: TransactionType::ContractCall {
                     contract_address: contract.clone(),
-                    method:           "claim".to_string(),
+                    method: "claim".to_string(),
                     call_args,
                 },
                 sig_scheme: SignatureScheme::Falcon512,
                 network_id: 0,
-                payload:    vec![],
+                payload: vec![],
             };
             let sig_bytes = tx.get_signing_bytes();
             tx.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
@@ -721,13 +796,22 @@ async fn main() {
                     println!("  Contract  : {}", contract);
                     let preimage_preview = &preimage[..preimage.len().min(16)];
                     println!("  Preimage  : {}...", preimage_preview);
-                    println!("\n  If the preimage matches, funds will be released to the beneficiary.");
+                    println!(
+                        "\n  If the preimage matches, funds will be released to the beneficiary."
+                    );
                 }
                 Err(e) => die(&format!("Claim failed: {}", e)),
             }
         }
 
-        Commands::ContractCall { wallet, contract, method, args, fee, node } => {
+        Commands::ContractCall {
+            wallet,
+            contract,
+            method,
+            args,
+            fee,
+            node,
+        } => {
             let wallet = resolve_wallet(wallet);
             let node = resolve_node(node);
             let kp = load_keypair_for_signing(&wallet);
@@ -736,23 +820,23 @@ async fn main() {
             let call_args: Vec<u8> = args.into_bytes();
 
             let mut tx = Transaction {
-                sender:     kp.address.clone(),
-                recipient:  contract.clone(),
-                amount:     0,
-                timestamp:  Utc::now().timestamp(),
-                signature:  vec![],
+                sender: kp.address.clone(),
+                recipient: contract.clone(),
+                amount: 0,
+                timestamp: Utc::now().timestamp(),
+                signature: vec![],
                 public_key: kp.keypair.public_key.clone(),
-                fee:        qua_to_u(fee),
+                fee: qua_to_u(fee),
                 nonce,
-                lock_time:  0,
-                tx_type:    TransactionType::ContractCall {
+                lock_time: 0,
+                tx_type: TransactionType::ContractCall {
                     contract_address: contract.clone(),
-                    method:           method.clone(),
+                    method: method.clone(),
                     call_args,
                 },
                 sig_scheme: SignatureScheme::Falcon512,
                 network_id: 0,
-                payload:    vec![],
+                payload: vec![],
             };
             let sig_bytes = tx.get_signing_bytes();
             tx.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
@@ -769,15 +853,22 @@ async fn main() {
         }
 
         // ── Treasury ──────────────────────────────────────────────────────
-
-        Commands::TreasuryInit { out, key_prefix, signers, password } => {
+        Commands::TreasuryInit {
+            out,
+            key_prefix,
+            signers,
+            password,
+        } => {
             if signers < TreasuryMultisigV2::REQUIRED {
                 die(&format!(
                     "--signers must be >= {} (got {}). A 3-of-N treasury needs at least 3 keyholders.",
                     TreasuryMultisigV2::REQUIRED, signers
                 ));
             }
-            println!("\n Generating 3-of-{} treasury multisig (Falcon-512)...\n", signers);
+            println!(
+                "\n Generating 3-of-{} treasury multisig (Falcon-512)...\n",
+                signers
+            );
             let (setup, keypairs) = TreasuryMultisigV2::generate(signers);
             println!("  Policy          : {}", setup.policy_string());
             println!("  Treasury Address: {}", setup.address);
@@ -794,13 +885,23 @@ async fn main() {
             println!();
             for (i, kp) in keypairs.iter().enumerate() {
                 let keyfile = format!("{}_key{}.qua", key_prefix, i);
-                let w = QuantumWallet { keypair: kp.clone(), address: kp.get_address() };
-                w.save_quantum_safe(&keyfile, &pwd).expect("Failed to save key file");
+                let w = QuantumWallet {
+                    keypair: kp.clone(),
+                    address: kp.get_address(),
+                };
+                w.save_quantum_safe(&keyfile, &pwd)
+                    .expect("Failed to save key file");
                 println!("  Key {} saved : {} ({})", i, keyfile, kp.get_address());
             }
             println!("\n SECURITY CHECKLIST:");
-            println!("  [ ] Distribute the {} key files to {} SEPARATE secure locations", signers, signers);
-            println!("  [ ] Any 3 of {} keyholders can authorize a spend", signers);
+            println!(
+                "  [ ] Distribute the {} key files to {} SEPARATE secure locations",
+                signers, signers
+            );
+            println!(
+                "  [ ] Any 3 of {} keyholders can authorize a spend",
+                signers
+            );
         }
 
         Commands::TreasuryInfo { setup, node } => {
@@ -810,29 +911,56 @@ async fn main() {
             let bal = fetch_balance(&node, &ts.address).await;
             println!("\n Treasury Info");
             println!("  Address : {}", ts.address);
-            println!("  Policy  : 3-of-{} Falcon-512 multisig", ts.public_keys.len());
+            println!(
+                "  Policy  : 3-of-{} Falcon-512 multisig",
+                ts.public_keys.len()
+            );
             println!("  Balance : {:.6} QUA ({} microunits)", u_to_qua(bal), bal);
         }
 
-        Commands::TreasuryPropose { setup, to, amount, fee, nonce, out } => {
+        Commands::TreasuryPropose {
+            setup,
+            to,
+            amount,
+            fee,
+            nonce,
+            out,
+        } => {
             let json = std::fs::read_to_string(&setup).expect("Could not read treasury setup");
             let ts = TreasuryMultisigV2::from_json(&json).expect("Invalid treasury setup JSON");
-            let proposal = ts.propose_spend(to.clone(), qua_to_u(amount), qua_to_u(fee), nonce, Utc::now().timestamp());
+            let proposal = ts.propose_spend(
+                to.clone(),
+                qua_to_u(amount),
+                qua_to_u(fee),
+                nonce,
+                Utc::now().timestamp(),
+            );
             let req_sigs = proposal.required_signatures;
             let total_keys = proposal.public_keys.len();
             std::fs::write(&out, proposal.to_json()).expect("Failed to save proposal");
             println!("\n Treasury proposal created: {}", out);
             println!("  To      : {}", to);
             println!("  Amount  : {:.6} QUA", amount);
-            println!("\n  Sign with any {} of {} treasury keys:", req_sigs, total_keys);
+            println!(
+                "\n  Sign with any {} of {} treasury keys:",
+                req_sigs, total_keys
+            );
             for i in 0..req_sigs {
-                println!("   quanta-wallet treasury-sign --proposal {} --key {}_key{}.qua --index {}", out, "treasury", i, i);
+                println!(
+                    "   quanta-wallet treasury-sign --proposal {} --key {}_key{}.qua --index {}",
+                    out, "treasury", i, i
+                );
             }
         }
 
-        Commands::TreasurySign { proposal, key, index } => {
+        Commands::TreasurySign {
+            proposal,
+            key,
+            index,
+        } => {
             let prop_json = std::fs::read_to_string(&proposal).expect("Could not read proposal");
-            let mut prop = MultiSigTransaction::from_json(&prop_json).expect("Invalid proposal JSON");
+            let mut prop =
+                MultiSigTransaction::from_json(&prop_json).expect("Invalid proposal JSON");
             let pwd = read_password(&format!("Password for {}", key));
             let wallet = QuantumWallet::load_quantum_safe(&key, &pwd).expect("Failed to load key");
             #[allow(deprecated)]
@@ -840,10 +968,16 @@ async fn main() {
                 .expect("Failed to sign proposal");
             let (collected, required) = prop.signature_progress();
             std::fs::write(&proposal, prop.to_json()).expect("Failed to save signed proposal");
-            println!("\n Signed with key {}. Signatures: {}/{}", index, collected, required);
+            println!(
+                "\n Signed with key {}. Signatures: {}/{}",
+                index, collected, required
+            );
             if prop.is_complete() {
                 println!("  READY TO BROADCAST:");
-                println!("   quanta-wallet treasury-broadcast --proposal {}", proposal);
+                println!(
+                    "   quanta-wallet treasury-broadcast --proposal {}",
+                    proposal
+                );
             } else {
                 println!("  Need {} more signature(s).", required - collected);
             }
@@ -854,8 +988,15 @@ async fn main() {
             let json = std::fs::read_to_string(&proposal).expect("Could not read proposal");
             let prop = MultiSigTransaction::from_json(&json).expect("Invalid proposal JSON");
             let (col, req) = prop.signature_progress();
-            if !prop.is_complete() { die(&format!("Proposal not complete: {}/{} signatures", col, req)); }
-            if !prop.verify() { die("Signature verification failed — proposal is invalid!"); }
+            if !prop.is_complete() {
+                die(&format!(
+                    "Proposal not complete: {}/{} signatures",
+                    col, req
+                ));
+            }
+            if !prop.verify() {
+                die("Signature verification failed — proposal is invalid!");
+            }
             match broadcast_tx(&node, &prop.base_tx).await {
                 Ok(hash) => {
                     println!("\n Treasury transaction broadcast!");
@@ -895,7 +1036,7 @@ fn try_load_wallet(file: &str) -> WalletKind {
     }
     // Fall back to raw wallet
     match QuantumWallet::load_quantum_safe(file, &pwd) {
-        Ok(w)  => WalletKind::Raw(w),
+        Ok(w) => WalletKind::Raw(w),
         Err(e) => WalletKind::None(format!("Failed to load wallet '{}': {}", file, e)),
     }
 }
@@ -908,33 +1049,46 @@ fn load_keypair_for_signing(file: &str) -> SigningWallet {
         if let Ok(w) = HDWallet::import_encrypted(&bytes, &pwd) {
             if let Some(acc) = w.accounts.first() {
                 if let Ok(kp) = w.get_keypair(0) {
-                    return SigningWallet { address: acc.address.clone(), keypair: kp };
+                    return SigningWallet {
+                        address: acc.address.clone(),
+                        keypair: kp,
+                    };
                 }
             }
         }
     }
     // Fall back to raw wallet
     let w = QuantumWallet::load_quantum_safe(file, &pwd)
-        .unwrap_or_else(|e| { die(&format!("Failed to load wallet: {}", e)) });
-    SigningWallet { address: w.address.clone(), keypair: w.keypair }
+        .unwrap_or_else(|e| die(&format!("Failed to load wallet: {}", e)));
+    SigningWallet {
+        address: w.address.clone(),
+        keypair: w.keypair,
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Transaction builder helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn build_transfer(kp: &SigningWallet, to: &str, amount: f64, fee: f64, nonce: u64, payload: Vec<u8>) -> Transaction {
+fn build_transfer(
+    kp: &SigningWallet,
+    to: &str,
+    amount: f64,
+    fee: f64,
+    nonce: u64,
+    payload: Vec<u8>,
+) -> Transaction {
     let mut tx = Transaction {
-        sender:     kp.address.clone(),
-        recipient:  to.to_string(),
-        amount:     qua_to_u(amount),
-        timestamp:  Utc::now().timestamp(),
-        signature:  vec![],
+        sender: kp.address.clone(),
+        recipient: to.to_string(),
+        amount: qua_to_u(amount),
+        timestamp: Utc::now().timestamp(),
+        signature: vec![],
         public_key: kp.keypair.public_key.clone(),
-        fee:        qua_to_u(fee),
+        fee: qua_to_u(fee),
         nonce,
-        lock_time:  0,
-        tx_type:    TransactionType::Transfer,
+        lock_time: 0,
+        tx_type: TransactionType::Transfer,
         sig_scheme: SignatureScheme::Falcon512,
         network_id: 0,
         payload,
@@ -944,7 +1098,15 @@ fn build_transfer(kp: &SigningWallet, to: &str, amount: f64, fee: f64, nonce: u6
     tx
 }
 
-async fn broadcast_and_print(node: &str, tx: &Transaction, kind: &str, from: &str, to: &str, amount: f64, fee: f64) {
+async fn broadcast_and_print(
+    node: &str,
+    tx: &Transaction,
+    kind: &str,
+    from: &str,
+    to: &str,
+    amount: f64,
+    fee: f64,
+) {
     match broadcast_tx(node, tx).await {
         Ok(hash) => {
             println!("\n {} submitted!", kind);
@@ -968,19 +1130,25 @@ fn die(msg: &str) -> ! {
 }
 
 fn read_password(prompt: &str) -> String {
-    if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") { return p; }
+    if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
+        return p;
+    }
     println!("{}:", prompt);
     rpassword::read_password().expect("Failed to read password")
 }
 
 fn read_new_password(label: &str) -> String {
-    if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") { return p; }
+    if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
+        return p;
+    }
     loop {
         println!("Enter password for {}:", label);
         let p1 = rpassword::read_password().expect("Read failed");
         println!("Confirm password:");
         let p2 = rpassword::read_password().expect("Read failed");
-        if p1 == p2 { return p1; }
+        if p1 == p2 {
+            return p1;
+        }
         println!(" Passwords don't match, try again.");
     }
 }
@@ -991,10 +1159,18 @@ async fn fetch_balance(node: &str, address: &str) -> u64 {
     match resp {
         Ok(r) => {
             if let Ok(j) = r.json::<serde_json::Value>().await {
-                j["balance_microunits"].as_u64().or_else(|| j["balance"].as_u64()).unwrap_or(0)
-            } else { 0 }
+                j["balance_microunits"]
+                    .as_u64()
+                    .or_else(|| j["balance"].as_u64())
+                    .unwrap_or(0)
+            } else {
+                0
+            }
         }
-        Err(_) => { eprintln!("  Warning: could not fetch balance from {}", node); 0 }
+        Err(_) => {
+            eprintln!("  Warning: could not fetch balance from {}", node);
+            0
+        }
     }
 }
 
@@ -1005,7 +1181,9 @@ async fn fetch_nonce(node: &str, address: &str) -> u64 {
         Ok(r) => {
             if let Ok(j) = r.json::<serde_json::Value>().await {
                 j["nonce"].as_u64().unwrap_or(0)
-            } else { 0 }
+            } else {
+                0
+            }
         }
         Err(_) => 0,
     }
@@ -1014,12 +1192,20 @@ async fn fetch_nonce(node: &str, address: &str) -> u64 {
 async fn broadcast_tx(node: &str, tx: &Transaction) -> Result<String, String> {
     let url = format!("{}/api/transactions/submit", node);
     let client = reqwest::Client::new();
-    let resp = client.post(&url).json(tx).send().await.map_err(|e| e.to_string())?;
+    let resp = client
+        .post(&url)
+        .json(tx)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
     let status = resp.status();
     let body: serde_json::Value = resp.json().await.unwrap_or_default();
     if status.is_success() {
         Ok(body["tx_hash"].as_str().unwrap_or("(unknown)").to_string())
     } else {
-        Err(body["error"].as_str().unwrap_or("Unknown error").to_string())
+        Err(body["error"]
+            .as_str()
+            .unwrap_or("Unknown error")
+            .to_string())
     }
 }

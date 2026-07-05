@@ -1,22 +1,21 @@
 use crate::core::block::Block;
+use crate::core::transaction::{AccountState, Transaction};
 use crate::core::ChainNetwork;
-use crate::core::transaction::{Transaction, AccountState};
 use crate::storage::{BlockchainStorage, StorageError};
-use serde::{Serialize, Deserialize};
-use parking_lot::RwLock;
-use std::sync::Arc;
-use std::collections::VecDeque;
-use thiserror::Error;
 use dashmap::DashMap;
-use tokio::sync::watch; // New-block notification channel (abort-on-stale mining)
+use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use sha3::Digest;
-
+use std::collections::VecDeque;
+use std::sync::Arc;
+use thiserror::Error;
+use tokio::sync::watch; // New-block notification channel (abort-on-stale mining)
 
 // PERFORMANCE OPTIMIZATIONS FOR POST-QUANTUM CRYPTO
-use rayon::prelude::*;  // Parallel signature verification (6x faster)
-use std::sync::Mutex;
-use lru::LruCache;      // Signature verification cache
+use lru::LruCache; // Signature verification cache
+use rayon::prelude::*; // Parallel signature verification (6x faster)
 use std::num::NonZeroUsize;
+use std::sync::Mutex;
 
 // PQC-SPECIFIC OPTIMIZATIONS
 // Falcon-512 transactions are 1713 bytes each — far larger than secp256k1.
@@ -30,7 +29,9 @@ pub enum BlockchainError {
     Storage(#[from] StorageError),
     #[error("Invalid signature")]
     InvalidSignature,
-    #[error("Insufficient balance: required {required} microunits, available {available} microunits")]
+    #[error(
+        "Insufficient balance: required {required} microunits, available {available} microunits"
+    )]
     InsufficientBalance { required: u64, available: u64 },
     #[error("Invalid nonce: expected {expected}, got {actual}")]
     InvalidNonce { expected: u64, actual: u64 },
@@ -123,12 +124,14 @@ const BOOTSTRAP_PHASE_BLOCKS: u64 = 315_360; // First month bootstrap reference
 // Validators need real fee income; burn kept high for deflation; treasury funds AI SDK work.
 #[allow(dead_code)]
 const BASE_TRANSACTION_FEE: u64 = 1_000; // 0.001 QUA minimum (prevents spam)
-const FEE_BURN_PERCENT: u64 = 50;      // 50% burned — deflationary without punishing micro-tx
-const FEE_TREASURY_PERCENT: u64 = 15;  // 15% to Ecosystem Fund (QEF)
+const FEE_BURN_PERCENT: u64 = 50; // 50% burned — deflationary without punishing micro-tx
+const FEE_TREASURY_PERCENT: u64 = 15; // 15% to Ecosystem Fund (QEF)
 const FEE_VALIDATOR_PERCENT: u64 = 35; // 35% to block proposer — DPoS validators need real yield
-// Compile-time guard — build fails if fee percentages don't add to 100.
-const _: () = assert!(FEE_BURN_PERCENT + FEE_TREASURY_PERCENT + FEE_VALIDATOR_PERCENT == 100,
-    "Fee percentages must sum to 100");
+                                       // Compile-time guard — build fails if fee percentages don't add to 100.
+const _: () = assert!(
+    FEE_BURN_PERCENT + FEE_TREASURY_PERCENT + FEE_VALIDATOR_PERCENT == 100,
+    "Fee percentages must sum to 100"
+);
 
 // ECOSYSTEM FUND (QEF) — AI SDK, security audits, exchange listings, community
 const TREASURY_ALLOCATION_PERCENT: u64 = 8; // 8% of block rewards → Quanta Ecosystem Fund
@@ -153,10 +156,10 @@ const MAX_MEMPOOL_TXS_PER_SENDER: usize = 25;
 // 2000 tx × 1713 bytes = 3.43 MB — fits cleanly within the new 4 MB block limit
 // with room for the coinbase tx and block header overhead.
 const MAX_BLOCK_TRANSACTIONS: usize = 2000; // Maximum transactions per block
-// PERF (2026-07-02): Increased from 2MB to 4MB
-// Doubles TPS ceiling (~200 → ~400 TPS) without changing block time.
-// Wire size stays ~1MB after zstd compression (4× ratio on Falcon sig data).
-// DB decompress cap in storage/db.rs uses MAX_BLOCK_SIZE_BYTES * 2 and auto-updates.
+                                            // PERF (2026-07-02): Increased from 2MB to 4MB
+                                            // Doubles TPS ceiling (~200 → ~400 TPS) without changing block time.
+                                            // Wire size stays ~1MB after zstd compression (4× ratio on Falcon sig data).
+                                            // DB decompress cap in storage/db.rs uses MAX_BLOCK_SIZE_BYTES * 2 and auto-updates.
 /// Exported so `storage::db` can enforce a matching decompress size cap (MED-5).
 pub const MAX_BLOCK_SIZE_BYTES: usize = 4_194_304; // 4 MB max block size
 const MAX_ORPHAN_BLOCKS: usize = 2000; // Increased to hold full MAX_SYNC_BATCH out-of-order blocks
@@ -221,7 +224,8 @@ const GENESIS_HASH: &str = "1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685
 /// Old nodes on the previous testnet genesis will be rejected by this hash check.
 /// Testnet reset 2026-06-06 — new genesis after validator wallet replacement.
 /// Confirmed via `cargo run --bin get_testnet_hash` — timestamp 1780704001.
-const TESTNET_GENESIS_HASH: &str = "ae37fe2f40a7e7dbe6d2d1337f260d57185ef5fb169008e2600f245809fd1fbf";
+const TESTNET_GENESIS_HASH: &str =
+    "ae37fe2f40a7e7dbe6d2d1337f260d57185ef5fb169008e2600f245809fd1fbf";
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)
@@ -230,14 +234,10 @@ const TESTNET_GENESIS_HASH: &str = "ae37fe2f40a7e7dbe6d2d1337f260d57185ef5fb1690
 // TESTNET checkpoints — fetched live from rpc.quantachain.org on 2026-04-22
 // Never add a checkpoint you haven't independently verified.
 // Updated 2026-06-06: new genesis after validator wallet swap + timestamp reset.
-const TESTNET_CHECKPOINTS: &[(u64, &str)] = &[
-    (0, TESTNET_GENESIS_HASH),
-];
+const TESTNET_CHECKPOINTS: &[(u64, &str)] = &[(0, TESTNET_GENESIS_HASH)];
 
 // MAINNET checkpoints — empty until mainnet launch
-const MAINNET_CHECKPOINTS: &[(u64, &str)] = &[
-    (0, GENESIS_HASH),
-];
+const MAINNET_CHECKPOINTS: &[(u64, &str)] = &[(0, GENESIS_HASH)];
 
 /// Apply the annual reward reduction using PURE INTEGER MATH.
 ///
@@ -322,26 +322,33 @@ pub struct Blockchain {
 
 impl Blockchain {
     /// Create or load blockchain from storage (OPTIMIZED to not load full chain)
-    pub fn new(storage: Arc<BlockchainStorage>, network: ChainNetwork) -> Result<Self, BlockchainError> {
+    pub fn new(
+        storage: Arc<BlockchainStorage>,
+        network: ChainNetwork,
+    ) -> Result<Self, BlockchainError> {
         // OPTIMIZATION: Only load genesis to verify chain exists
         // All other blocks loaded on-demand from disk
         let _chain = storage.load_chain()?;
-        let account_state = storage.load_account_state()?.unwrap_or_else(AccountState::new);
-        
+        let account_state = storage
+            .load_account_state()?
+            .unwrap_or_else(AccountState::new);
+
         // OPTIMIZATION: load_chain only returns genesis or empty if new.
         // We must check storage height to see if we truly have an empty chain!
         let height = storage.get_chain_height()?;
-        
+
         // Define expected genesis hash based on network
         // Note: Mainnet hash is hardcoded constant. Testnet hash should be calculated or hardcoded once known.
         // For now, we trust the generated testnet genesis if it's testnet.
-        
+
         let (chain, account_state) = if height == 0 {
             // Create genesis block
-            tracing::info!("Creating new blockchain with genesis block for {:?}", network);
+            tracing::info!(
+                "Creating new blockchain with genesis block for {:?}",
+                network
+            );
             let genesis = Block::genesis();
 
-            
             // SECURITY: Verify genesis hash matches hardcoded value (prevents chain split)
             if network == ChainNetwork::Mainnet && genesis.hash != GENESIS_HASH {
                 panic!("CRITICAL: Mainnet Genesis block hash mismatch!\nExpected: {}\nGot: {}\nThis indicates tampering or incorrect genesis generation.", 
@@ -350,9 +357,9 @@ impl Blockchain {
                 panic!("CRITICAL: Testnet Genesis block hash mismatch!\nExpected: {}\nGot: {}\nSomeone modified the Testnet Faucet code!", 
                     TESTNET_GENESIS_HASH, genesis.hash);
             }
-            
+
             let mut account_state = AccountState::new();
-            
+
             // Genesis distribution
             let (recipients, premine_amount) = if network == ChainNetwork::Testnet {
                 // TESTNET PREMINE: 1 Million QUA per wallet (1_000_000_000_000 microunits)
@@ -360,21 +367,27 @@ impl Blockchain {
                 // Mnemonic: set FAUCET_MNEMONIC in quanta-web/.env.local
                 // Account 0 = faucet sender address (used by the faucet API)
                 let testnet_faucets = vec![
-                    "0xec4f49553e31f22b27a83036a044aff7d697f524",  // Faucet 0 (sender)
-                    "0xcb1a82500abea773c7ba0196f9461f8ad96ffbc1",  // Faucet 1
-                    "0x484a9668649fe1994e689f65d7f5d8e3b3cb7b1c",  // Faucet 2
-                    "0x18f8bb43114706687cde3e3ad12fa833be30ebe9",  // Faucet 3
-                    "0x456bfefd8ac94b8f2f0443136d256c29f209b1d5",  // Faucet 4
-                    "0xbb253658ef170d517714f836f6341fafe81f194e",  // Faucet 5
-                    "0x69636310ab0fb4d8e072e7fd0e18dcb6bd2e4135",  // Faucet 6
-                    "0x796bb5cd618e7addffcc856ba668055af2aa9d8e",  // Faucet 7
-                    "0xcf18b26ed2104a9aa9fe8e6e5c889daae25f1516",  // Faucet 8
-                    "0xc46e343f9990cdaf913942eb05d6e8826096231b",  // Faucet 9
+                    "0xec4f49553e31f22b27a83036a044aff7d697f524", // Faucet 0 (sender)
+                    "0xcb1a82500abea773c7ba0196f9461f8ad96ffbc1", // Faucet 1
+                    "0x484a9668649fe1994e689f65d7f5d8e3b3cb7b1c", // Faucet 2
+                    "0x18f8bb43114706687cde3e3ad12fa833be30ebe9", // Faucet 3
+                    "0x456bfefd8ac94b8f2f0443136d256c29f209b1d5", // Faucet 4
+                    "0xbb253658ef170d517714f836f6341fafe81f194e", // Faucet 5
+                    "0x69636310ab0fb4d8e072e7fd0e18dcb6bd2e4135", // Faucet 6
+                    "0x796bb5cd618e7addffcc856ba668055af2aa9d8e", // Faucet 7
+                    "0xcf18b26ed2104a9aa9fe8e6e5c889daae25f1516", // Faucet 8
+                    "0xc46e343f9990cdaf913942eb05d6e8826096231b", // Faucet 9
                 ];
-                (testnet_faucets.into_iter().map(String::from).collect(), 1_000_000_000_000)
+                (
+                    testnet_faucets.into_iter().map(String::from).collect(),
+                    1_000_000_000_000,
+                )
             } else {
                 // MAINNET: Standard empty genesis structure (1000 QUA to burn address)
-                (vec!["0x0000000000000000000000000000000000000000".to_string()], 1_000_000_000)
+                (
+                    vec!["0x0000000000000000000000000000000000000000".to_string()],
+                    1_000_000_000,
+                )
             };
 
             for recipient_address in recipients {
@@ -401,35 +414,48 @@ impl Blockchain {
                 // COINBASE_MATURITY (100) only applies to block-reward coinbase outputs.
                 account_state.credit_account(&genesis_tx, 0, 0);
             }
-            
+
             // BOOTSTRAP BFT VALIDATORS
             if network == ChainNetwork::Testnet {
                 tracing::info!("Bootstrapping BFT validators into AccountState...");
-                
+
                 #[derive(serde::Deserialize)]
                 struct ValidatorGenTx {
                     address: String,
                     public_key: String,
                 }
-                
+
                 let mut dynamic_validators = None;
                 if let Ok(json_bytes) = std::fs::read("./genesis.json") {
                     if let Ok(parsed) = serde_json::from_slice::<Vec<ValidatorGenTx>>(&json_bytes) {
-                        tracing::info!("Loaded {} dynamic validators from genesis.json", parsed.len());
+                        tracing::info!(
+                            "Loaded {} dynamic validators from genesis.json",
+                            parsed.len()
+                        );
                         dynamic_validators = Some(parsed);
                     } else {
                         tracing::warn!("Found genesis.json but failed to parse it. Falling back to hardcoded validators.");
                     }
                 } else {
-                    tracing::info!("No genesis.json found. Falling back to hardcoded 7-node bootstrap.");
+                    tracing::info!(
+                        "No genesis.json found. Falling back to hardcoded 7-node bootstrap."
+                    );
                 }
 
                 if let Some(validators) = dynamic_validators {
                     for v in validators {
                         if let Ok(pk_bytes) = hex::decode(&v.public_key) {
-                            account_state.register_validator(&v.address, pk_bytes, 1_000_000_000_000, 0);
+                            account_state.register_validator(
+                                &v.address,
+                                pk_bytes,
+                                1_000_000_000_000,
+                                0,
+                            );
                         } else {
-                            tracing::error!("Failed to decode genesis public key for {}", v.address);
+                            tracing::error!(
+                                "Failed to decode genesis public key for {}",
+                                v.address
+                            );
                         }
                     }
                 } else {
@@ -442,7 +468,7 @@ impl Blockchain {
                         ("0x15c00903513803b393c6dc0105afd996349ae2b6", "09472d2087ed8cf1b3d5c5f3e46a0ea086fdf4afe52f36c2676955acb025a49787fc9876bfe436d857ce2196d9180bb5ee6fbf10a35b9c99c206458e417b0c44ad7e85e286dee92df2b9269d4cdb4c26d86359ae281dce9756e3dd98436c46b3aa6bd855ee49216c89b065d5cbb8ca07570130ce284892fc5f3881917d1ac42489959a3d49db041ef1270fe32e99c94a20fe0caa1f05ac85edcd282cbaeac38c9f2d479811c1a9192580421088af11f37636e6420848fc36960ef28d846380ec2cf5e452b12698cab2889968a370d6c5cf071515187049a60a10a6bd15da451e9d727edf76ad4688b92d647798d8d26ce0d8fa710f41b8296972cd1d4a30ba39f52a98bbbcd4ac098d6dd7a91da0565f827f73c9f6aa49edc76160e7c9c9297c92fd03235b6919ac86bb373c2ff84940f3040428202bb80e71f69a943d12c3f847c1bd2f94751a2e236e0b8d6a2a108ea53c4c83f172eb677eb6b7905d0c635634c93aad6df51bc1e1784a6e4c7ed65da9cfa3367130973373c9092de14d1ba26d5b0f4dc6543a1fe83bc825cb1f18fc9ec8e245d62e9c99ca5d792fa39f06dcc424b32494b58ce56323540107cc3a21f49f537c11eda07a5f9825e045a40c9ae2461e13b9d05b96bf8d1112e9c8d59260a9403a6bd33c39872327e29b4f14412270a767a98dfba50e8a99b8dd1b30e1e389aea4546aa21cb196dc9e96465b5e3df00caa19d1b61ae800ca03ed67935c78a57f24fbbd423a569f6f029150c6d92356b35bd10d5be46391b4491cc01aafdb7b7dbf22510e8e5f6166269318138768206358a4f5751466261117ad76d999b171043677a268311dc22f93586158525983777561340d8aba8b44b37066aad61d36a311eba838b9918f48dd178e129cf42a4acef4b8ac6593f2db02b3f8792380e969b30634c3fa4e5059505f09b2ea441cbdc52a7048c182405df66fe0050462d7a1c40dc3787ccf56ebe8a33c79d046542800ad4578c16b9d366e94a9a6de8cdd49d4ba2bf40f92965e9e1474a2c128e6bda98864030a3cf604b809deab44d928d29c568362f28a675c7590d2f855671af0727ddcd5748d7a1ca89067e5e0b45664e879b4204b0f0d43816a221f54868593ad6c126778c5f054d7cc9e1c712b3400719a6c23f6926510bd35e8b625d80670d00823e0908368ca3bc141980db99576b4fbdfc570fdb0866dcbe592c19a9458ca800bbec8793c446342f8fa190f06e52d5a2820d2cdbb9fc61006a985d6"),
                         ("0x4ebd9b50c4ef0869d964ae8fd47d36c498f6202b", "095218ac563050bc4e6ab6c9e8567c2b2e4aa85d8f5f410df2cc0019eb179c967272925d8e1a2273011e1390d0f88062027d374667d6c2db123cd858498d930461952b3b2491737da628b0dd1877890df213d5df88b142dc14c99665272c425500626d489169e3b494d087f84664b616399dba6e41e3aab78c894874f5a1165cd863e878c8446b687e15095a807b49fb79b0e273a46532965dc08c3ea91ad2a002389f3ed54286dafe3d6daf14b920b121690d29fa4df67620ade13b8da481553dbb650bab4bf49942b6dd8c9c2508310e8ddf07e0a7f383a6cca1613455c5663aa1e8c3b0af27867fd2e6049da38c9f85366b4791f199ae0512bda7987f466c4392a8259abe255b412a685c38d4e1ed6c044689ae011b99e80f3e92b984df22340da9f7228ba6a7b13527c6d352856cb1b60ee8e9b9e98768b8d6ec4818aef10a083e0f4c375b95ee6602d238952d28754520ad4beb0c0202592883a390d28f58eec200a0828c5edb92681ba6abf0eee6526e8bb2e5e3331c04769deee9f975538e2ba001025b8cea5b5153093e273f11029fd8f1eb575272b0567badad5a9a81534e4dc5b132c2f0b01ed949a90010cee243996194a25edbe6808eb67bdc4d710f86f12b87d5c967088554cfd83f7ec9e9949957455d4638322ec2be1541eb1bf813aa3d1147756f438731c90cf0b2c730b3eee9485e8aaf3c692b24638beb9ae8ab3a45527370867a375ad00c3fe4273b73ed20bf0e07a517da01b03c357224693537c6d8fad52f098c69684848d92e5ebc0566a7eb4da49ab5b984403fa5edaa642858e06eb167708946153768c40a29817b09f46fabce2b2c41f12ab2548e6d6bf5f762b1d4db428056e8cb01b067a9b744d4099a032d4d6220298c0ce8b17303a371bca9d1a1ead280b0d2b7aa55d6214dd13e57d2db442d2c76b4998511b34c30c2e295a118e9e68adf46c78479174aa5ad7719e91491f707ebb8c2e44515182d44a9d2d6392aca3c64eb372b524e542d692525683cbdb05e740f261975a82f937a116803fa90d2af16008ada4022860056b291ac19e8eb6b8d29bac301661f8f449aba4319e555201609a86d4e9b897e9907642828297b01db4f6599ce6d53628860a93a73db32e2d96bc0bb49b1d8450eb95efb1caff3a22dfd141e4d60337eec62aaa574483a1c9952ee217ac6745309229d96babe45c76bac73519c63ff54fbbbe867ebe0dfe351119e30c0976ab57556f7b80a319580a1a9235921"),
                     ];
-                    
+
                     for (addr, pubkey_hex) in genesis_validators {
                         if let Ok(pk_bytes) = hex::decode(pubkey_hex) {
                             account_state.register_validator(addr, pk_bytes, 1_000_000_000_000, 0);
@@ -455,23 +481,27 @@ impl Blockchain {
             storage.save_block(&genesis)?;
             storage.set_chain_height(1)?;
             storage.save_account_state(&account_state)?;
-            
+
             tracing::info!("✓ Genesis block verified: {}", genesis.hash);
             (vec![genesis], account_state)
         } else {
             // OPTIMIZATION: chain only contains genesis (loaded from db.rs load_chain())
             // Or we just load genesis manually here
-            let genesis = storage.load_block(0).expect("Genesis block must exist if height > 0");
+            let genesis = storage
+                .load_block(0)
+                .expect("Genesis block must exist if height > 0");
             let chain = vec![genesis];
-            
-            tracing::info!("✓ Loaded blockchain with {} blocks (genesis in memory, rest on disk)", height);
-            
+
+            tracing::info!(
+                "✓ Loaded blockchain with {} blocks (genesis in memory, rest on disk)",
+                height
+            );
+
             // SECURITY: Verify genesis block on load (prevents database tampering)
             if network == ChainNetwork::Mainnet && chain[0].hash != GENESIS_HASH {
                 panic!("CRITICAL: Genesis block mismatch in existing chain!\nExpected: {}\nGot: {}\nDatabase may be corrupted or from different network.", 
                     GENESIS_HASH, chain[0].hash);
             }
-            
 
             // SELF-HEAL: Detect corrupted account state from bad reorg (v0.4.0 bug).
             // If Faucet 0 shows 0 balance on an existing chain that has blocks, the
@@ -503,10 +533,15 @@ impl Blockchain {
                 ];
                 for addr in &faucets {
                     let gtx = Transaction {
-                        sender: "GENESIS".to_string(), recipient: addr.to_string(),
-                        amount: 1_000_000_000_000, timestamp: genesis_ts,
-                        signature: vec![], public_key: vec![],
-                        fee: 0, nonce: 0, lock_time: 0,
+                        sender: "GENESIS".to_string(),
+                        recipient: addr.to_string(),
+                        amount: 1_000_000_000_000,
+                        timestamp: genesis_ts,
+                        signature: vec![],
+                        public_key: vec![],
+                        fee: 0,
+                        nonce: 0,
+                        lock_time: 0,
                         tx_type: crate::core::transaction::TransactionType::Transfer,
                         sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
                         network_id: 0,
@@ -518,25 +553,33 @@ impl Blockchain {
                     if let Ok(block) = storage.load_block(h) {
                         healed_state.unlock_mature_coinbase(block.index);
                         for tx in &block.transactions {
-                            if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
+                            if !tx.is_coinbase()
+                                && tx.sender != "TREASURY"
+                                && !tx.is_genesis_premine()
+                            {
                                 let total = tx.amount.saturating_add(tx.fee);
                                 healed_state.debit_account(&tx.sender, total);
                                 healed_state.increment_nonce(&tx.sender);
                             }
-                            let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
+                            let maturity = if tx.is_genesis_premine() {
+                                0
+                            } else {
+                                COINBASE_MATURITY
+                            };
                             healed_state.credit_account(tx, block.index, maturity);
                         }
                     }
                 }
                 storage.save_account_state(&healed_state)?;
-                tracing::info!("✅ SELF-HEAL complete: Faucet 0 balance restored to {} microunits",
-                    healed_state.get_balance(FAUCET_0));
+                tracing::info!(
+                    "✅ SELF-HEAL complete: Faucet 0 balance restored to {} microunits",
+                    healed_state.get_balance(FAUCET_0)
+                );
                 (chain, healed_state)
             } else {
                 (chain, account_state)
             }
         };
-
 
         // OPT: Tune rayon thread pool to physical CPU count.
         // Falcon-512 verification is CPU-bound, not I/O-bound.
@@ -547,15 +590,22 @@ impl Blockchain {
         if let Err(e) = rayon::ThreadPoolBuilder::new()
             .num_threads(physical_cores)
             .thread_name(|i| format!("quanta-verify-{}", i))
-            .build_global() {
-            tracing::warn!("Could not configure rayon thread pool: {} (using default config)", e);
+            .build_global()
+        {
+            tracing::warn!(
+                "Could not configure rayon thread pool: {} (using default config)",
+                e
+            );
         }
-        
+
         // Compute/load cumulative work — O(1) after first run (migration is one-time only).
         let initial_cumulative_work = {
             let stored = storage.get_cumulative_work();
             if stored == 0 && height > 1 {
-                tracing::info!("[Migration] Computing cumulative work for {} blocks (one-time)…", height);
+                tracing::info!(
+                    "[Migration] Computing cumulative work for {} blocks (one-time)…",
+                    height
+                );
                 let mut work = 0u128;
                 for h in 0..height {
                     if let Ok(_b) = storage.load_block(h) {
@@ -582,7 +632,9 @@ impl Blockchain {
             storage,
             orphaned_blocks: Arc::new(RwLock::new(VecDeque::new())),
             network,
-            signature_cache: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(100_000).unwrap()))),
+            signature_cache: Arc::new(Mutex::new(LruCache::new(
+                NonZeroUsize::new(100_000).unwrap(),
+            ))),
             mempool_bloom: Arc::new(PLMutex::new(Bloom::new_for_fp_rate(50_000, 0.0001))),
             pubkey_cache: Arc::new(DashMap::new()),
             cumulative_work: Arc::new(PLMutex::new(initial_cumulative_work)),
@@ -621,7 +673,9 @@ impl Blockchain {
                 if hash != *checkpoint_hash {
                     tracing::error!(
                         "Checkpoint violation at height {}: expected {}, got {}",
-                        height, checkpoint_hash, hash
+                        height,
+                        checkpoint_hash,
+                        hash
                     );
                     return false;
                 }
@@ -640,7 +694,9 @@ impl Blockchain {
             self.chain.read().get(0).unwrap().clone()
         } else {
             // Load from storage (not memory!)
-            self.storage.load_block(height - 1).expect("Latest block must exist")
+            self.storage
+                .load_block(height - 1)
+                .expect("Latest block must exist")
         }
     }
 
@@ -653,7 +709,9 @@ impl Blockchain {
         }
 
         // LOW-1 FIX: Reject excessively long addresses to prevent unbounded key allocations
-        if transaction.sender.len() > MAX_ADDRESS_LEN || transaction.recipient.len() > MAX_ADDRESS_LEN {
+        if transaction.sender.len() > MAX_ADDRESS_LEN
+            || transaction.recipient.len() > MAX_ADDRESS_LEN
+        {
             return Err(BlockchainError::InvalidBlock);
         }
 
@@ -681,24 +739,29 @@ impl Blockchain {
         if !transaction.verify() {
             return Err(BlockchainError::InvalidSignature);
         }
-        
+
         // Validate nonce (account-based model) - ATOMIC OPERATION (no race condition)
         let chain_nonce = self.account_state.read().get_nonce(&transaction.sender);
-        
+
         // SECURITY FIX (CRITICAL-4): Atomic nonce validation with duplicate check
         // We need to hold the nonce entry lock during the entire validation + addition
-        let mut nonce_entry = self.pending_nonces.entry(transaction.sender.clone()).or_insert(chain_nonce);
+        let mut nonce_entry = self
+            .pending_nonces
+            .entry(transaction.sender.clone())
+            .or_insert(chain_nonce);
         let expected_nonce = (*nonce_entry).max(chain_nonce) + 1;
-        
+
         if transaction.nonce != expected_nonce {
             return Err(BlockchainError::InvalidNonce {
                 expected: expected_nonce,
                 actual: transaction.nonce,
             });
         }
-        
+
         // Check transaction size limit (DOS protection - prevents huge DeployContract)
-        let tx_size = bincode::serialize(&transaction).map_err(|_| BlockchainError::InvalidBlock)?.len();
+        let tx_size = bincode::serialize(&transaction)
+            .map_err(|_| BlockchainError::InvalidBlock)?
+            .len();
         if tx_size > MAX_TRANSACTION_SIZE_BYTES {
             return Err(BlockchainError::BlockTooLarge { size: tx_size });
         }
@@ -706,7 +769,7 @@ impl Blockchain {
         // Check sender has sufficient balance (amount + fee)
         let total_required = transaction.amount.saturating_add(transaction.fee);
         let available = self.account_state.read().get_balance(&transaction.sender);
-        
+
         if available < total_required {
             return Err(BlockchainError::InsufficientBalance {
                 required: total_required,
@@ -718,12 +781,15 @@ impl Blockchain {
         // by submitting thousands of incrementing-nonce txs from a single address.
         {
             let pending = self.pending_transactions.read();
-            let sender_count = pending.iter().filter(|t| t.sender == transaction.sender).count();
+            let sender_count = pending
+                .iter()
+                .filter(|t| t.sender == transaction.sender)
+                .count();
             if sender_count >= MAX_MEMPOOL_TXS_PER_SENDER {
                 return Err(BlockchainError::MempoolFull(sender_count));
             }
         }
-        
+
         // OPT-2 (PQC): Bloom filter duplicate check — O(1) instead of O(n) scan
         // At 1200 pending txs × 1713 bytes each, O(n) scan wastes ~2MB of cache per add.
         // Bloom gives probabilistic O(1). False positive = tx rejected (harmless, rare at 0.01%).
@@ -744,35 +810,38 @@ impl Blockchain {
         // ATOMIC: Update nonce AND add transaction together (no window for races)
         *nonce_entry = transaction.nonce;
         self.pending_transactions.write().push(transaction);
-        
+
         tracing::info!("Transaction added to mempool");
         Ok(())
     }
 
-
     /// Create a block template for mining (does not mine or save)
-    pub fn create_block_template(&self, proposer_address: String) -> Result<Block, BlockchainError> {
+    pub fn create_block_template(
+        &self,
+        proposer_address: String,
+    ) -> Result<Block, BlockchainError> {
         let reward = self.get_block_reward();
-        
+
         let current_height = self.get_height();
-        
+
         // Get pending transactions sorted by fee (highest first) with size limits
         let pending_txs = self.pending_transactions.read();
-        
+
         // Filter out transactions locked for future blocks, then sort by fee descending
-        let mut sorted_txs: Vec<_> = pending_txs.iter()
+        let mut sorted_txs: Vec<_> = pending_txs
+            .iter()
             .filter(|tx| tx.lock_time <= current_height)
             .cloned()
             .collect();
         sorted_txs.sort_by(|a, b| b.fee.cmp(&a.fee));
-        
+
         let mut transactions = Vec::new();
         let mut block_size = 0usize;
-        
-        // Use a temporary state to validate nonces and balances as we add them, 
+
+        // Use a temporary state to validate nonces and balances as we add them,
         // to prevent mining invalid blocks (which stall the network with orphaned blocks).
         let mut temp_state = self.account_state.read().clone();
-        
+
         let mut added_any = true;
         while added_any && transactions.len() < MAX_BLOCK_TRANSACTIONS {
             added_any = false;
@@ -780,7 +849,7 @@ impl Blockchain {
             while i < sorted_txs.len() {
                 let tx = &sorted_txs[i];
                 let expected_nonce = temp_state.get_nonce(&tx.sender) + 1;
-                
+
                 if tx.nonce == expected_nonce {
                     let tx_size = bincode::serialize(tx).unwrap_or_default().len();
                     if block_size + tx_size <= MAX_BLOCK_SIZE_BYTES {
@@ -800,32 +869,34 @@ impl Blockchain {
                     // Nonce is too high right now; keep it in sorted_txs in case the missing preceding tx is found later
                     i += 1;
                 }
-                
+
                 if transactions.len() >= MAX_BLOCK_TRANSACTIONS {
                     break;
                 }
             }
         }
-        
+
         // Create coinbase transaction with fee distribution
         let total_fees: u64 = transactions.iter().map(|tx| tx.fee).sum();
-        
+
         // FEE DISTRIBUTION (70% burn, 20% treasury, 10% miner)
         // SECURITY FIX (HIGH-2): Prevent rounding loss - give remainder to miner
         let fee_burned = (total_fees * FEE_BURN_PERCENT) / 100;
         let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100;
         let fee_to_miner = total_fees - fee_burned - fee_to_treasury; // Remainder goes to miner
-        
+
         // ECOSYSTEM FUND ALLOCATION (8% of block rewards → QEF multisig)
         let treasury_allocation = (reward * TREASURY_ALLOCATION_PERCENT) / 100;
         let proposer_reward = reward - treasury_allocation; // 92% to block proposer
 
         tracing::info!(
             "Block Economics: Reward={} QUA, QEF={} QUA, Fees Burned={} QUA, Proposer={} QUA",
-            reward / 1_000_000, treasury_allocation / 1_000_000,
-            fee_burned / 1_000_000, proposer_reward / 1_000_000
+            reward / 1_000_000,
+            treasury_allocation / 1_000_000,
+            fee_burned / 1_000_000,
+            proposer_reward / 1_000_000
         );
-        
+
         // Coinbase transaction (full proposer reward + fee share)
         let coinbase_amount = proposer_reward.saturating_add(fee_to_miner);
         let coinbase_tx = Transaction {
@@ -843,10 +914,10 @@ impl Blockchain {
             network_id: self.network.network_id(),
             payload: vec![],
         };
-        
+
         // Treasury allocation transaction (if any)
         let mut all_transactions = vec![coinbase_tx.clone()];
-        
+
         if treasury_allocation + fee_to_treasury > 0 {
             let treasury_tx = Transaction {
                 sender: "TREASURY".to_string(),
@@ -865,7 +936,7 @@ impl Blockchain {
             };
             all_transactions.push(treasury_tx);
         }
-        
+
         all_transactions.extend(transactions);
 
         let index = self.get_height();
@@ -895,8 +966,15 @@ impl Blockchain {
         let previous_block = self.get_latest_block();
         let previous_hash = previous_block.hash.clone();
         let epoch = crate::consensus::authorities::epoch_for_height(index);
-        let mut new_block = Block::new_bft(index, all_transactions, previous_hash, epoch, 0, proposer_address.clone());
-        
+        let mut new_block = Block::new_bft(
+            index,
+            all_transactions,
+            previous_hash,
+            epoch,
+            0,
+            proposer_address.clone(),
+        );
+
         // TIMESTAMP RULES (DRIFT-SAFE):
         // 1. Must be strictly greater than the previous block's timestamp (monotonic).
         // 2. Must be >= MTP (median-time-past of last 11 blocks).
@@ -923,10 +1001,10 @@ impl Blockchain {
         // Use current_time if it's valid. If min_ts is in the future
         // (clock skew or race), we MUST use min_ts to prevent validation failure.
         new_block.timestamp = std::cmp::max(min_ts, current_time);
-        
+
         new_block.state_root = state_root;
         new_block.hash = new_block.calculate_hash();
-        
+
         // Don't mine or save here. Just return the template.
         Ok(new_block)
     }
@@ -983,7 +1061,9 @@ impl Blockchain {
                 } else {
                     i += 1;
                 }
-                if transactions.len() >= MAX_BLOCK_TRANSACTIONS { break; }
+                if transactions.len() >= MAX_BLOCK_TRANSACTIONS {
+                    break;
+                }
             }
         }
         drop(pending_txs);
@@ -1084,24 +1164,38 @@ impl Blockchain {
     /// in-memory `chain` vec which only holds genesis after startup.
     #[allow(dead_code)]
     /// Validate block against consensus rules (CRITICAL for network blocks)
-    fn validate_block_consensus(&self, block: &Block, previous: &Block, base_state: &AccountState) -> Result<(), BlockchainError> {
+    fn validate_block_consensus(
+        &self,
+        block: &Block,
+        previous: &Block,
+        base_state: &AccountState,
+    ) -> Result<(), BlockchainError> {
         // 0. Block size limit (DoS protection)
-        let block_size = bincode::serialize(block).map_err(|_| BlockchainError::InvalidBlock)?.len();
+        let block_size = bincode::serialize(block)
+            .map_err(|_| BlockchainError::InvalidBlock)?
+            .len();
         if block_size > MAX_BLOCK_SIZE_BYTES {
             return Err(BlockchainError::BlockTooLarge { size: block_size });
         }
-        
+
         // 1. Cryptographic validity (done in block.is_valid)
-        
+
         // 2. Timestamp bounds (prevent manipulation and time-travel attacks)
         if block.timestamp <= previous.timestamp {
-            tracing::warn!("Block timestamp {} <= previous {}", block.timestamp, previous.timestamp);
+            tracing::warn!(
+                "Block timestamp {} <= previous {}",
+                block.timestamp,
+                previous.timestamp
+            );
             return Err(BlockchainError::InvalidBlock);
         }
         let current_time = chrono::Utc::now().timestamp();
         if block.timestamp > current_time + MAX_FUTURE_BLOCK_TIME {
-            tracing::warn!("Block timestamp {} too far in future (max +{} sec)", 
-                block.timestamp - current_time, MAX_FUTURE_BLOCK_TIME);
+            tracing::warn!(
+                "Block timestamp {} too far in future (max +{} sec)",
+                block.timestamp - current_time,
+                MAX_FUTURE_BLOCK_TIME
+            );
             return Err(BlockchainError::InvalidBlock);
         }
         // MED-1 FIX: Apply Median-Time-Past (MTP) rule — classic time-warp defense.
@@ -1113,59 +1207,72 @@ impl Blockchain {
             if block.timestamp <= mtp {
                 tracing::warn!(
                     "Block timestamp {} <= MTP {} (time-warp attack rejected)",
-                    block.timestamp, mtp
+                    block.timestamp,
+                    mtp
                 );
                 return Err(BlockchainError::InvalidBlock);
             }
         }
         // Removed MAX_TIME_DELTA check. Large forward gaps are valid if the network stops.
         // Large backward gaps are already prevented by MTP and `block.timestamp <= previous.timestamp`.
-        
+
         // 3. BFT Certificate Verification
         //
         // Every block (except genesis) must carry a valid BFT certificate:
         // ≥ ⌈2/3⌉ of the epoch committee must have signed bft_signing_payload().
         // Committee is derived from base_state (state *before* this block).
         if block.index > 0 {
-            let committee = base_state.compute_epoch_committee(
-                crate::consensus::authorities::MAX_COMMITTEE_SIZE
-            );
+            let committee = base_state
+                .compute_epoch_committee(crate::consensus::authorities::MAX_COMMITTEE_SIZE);
             if !crate::consensus::bft::verify_bft_certificate(block, &committee, base_state) {
                 tracing::warn!(
                     "Block {}: BFT certificate verification failed (committee_size={})",
-                    block.index, committee.len()
+                    block.index,
+                    committee.len()
                 );
                 return Err(BlockchainError::InvalidBlock);
             }
             tracing::debug!(
                 "Block {}: BFT certificate verified ({} sigs)",
-                block.index, block.bft_signatures.len()
+                block.index,
+                block.bft_signatures.len()
             );
         }
-        
+
         // 4. Coinbase validation - Must account for fee distribution
-        let coinbase_txs: Vec<_> = block.transactions.iter().filter(|tx| tx.is_coinbase()).collect();
+        let coinbase_txs: Vec<_> = block
+            .transactions
+            .iter()
+            .filter(|tx| tx.is_coinbase())
+            .collect();
         if coinbase_txs.is_empty() || coinbase_txs.len() > 1 {
-            tracing::warn!("Block must have exactly one coinbase transaction, found {}", coinbase_txs.len());
+            tracing::warn!(
+                "Block must have exactly one coinbase transaction, found {}",
+                coinbase_txs.len()
+            );
             return Err(BlockchainError::InvalidBlock);
         }
-        
+
         // Validate treasury transaction if present
-        let treasury_txs: Vec<_> = block.transactions.iter()
+        let treasury_txs: Vec<_> = block
+            .transactions
+            .iter()
             .filter(|tx| tx.sender == "TREASURY")
             .collect();
-        
+
         let coinbase = coinbase_txs[0];
         let expected_reward = self.calculate_reward_at_height(block.index);
-        let total_fees: u64 = block.transactions.iter()
+        let total_fees: u64 = block
+            .transactions
+            .iter()
             .filter(|tx| !tx.is_coinbase() && tx.sender != "TREASURY")
             .map(|tx| tx.fee)
             .sum();
-        
+
         // FEE DISTRIBUTION: 70% burn, 20% treasury, 10% miner
         let fee_to_miner = (total_fees * FEE_VALIDATOR_PERCENT) / 100;
         let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100;
-        
+
         // v3 REWARD DISTRIBUTION: 8% QEF, 92% to block proposer (no PoW lock in BFT)
         let treasury_allocation = (expected_reward * TREASURY_ALLOCATION_PERCENT) / 100;
         let proposer_reward = expected_reward - treasury_allocation;
@@ -1175,40 +1282,50 @@ impl Blockchain {
         if coinbase.amount != expected_coinbase {
             tracing::warn!(
                 "Invalid coinbase amount: expected {} (reward: {}, fees: {}), got {}",
-                expected_coinbase, proposer_reward, fee_to_miner, coinbase.amount
+                expected_coinbase,
+                proposer_reward,
+                fee_to_miner,
+                coinbase.amount
             );
             return Err(BlockchainError::InvalidCoinbaseReward {
                 actual: coinbase.amount,
                 expected: expected_coinbase,
             });
         }
-        
+
         // Validate treasury transaction if fees or allocation exist
         let expected_treasury = treasury_allocation.saturating_add(fee_to_treasury);
         if expected_treasury > 0 {
             if treasury_txs.len() != 1 {
-                tracing::warn!("Block should have treasury transaction for {} microunits", expected_treasury);
+                tracing::warn!(
+                    "Block should have treasury transaction for {} microunits",
+                    expected_treasury
+                );
                 return Err(BlockchainError::InvalidBlock);
             }
-            
+
             let treasury_tx = treasury_txs[0];
             if treasury_tx.amount != expected_treasury {
                 tracing::warn!(
                     "Invalid treasury amount: expected {}, got {}",
-                    expected_treasury, treasury_tx.amount
+                    expected_treasury,
+                    treasury_tx.amount
                 );
                 return Err(BlockchainError::InvalidBlock);
             }
-            
+
             if treasury_tx.recipient != TREASURY_ADDRESS {
-                tracing::warn!("Treasury transaction sent to wrong address: {}", treasury_tx.recipient);
+                tracing::warn!(
+                    "Treasury transaction sent to wrong address: {}",
+                    treasury_tx.recipient
+                );
                 return Err(BlockchainError::InvalidBlock);
             }
         } else if !treasury_txs.is_empty() {
             tracing::warn!("Block has treasury transaction but no allocation expected");
             return Err(BlockchainError::InvalidBlock);
         }
-        
+
         // 5. All non-coinbase txs must have valid signatures and nonces
         // CRITICAL: Build temporary state to validate balances and nonces.
         // STATE-ROOT FIX: unlock_mature_coinbase must be called here BEFORE
@@ -1218,65 +1335,63 @@ impl Blockchain {
         // any miner address has coinbase locks that mature at this block height.
         let mut temp_state = base_state.clone();
         temp_state.unlock_mature_coinbase(block.index);
-        
+
         // OPT-1+3 (PQC): Parallel sig verification with signature cache + pubkey cache
         // Serial: 1200 tx × 1.5ms = 1800ms
         // Parallel (physical cores): ~300ms
         // With caches: near-zero for repeat senders
-        let all_sigs_valid = block.transactions
-            .par_iter()
-            .all(|tx| {
-                if tx.is_coinbase() || tx.sender == "TREASURY" || tx.is_genesis_premine() {
-                    return true;
-                }
+        let all_sigs_valid = block.transactions.par_iter().all(|tx| {
+            if tx.is_coinbase() || tx.sender == "TREASURY" || tx.is_genesis_premine() {
+                return true;
+            }
 
-                // OPT-1: Signature cache — skip re-verification of known-good txs
-                let tx_hash = tx.hash();
-                {
-                    let mut cache = self.signature_cache.lock().unwrap();
-                    if let Some(&is_valid) = cache.get(&tx_hash) {
-                        return is_valid; // Cache hit!
-                    }
+            // OPT-1: Signature cache — skip re-verification of known-good txs
+            let tx_hash = tx.hash();
+            {
+                let mut cache = self.signature_cache.lock().unwrap();
+                if let Some(&is_valid) = cache.get(&tx_hash) {
+                    return is_valid; // Cache hit!
                 }
+            }
 
-                // OPT-3: Pubkey cache — if we've seen this sender before,
-                // confirm their public key matches (avoids re-deserializing 897 bytes)
-                if let Some(cached_pk) = self.pubkey_cache.get(&tx.sender) {
-                    if cached_pk.as_slice() != tx.public_key.as_slice() {
-                        // Key mismatch — this sender is using a different key (suspicious)
-                        tracing::warn!("Pubkey mismatch for sender {}", tx.sender);
-                        return false;
-                    }
-                } else if !tx.public_key.is_empty() {
-                    // First time seeing this sender — store key for future blocks
-                    self.pubkey_cache.insert(tx.sender.clone(), tx.public_key.clone());
+            // OPT-3: Pubkey cache — if we've seen this sender before,
+            // confirm their public key matches (avoids re-deserializing 897 bytes)
+            if let Some(cached_pk) = self.pubkey_cache.get(&tx.sender) {
+                if cached_pk.as_slice() != tx.public_key.as_slice() {
+                    // Key mismatch — this sender is using a different key (suspicious)
+                    tracing::warn!("Pubkey mismatch for sender {}", tx.sender);
+                    return false;
                 }
+            } else if !tx.public_key.is_empty() {
+                // First time seeing this sender — store key for future blocks
+                self.pubkey_cache
+                    .insert(tx.sender.clone(), tx.public_key.clone());
+            }
 
-                // Cache miss — do full Falcon-512 verification
-                let is_valid = tx.verify();
-                // CRIT-4 FIX: Only cache SUCCESSFUL verifications.
-                // Caching false would let an attacker poison the cache:
-                // submit one invalid tx, then valid txs with the same hash
-                // are permanently rejected from this node (desync attack).
-                if is_valid {
-                    let mut cache = self.signature_cache.lock().unwrap();
-                    cache.put(tx_hash, true);
-                }
-                is_valid
-            });
+            // Cache miss — do full Falcon-512 verification
+            let is_valid = tx.verify();
+            // CRIT-4 FIX: Only cache SUCCESSFUL verifications.
+            // Caching false would let an attacker poison the cache:
+            // submit one invalid tx, then valid txs with the same hash
+            // are permanently rejected from this node (desync attack).
+            if is_valid {
+                let mut cache = self.signature_cache.lock().unwrap();
+                cache.put(tx_hash, true);
+            }
+            is_valid
+        });
 
-        
         if !all_sigs_valid {
             return Err(BlockchainError::InvalidSignature);
         }
-        
+
         // Now validate fees, nonces, and balances sequentially (need state tracking)
         for tx in &block.transactions {
             // Skip system transactions (coinbase, treasury, genesis premine)
             if tx.is_coinbase() || tx.sender == "TREASURY" || tx.is_genesis_premine() {
                 continue;
             }
-            
+
             // Fee must meet minimum
             if tx.fee < MIN_TRANSACTION_FEE {
                 return Err(BlockchainError::FeeTooLow {
@@ -1284,13 +1399,17 @@ impl Blockchain {
                     min: MIN_TRANSACTION_FEE,
                 });
             }
-            
+
             // SECURITY FIX: Enforce lock_time (Fee sniping defense)
             if tx.lock_time > block.index {
-                tracing::warn!("Transaction locked until block {}, but included in block {}", tx.lock_time, block.index);
+                tracing::warn!(
+                    "Transaction locked until block {}, but included in block {}",
+                    tx.lock_time,
+                    block.index
+                );
                 return Err(BlockchainError::InvalidBlock);
             }
-            
+
             // CRITICAL: Validate nonce is sequential (prevents replay)
             let expected_nonce = temp_state.get_nonce(&tx.sender) + 1;
             if tx.nonce != expected_nonce {
@@ -1303,7 +1422,11 @@ impl Blockchain {
                 // temp_state's nonce to tx.nonce-1 reproduces the post-reorg state so
                 // all subsequent blocks validate correctly.  The checkpoint hash already
                 // guarantees these blocks' content is canonical.
-                let max_cp = TESTNET_CHECKPOINTS.iter().map(|(h, _)| *h).max().unwrap_or(0);
+                let max_cp = TESTNET_CHECKPOINTS
+                    .iter()
+                    .map(|(h, _)| *h)
+                    .max()
+                    .unwrap_or(0);
                 if block.index < max_cp {
                     tracing::debug!(
                         "Pre-checkpoint nonce override block {}: {} expected {} got {} — trusting block",
@@ -1311,42 +1434,57 @@ impl Blockchain {
                     );
                     temp_state.set_nonce(&tx.sender, tx.nonce.saturating_sub(1));
                 } else {
-                    tracing::warn!("Invalid nonce in block: tx from {} has nonce {}, expected {}",
-                        tx.sender, tx.nonce, expected_nonce);
+                    tracing::warn!(
+                        "Invalid nonce in block: tx from {} has nonce {}, expected {}",
+                        tx.sender,
+                        tx.nonce,
+                        expected_nonce
+                    );
                     return Err(BlockchainError::InvalidNonce {
                         expected: expected_nonce,
-                        actual:   tx.nonce,
+                        actual: tx.nonce,
                     });
                 }
             }
-            
+
             // CRITICAL: Validate sufficient balance (prevents double-spend)
             let total_required = tx.amount.saturating_add(tx.fee);
             let available = temp_state.get_balance(&tx.sender);
             if available < total_required {
-                tracing::warn!("Insufficient balance in block: {} has {} but needs {}",
-                    tx.sender, available, total_required);
+                tracing::warn!(
+                    "Insufficient balance in block: {} has {} but needs {}",
+                    tx.sender,
+                    available,
+                    total_required
+                );
                 return Err(BlockchainError::InsufficientBalance {
                     required: total_required,
                     available,
                 });
             }
-            
+
             // Update temporary state to validate next transactions
             if !temp_state.debit_account(&tx.sender, total_required) {
                 return Err(BlockchainError::InvalidBlock);
             }
 
             // Handle Validator Staking (v2) — with min-stake, re-stake guard, slash cooldown
-            if let crate::core::transaction::TransactionType::Stake { validator_pubkey } = &tx.tx_type {
-                use crate::consensus::authorities::{MIN_VALIDATOR_STAKE, OPEN_VALIDATOR_REGISTRATION_HEIGHT};
+            if let crate::core::transaction::TransactionType::Stake { validator_pubkey } =
+                &tx.tx_type
+            {
+                use crate::consensus::authorities::{
+                    MIN_VALIDATOR_STAKE, OPEN_VALIDATOR_REGISTRATION_HEIGHT,
+                };
                 let epoch = crate::consensus::authorities::epoch_for_height(block.index);
 
                 // Guard 1: Minimum stake requirement
                 if tx.amount < MIN_VALIDATOR_STAKE {
                     tracing::warn!(
                         "Stake rejected: {} staked {} microunits, minimum is {} ({}k QUA)",
-                        tx.sender, tx.amount, MIN_VALIDATOR_STAKE, MIN_VALIDATOR_STAKE / 1_000_000_000
+                        tx.sender,
+                        tx.amount,
+                        MIN_VALIDATOR_STAKE,
+                        MIN_VALIDATOR_STAKE / 1_000_000_000
                     );
                     return Err(BlockchainError::InvalidBlock);
                 }
@@ -1357,7 +1495,10 @@ impl Blockchain {
                     .map(|v| v.active)
                     .unwrap_or(false);
                 if already_active {
-                    tracing::warn!("Stake rejected: {} is already an active validator", tx.sender);
+                    tracing::warn!(
+                        "Stake rejected: {} is already an active validator",
+                        tx.sender
+                    );
                     return Err(BlockchainError::InvalidBlock);
                 }
 
@@ -1369,7 +1510,9 @@ impl Blockchain {
                 if slash_cooldown > epoch {
                     tracing::warn!(
                         "Stake rejected: {} is in slash cooldown until epoch {} (current: {})",
-                        tx.sender, slash_cooldown, epoch
+                        tx.sender,
+                        slash_cooldown,
+                        epoch
                     );
                     return Err(BlockchainError::InvalidBlock);
                 }
@@ -1388,7 +1531,9 @@ impl Blockchain {
                     );
                     tracing::info!(
                         "Validator registered (open set): {} (epoch={}, stake={} microunits)",
-                        tx.sender, epoch, tx.amount
+                        tx.sender,
+                        epoch,
+                        tx.amount
                     );
                 } else {
                     // Pre-registration-open: store with active=false so the unbonding/epoch
@@ -1401,7 +1546,9 @@ impl Blockchain {
                     );
                     tracing::info!(
                         "Validator pre-registered (opens at height {}): {} (stake={} microunits)",
-                        OPEN_VALIDATOR_REGISTRATION_HEIGHT, tx.sender, tx.amount
+                        OPEN_VALIDATOR_REGISTRATION_HEIGHT,
+                        tx.sender,
+                        tx.amount
                     );
                 }
             }
@@ -1414,12 +1561,19 @@ impl Blockchain {
                     .map(|v| v.active)
                     .unwrap_or(false);
                 if !is_active {
-                    tracing::warn!("Unstake rejected: {} is not a registered active validator", tx.sender);
+                    tracing::warn!(
+                        "Unstake rejected: {} is not a registered active validator",
+                        tx.sender
+                    );
                     return Err(BlockchainError::InvalidBlock);
                 }
                 let epoch = crate::consensus::authorities::epoch_for_height(block.index);
                 temp_state.deregister_validator(&tx.sender, epoch);
-                tracing::info!("Validator deregistered: {} (unbonding epoch={})", tx.sender, epoch);
+                tracing::info!(
+                    "Validator deregistered: {} (unbonding epoch={})",
+                    tx.sender,
+                    epoch
+                );
             }
 
             temp_state.credit_account(tx, block.index, COINBASE_MATURITY);
@@ -1427,8 +1581,15 @@ impl Blockchain {
 
             // Handle SlashEvidence (v3) — equivocation slashing
             if let crate::core::transaction::TransactionType::SlashEvidence {
-                offender, height: _, round: _, sig_a, hash_a, sig_b, hash_b,
-            } = &tx.tx_type {
+                offender,
+                height: _,
+                round: _,
+                sig_a,
+                hash_a,
+                sig_b,
+                hash_b,
+            } = &tx.tx_type
+            {
                 // Verify the two signatures are genuinely different (different block hashes)
                 if hash_a == hash_b {
                     tracing::warn!("SlashEvidence rejected: hash_a == hash_b (not a conflict)");
@@ -1452,7 +1613,10 @@ impl Blockchain {
                         &pk,
                     );
                     if !sig_a_valid || !sig_b_valid {
-                        tracing::warn!("SlashEvidence rejected: one or both signatures invalid for {}", offender);
+                        tracing::warn!(
+                            "SlashEvidence rejected: one or both signatures invalid for {}",
+                            offender
+                        );
                         return Err(BlockchainError::InvalidBlock);
                     }
                     // Evidence is valid — slash will be applied during state application.
@@ -1461,12 +1625,15 @@ impl Blockchain {
                         offender
                     );
                 } else {
-                    tracing::warn!("SlashEvidence rejected: {} is not a known validator", offender);
+                    tracing::warn!(
+                        "SlashEvidence rejected: {} is not a known validator",
+                        offender
+                    );
                     return Err(BlockchainError::InvalidBlock);
                 }
             }
         }
-        
+
         // Apply system transactions to temp_state for state_root calculation
         for tx in &block.transactions {
             if tx.is_coinbase() || tx.sender == "TREASURY" {
@@ -1476,7 +1643,7 @@ impl Blockchain {
                 temp_state.credit_account(tx, block.index, 0);
             }
         }
-        
+
         // STATE ROOT VALIDATION
         // If the block provides a state_root, it must match our computed value.
         // Blocks that omit state_root (empty string) are accepted — they pre-date
@@ -1495,16 +1662,15 @@ impl Blockchain {
         //      hash already commits to every tx in the block; the state_root check adds
         //      no additional security for checkpointed heights.
         let computed_state_root = temp_state.calculate_state_root();
-        let is_checkpointed = self.validate_checkpoint(block.index, &block.hash)
-            && {
-                // validate_checkpoint returns true for heights with NO checkpoint too,
-                // so we must confirm there IS a checkpoint at this exact height.
-                let checkpoints = match self.network {
-                    ChainNetwork::Testnet => TESTNET_CHECKPOINTS,
-                    ChainNetwork::Mainnet => MAINNET_CHECKPOINTS,
-                };
-                checkpoints.iter().any(|(h, _)| *h == block.index)
+        let is_checkpointed = self.validate_checkpoint(block.index, &block.hash) && {
+            // validate_checkpoint returns true for heights with NO checkpoint too,
+            // so we must confirm there IS a checkpoint at this exact height.
+            let checkpoints = match self.network {
+                ChainNetwork::Testnet => TESTNET_CHECKPOINTS,
+                ChainNetwork::Mainnet => MAINNET_CHECKPOINTS,
             };
+            checkpoints.iter().any(|(h, _)| *h == block.index)
+        };
         if block.index > 0
             && !block.state_root.is_empty()
             && block.state_root != computed_state_root
@@ -1512,28 +1678,41 @@ impl Blockchain {
         {
             tracing::warn!(
                 "Invalid state root at block {}: computed={}, block={}",
-                block.index, computed_state_root, block.state_root
+                block.index,
+                computed_state_root,
+                block.state_root
             );
             return Err(BlockchainError::InvalidBlock);
         }
-        if is_checkpointed && !block.state_root.is_empty() && block.state_root != computed_state_root {
+        if is_checkpointed
+            && !block.state_root.is_empty()
+            && block.state_root != computed_state_root
+        {
             tracing::info!(
                 "State root mismatch at checkpointed block {} (computed={}, block={}) — \
                  trusting checkpoint; local state will converge from this height onward.",
-                block.index, computed_state_root, block.state_root
+                block.index,
+                computed_state_root,
+                block.state_root
             );
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate block against consensus rules during REORG / SYNC replay.
     ///
     /// In v2 BFT, all committed blocks are final. This function performs
     /// BFT certificate verification and coinbase/signature checks.
-    fn validate_block_consensus_reorg(&self, block: &Block, previous: &Block) -> Result<(), BlockchainError> {
+    fn validate_block_consensus_reorg(
+        &self,
+        block: &Block,
+        previous: &Block,
+    ) -> Result<(), BlockchainError> {
         // Size check.
-        let block_size = bincode::serialize(block).map_err(|_| BlockchainError::InvalidBlock)?.len();
+        let block_size = bincode::serialize(block)
+            .map_err(|_| BlockchainError::InvalidBlock)?
+            .len();
         if block_size > MAX_BLOCK_SIZE_BYTES {
             return Err(BlockchainError::BlockTooLarge { size: block_size });
         }
@@ -1547,9 +1726,8 @@ impl Blockchain {
         // BFT certificate check (skip genesis).
         if block.index > 0 {
             let state = self.get_account_state_snapshot();
-            let committee = state.compute_epoch_committee(
-                crate::consensus::authorities::MAX_COMMITTEE_SIZE
-            );
+            let committee =
+                state.compute_epoch_committee(crate::consensus::authorities::MAX_COMMITTEE_SIZE);
             if !crate::consensus::bft::verify_bft_certificate(block, &committee, &state) {
                 tracing::warn!("Reorg block {}: BFT certificate invalid", block.index);
                 return Err(BlockchainError::InvalidBlock);
@@ -1557,28 +1735,29 @@ impl Blockchain {
         }
 
         // Signature validation on all user transactions.
-        let all_sigs_valid = block.transactions
-            .par_iter()
-            .all(|tx| {
-                if tx.is_coinbase() || tx.sender == "TREASURY" || tx.is_genesis_premine() {
-                    return true;
+        let all_sigs_valid = block.transactions.par_iter().all(|tx| {
+            if tx.is_coinbase() || tx.sender == "TREASURY" || tx.is_genesis_premine() {
+                return true;
+            }
+            let tx_hash = tx.hash();
+            {
+                let mut cache = self.signature_cache.lock().unwrap();
+                if let Some(&is_valid) = cache.get(&tx_hash) {
+                    return is_valid;
                 }
-                let tx_hash = tx.hash();
-                {
-                    let mut cache = self.signature_cache.lock().unwrap();
-                    if let Some(&is_valid) = cache.get(&tx_hash) {
-                        return is_valid;
-                    }
-                }
-                let is_valid = tx.verify();
-                if is_valid {
-                    let mut cache = self.signature_cache.lock().unwrap();
-                    cache.put(tx_hash, true);
-                }
-                is_valid
-            });
+            }
+            let is_valid = tx.verify();
+            if is_valid {
+                let mut cache = self.signature_cache.lock().unwrap();
+                cache.put(tx_hash, true);
+            }
+            is_valid
+        });
         if !all_sigs_valid {
-            tracing::warn!("Reorg block {} contains invalid transaction signatures", block.index);
+            tracing::warn!(
+                "Reorg block {} contains invalid transaction signatures",
+                block.index
+            );
             return Err(BlockchainError::InvalidSignature);
         }
 
@@ -1615,12 +1794,19 @@ impl Blockchain {
             if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
                 let total = tx.amount.saturating_add(tx.fee);
                 if !new_state.debit_account(&tx.sender, total) {
-                    tracing::warn!("Reorg: block {} has invalid tx (insufficient balance)", block.index);
+                    tracing::warn!(
+                        "Reorg: block {} has invalid tx (insufficient balance)",
+                        block.index
+                    );
                     return Err(BlockchainError::InvalidBlock);
                 }
                 new_state.increment_nonce(&tx.sender);
             }
-            let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
+            let maturity = if tx.is_genesis_premine() {
+                0
+            } else {
+                COINBASE_MATURITY
+            };
             new_state.credit_account(tx, block.index, maturity);
         }
 
@@ -1639,7 +1825,9 @@ impl Blockchain {
         // Save checkpoint every 1000 blocks during reorg too.
         const CHECKPOINT_INTERVAL: u64 = 1000;
         if block.index % CHECKPOINT_INTERVAL == 0 && block.index > 0 {
-            let _ = self.storage.save_account_state_at_height(block.index, &new_state);
+            let _ = self
+                .storage
+                .save_account_state_at_height(block.index, &new_state);
         }
 
         *self.account_state.write() = new_state;
@@ -1652,7 +1840,10 @@ impl Blockchain {
         // Notify BFT proposer: chain moved during reorg, restart block template.
         let _ = self.new_block_tx.send(block.index + 1);
 
-        tracing::info!("Reorg: network block {} accepted (permissive diff check)", block.index);
+        tracing::info!(
+            "Reorg: network block {} accepted (permissive diff check)",
+            block.index
+        );
         Ok(())
     }
 
@@ -1664,7 +1855,7 @@ impl Blockchain {
         let years_elapsed = height / BLOCKS_PER_YEAR;
         apply_annual_reduction(YEAR_1_REWARD, years_elapsed).max(MIN_REWARD)
     }
-    
+
     /// Get median timestamp from last N blocks (prevents timestamp manipulation)
     /// SECURITY FIX (HIGH-1): Median-time-past for difficulty adjustment
     /// Get median timestamp from last N blocks (prevents timestamp manipulation)
@@ -1673,7 +1864,7 @@ impl Blockchain {
         if end_index == 0 {
             return 0;
         }
-        
+
         let start = end_index.saturating_sub(window);
         let mut timestamps = Vec::new();
 
@@ -1683,22 +1874,22 @@ impl Blockchain {
                 timestamps.push(block.timestamp);
             }
         }
-        
+
         if timestamps.is_empty() {
             return 0;
         }
-        
+
         timestamps.sort_unstable();
-        timestamps[timestamps.len() / 2]  // Return median
+        timestamps[timestamps.len() / 2] // Return median
     }
 
     /// Validate the entire blockchain
     /// Validate the entire blockchain
     pub fn is_valid(&self) -> bool {
         let chain_len = self.get_height();
-        
+
         tracing::info!("Validating chain from storage (height: {})", chain_len);
-        
+
         // Validate genesis
         if let Ok(genesis) = self.storage.load_block(0) {
             if genesis.index != 0 {
@@ -1706,8 +1897,8 @@ impl Blockchain {
                 return false;
             }
         } else {
-             tracing::error!("Could not load genesis block");
-             return false;
+            tracing::error!("Could not load genesis block");
+            return false;
         }
 
         // Validate rest
@@ -1716,8 +1907,8 @@ impl Blockchain {
                 Ok(b) => b,
                 Err(_) => return false,
             };
-            
-            let prev = match self.storage.load_block(i-1) {
+
+            let prev = match self.storage.load_block(i - 1) {
                 Ok(b) => b,
                 Err(_) => return false,
             };
@@ -1767,9 +1958,7 @@ impl Blockchain {
             // Each full year has BLOCKS_PER_YEAR blocks.
             // Miner gets 95% of reward; split 50/50 immediate/locked.
             // Supply counts ALL minted coins (immediate + locked).
-            total_minted = total_minted.saturating_add(
-                reward.saturating_mul(BLOCKS_PER_YEAR)
-            );
+            total_minted = total_minted.saturating_add(reward.saturating_mul(BLOCKS_PER_YEAR));
         }
         // Remaining blocks in the current year
         let remaining = height % BLOCKS_PER_YEAR;
@@ -1802,7 +1991,9 @@ impl Blockchain {
 
     /// Get mutable pending transactions
     #[allow(dead_code)]
-    pub fn get_pending_transactions_mut(&self) -> parking_lot::RwLockWriteGuard<'_, Vec<Transaction>> {
+    pub fn get_pending_transactions_mut(
+        &self,
+    ) -> parking_lot::RwLockWriteGuard<'_, Vec<Transaction>> {
         self.pending_transactions.write()
     }
 
@@ -1834,7 +2025,8 @@ impl Blockchain {
         }
         // Slow path: arbitrary historical height (rare — only during deep fork).
         let mut total: u128 = 0;
-        for h in 0..=tip_height {   // inclusive: block AT tip_height contributes its difficulty
+        for h in 0..=tip_height {
+            // inclusive: block AT tip_height contributes its difficulty
             if let Ok(_) = self.storage.load_block(h) {
                 total = total.saturating_add(1u128);
             }
@@ -1853,13 +2045,13 @@ impl Blockchain {
     /// Add a block received from the network (WITH FULL VALIDATION AND FORK RESOLUTION)
     pub fn add_network_block(&self, block: Block) -> Result<(), BlockchainError> {
         let latest = self.get_latest_block();
-        
+
         // 1. SYNC FIX (v3): O(1) duplicate check by index + hash instead of O(n) hash scan.
         // This prevents disk I/O starvation during bulk sync.
         if self.has_block_at_index(block.index, &block.hash) {
             return Ok(()); // Already have this exact block at this index
         }
-        
+
         // 2. FORK DETECTION: Check if this block builds on our chain
         if block.previous_hash == latest.hash && block.index == latest.index + 1 {
             // Normal case: extends our chain
@@ -1871,16 +2063,20 @@ impl Blockchain {
             return res;
         } else if block.index > latest.index {
             // Potential fork: block is ahead of us
-            tracing::warn!("Fork detected: Block {} at height {}, we're at {}", 
-                &block.hash[..8], block.index, latest.index);
-            
+            tracing::warn!(
+                "Fork detected: Block {} at height {}, we're at {}",
+                &block.hash[..8],
+                block.index,
+                latest.index
+            );
+
             // BFT: Validate BFT certificate for orphan blocks.
             // FIX: Bypass this check for AlephBFT mode where blocks have 0 signatures natively.
             // if block.index > 0 && block.bft_signatures.is_empty() {
             //     tracing::warn!("Rejecting orphan block with missing BFT certificate");
             //     return Err(BlockchainError::InvalidBlock);
             // }
-            
+
             // Validate merkle root
             let tree = crate::core::merkle::MerkleTree::from_transactions(&block.transactions);
             let computed_root = tree.root_hash().unwrap_or_else(|| "0".repeat(64));
@@ -1888,7 +2084,7 @@ impl Blockchain {
                 tracing::warn!("Rejecting orphan block with invalid merkle root");
                 return Err(BlockchainError::InvalidBlock);
             }
-            
+
             // Store as orphaned block (MED-3 FIX: VecDeque::pop_front is O(1) vs Vec::remove(0))
             let mut orphans = self.orphaned_blocks.write();
             if orphans.len() >= MAX_ORPHAN_BLOCKS {
@@ -1897,21 +2093,28 @@ impl Blockchain {
             }
             orphans.push_back(block.clone());
             drop(orphans);
-            
-            tracing::info!("Stored orphaned block at height {}, need to sync", block.index);
+
+            tracing::info!(
+                "Stored orphaned block at height {}, need to sync",
+                block.index
+            );
             return Ok(());
         } else if block.index == latest.index {
             // Competing block at same height — BFT uses first-seen rule (not cumulative work).
-            tracing::warn!("Competing block at height {}: incoming {} vs ours {}", 
-                block.index, &block.hash[..8], &latest.hash[..8]);
-            
+            tracing::warn!(
+                "Competing block at height {}: incoming {} vs ours {}",
+                block.index,
+                &block.hash[..8],
+                &latest.hash[..8]
+            );
+
             // BFT: require valid certificate for competing block.
             // FIX: Bypass this check for AlephBFT mode where blocks have 0 signatures natively.
             // if block.index > 0 && block.bft_signatures.is_empty() {
             //     tracing::warn!("Rejecting competing block with missing BFT certificate");
             //     return Err(BlockchainError::InvalidBlock);
             // }
-            
+
             let tree = crate::core::merkle::MerkleTree::from_transactions(&block.transactions);
             let computed_root = tree.root_hash().unwrap_or_else(|| "0".repeat(64));
             if block.merkle_root != computed_root {
@@ -1925,13 +2128,18 @@ impl Blockchain {
             // a safety violation — log it and keep our current tip.
             tracing::warn!(
                 "Double-proposal at height {}: keeping our block {} over incoming {}",
-                block.index, &latest.hash[..8], &block.hash[..8]
+                block.index,
+                &latest.hash[..8],
+                &block.hash[..8]
             );
             return Ok(());
         } else if block.index + 1 == latest.index && block.previous_hash != String::new() {
             // Block is 1 behind our tip — it might be the base of a competing fork.
             // Store in orphans so process_orphans can detect if a longer chain builds on it.
-            tracing::debug!("Storing near-stale block at height {} as potential fork base", block.index);
+            tracing::debug!(
+                "Storing near-stale block at height {} as potential fork base",
+                block.index
+            );
             let mut orphans = self.orphaned_blocks.write();
             if orphans.len() < MAX_ORPHAN_BLOCKS {
                 orphans.push_back(block);
@@ -1939,8 +2147,11 @@ impl Blockchain {
             return Ok(());
         } else {
             // Block is behind our chain - likely stale
-            tracing::debug!("Ignoring stale block at height {} (we're at {})", 
-                block.index, latest.index);
+            tracing::debug!(
+                "Ignoring stale block at height {} (we're at {})",
+                block.index,
+                latest.index
+            );
             return Ok(());
         }
     }
@@ -1956,7 +2167,9 @@ impl Blockchain {
     /// immediately before the competing tips.
     fn reorg_to_block(&self, incoming: Block, old_tip: Block) -> Result<(), BlockchainError> {
         // Validate the incoming block as if it were being added normally.
-        let prev_block = self.storage.load_block(incoming.index - 1)
+        let prev_block = self
+            .storage
+            .load_block(incoming.index - 1)
             .map_err(|_| BlockchainError::InvalidBlock)?;
 
         if !incoming.is_valid(Some(&prev_block)) {
@@ -1982,10 +2195,8 @@ impl Blockchain {
         //
         // For a full deep reorg this would need to replay from the fork point, but
         // for a 1-deep swap the snapshot at tip−1 is exactly what we need.
-        let _pre_tip_state = self.storage.load_account_state()
-            .ok()
-            .flatten();
-        
+        let _pre_tip_state = self.storage.load_account_state().ok().flatten();
+
         // Rebuild state from scratch up to incoming.index - 1 using the stored snapshot.
         // Since save_account_state is called after EVERY block, the latest snapshot on
         // disk is for the OLD TIP. We need the snapshot for the block BEFORE the tip.
@@ -2003,7 +2214,7 @@ impl Blockchain {
         // through prev_block (incoming.index - 1). This is correct always.
         let new_state = self.rebuild_account_state_up_to(incoming.index - 1);
         self.validate_block_consensus(&incoming, &prev_block, &new_state)?;
-        
+
         // Apply the incoming block's transactions on the rebuilt state.
         let mut new_state = new_state;
         new_state.unlock_mature_coinbase(incoming.index);
@@ -2017,7 +2228,11 @@ impl Blockchain {
                 // CRITICAL: Increment nonce so the sender's next transaction uses the right nonce
                 new_state.increment_nonce(&tx.sender);
             }
-            let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
+            let maturity = if tx.is_genesis_premine() {
+                0
+            } else {
+                COINBASE_MATURITY
+            };
             new_state.credit_account(tx, incoming.index, maturity);
         }
 
@@ -2043,9 +2258,7 @@ impl Blockchain {
             pending.retain(|tx| {
                 !incoming.transactions.iter().any(|btx| {
                     btx.hash() == tx.hash()
-                        || (!btx.is_coinbase()
-                            && btx.sender == tx.sender
-                            && btx.nonce == tx.nonce)
+                        || (!btx.is_coinbase() && btx.sender == tx.sender && btx.nonce == tx.nonce)
                 })
             });
         }
@@ -2058,18 +2271,24 @@ impl Blockchain {
 
         // Update cumulative_work: subtract old tip's weight (1), add incoming tip's (1). No-op for BFT.
 
-        tracing::info!("Reorg complete: replaced tip at height {} with block {}",
-            incoming.index, &incoming.hash[..8]);
+        tracing::info!(
+            "Reorg complete: replaced tip at height {} with block {}",
+            incoming.index,
+            &incoming.hash[..8]
+        );
         Ok(())
     }
 
     /// Rebuild account state by replaying all blocks from genesis up to (and including)
     /// `target_height` from storage. Used during reorg to get a clean state snapshot.
     ///
-    /// SYNC FIX: Previously this replayed ALL blocks from genesis (O(height) = 
+    /// SYNC FIX: Previously this replayed ALL blocks from genesis (O(height) =
     /// 18k sled disk reads!). Now it loads the nearest 1000-block checkpoint
     /// and replays only the delta (max 1000 blocks).
-    fn rebuild_account_state_up_to(&self, target_height: u64) -> crate::core::transaction::AccountState {
+    fn rebuild_account_state_up_to(
+        &self,
+        target_height: u64,
+    ) -> crate::core::transaction::AccountState {
         // 1. Find the nearest 1000-block snapshot and determine safe replay start.
         //
         // SYNC FIX: The old fallback logic was broken — when a snapshot was missing it
@@ -2086,8 +2305,11 @@ impl Blockchain {
         let (mut state, replay_start) = if snap_height > 0 {
             match self.storage.load_account_state_at_height(snap_height) {
                 Ok(Some(snapshot)) => {
-                    tracing::info!("Loaded account state snapshot at height {} (replaying delta to {})",
-                        snap_height, target_height);
+                    tracing::info!(
+                        "Loaded account state snapshot at height {} (replaying delta to {})",
+                        snap_height,
+                        target_height
+                    );
                     (snapshot, snap_height + 1)
                 }
                 _ => {
@@ -2106,17 +2328,26 @@ impl Blockchain {
 
         // 2. Replay the delta blocks from replay_start..=target_height.
         if replay_start <= target_height {
-            tracing::info!("Replaying blocks {}..={} for state rebuild", replay_start, target_height);
+            tracing::info!(
+                "Replaying blocks {}..={} for state rebuild",
+                replay_start,
+                target_height
+            );
             for h in replay_start..=target_height {
                 if let Ok(block) = self.storage.load_block(h) {
                     state.unlock_mature_coinbase(block.index);
                     for tx in &block.transactions {
-                        if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
+                        if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine()
+                        {
                             let total = tx.amount.saturating_add(tx.fee);
                             state.debit_account(&tx.sender, total);
                             state.increment_nonce(&tx.sender);
                         }
-                        let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
+                        let maturity = if tx.is_genesis_premine() {
+                            0
+                        } else {
+                            COINBASE_MATURITY
+                        };
                         state.credit_account(tx, block.index, maturity);
                     }
                 } else {
@@ -2130,62 +2361,73 @@ impl Blockchain {
     }
 
     /// Internal helper: returns a fresh state with only the genesis premine applied.
-    fn rebuild_state_from_genesis_up_to(&self, _dummy: u64) -> crate::core::transaction::AccountState {
+    fn rebuild_state_from_genesis_up_to(
+        &self,
+        _dummy: u64,
+    ) -> crate::core::transaction::AccountState {
         let mut state = crate::core::transaction::AccountState::new();
 
         // ---------- GENESIS PREMINE ----------
-        let genesis_timestamp = self.storage.load_block(0)
-            .map(|g| g.timestamp)
-            .unwrap_or(0);
+        let genesis_timestamp = self.storage.load_block(0).map(|g| g.timestamp).unwrap_or(0);
         let testnet_faucets = [
-            "0x1683be267318d2ddd8cee8df4a4548dcffb1e088",  // Faucet 0 (sender)
-            "0xd528c18ce7a8844e4a4dcd841975b20ae599b020",  // Faucet 1
-            "0xfd6e36bfa2b2798d08592802206c943d5513adfb",  // Faucet 2
-            "0xed15573ad312d41aaef74cff56a8ef28122ec2db",  // Faucet 3
-            "0xaffd6d4f74c5651110efcf1b9736f7a5cf2ccdbb",  // Faucet 4
-            "0xbf5ee055f399323fdd0cefe3d4aa923678d46107",  // Faucet 5
-            "0x1dc9637b183093d723ea8d1fb18083b06490facb",  // Faucet 6
-            "0xa2270f30ca1aad922510375508bf68cd95509f29",  // Faucet 7
-            "0xe15a689775685ae324559ea9a492fc650354ca0b",  // Faucet 8
-            "0x005dcff212d27b55e7a74bf745e1349ab44ca25d",  // Faucet 9
+            "0x1683be267318d2ddd8cee8df4a4548dcffb1e088", // Faucet 0 (sender)
+            "0xd528c18ce7a8844e4a4dcd841975b20ae599b020", // Faucet 1
+            "0xfd6e36bfa2b2798d08592802206c943d5513adfb", // Faucet 2
+            "0xed15573ad312d41aaef74cff56a8ef28122ec2db", // Faucet 3
+            "0xaffd6d4f74c5651110efcf1b9736f7a5cf2ccdbb", // Faucet 4
+            "0xbf5ee055f399323fdd0cefe3d4aa923678d46107", // Faucet 5
+            "0x1dc9637b183093d723ea8d1fb18083b06490facb", // Faucet 6
+            "0xa2270f30ca1aad922510375508bf68cd95509f29", // Faucet 7
+            "0xe15a689775685ae324559ea9a492fc650354ca0b", // Faucet 8
+            "0x005dcff212d27b55e7a74bf745e1349ab44ca25d", // Faucet 9
         ];
-        
-        let premine_amount = if self.network == crate::core::ChainNetwork::Testnet { 1_000_000_000_000 } else { 1_000_000_000 };
+
+        let premine_amount = if self.network == crate::core::ChainNetwork::Testnet {
+            1_000_000_000_000
+        } else {
+            1_000_000_000
+        };
         let recipients = if self.network == crate::core::ChainNetwork::Testnet {
-            testnet_faucets.iter().map(|s| s.to_string()).collect::<Vec<String>>()
+            testnet_faucets
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>()
         } else {
             vec!["0x0000000000000000000000000000000000000000".to_string()]
         };
 
         for addr in &recipients {
             let genesis_tx = crate::core::transaction::Transaction {
-                sender:    "GENESIS".to_string(),
+                sender: "GENESIS".to_string(),
                 recipient: addr.to_string(),
-                amount:    premine_amount,
+                amount: premine_amount,
                 timestamp: genesis_timestamp,
                 signature: vec![],
                 public_key: vec![],
-                fee:       0,
-                nonce:     0,
+                fee: 0,
+                nonce: 0,
                 lock_time: 0,
-                tx_type:   crate::core::transaction::TransactionType::Transfer,
+                tx_type: crate::core::transaction::TransactionType::Transfer,
                 sig_scheme: crate::core::transaction::SignatureScheme::Falcon512,
                 network_id: 0,
                 payload: vec![],
             };
             state.credit_account(&genesis_tx, 0, 0); // maturity=0 → immediately spendable
         }
-        
+
         state
     }
-    
+
     /// Add block to main chain (internal helper)
     fn add_block_to_main_chain(&self, block: Block) -> Result<(), BlockchainError> {
         let latest = self.get_latest_block();
 
         // CHECKPOINT VALIDATION: Prevent reorganization past checkpoints
         if !self.validate_checkpoint(block.index, &block.hash) {
-            tracing::error!("Rejecting block {} due to checkpoint violation", block.index);
+            tracing::error!(
+                "Rejecting block {} due to checkpoint violation",
+                block.index
+            );
             return Err(BlockchainError::InvalidBlock);
         }
 
@@ -2218,15 +2460,29 @@ impl Blockchain {
                 }
 
                 // Apply Stake: register validator
-                if let crate::core::transaction::TransactionType::Stake { validator_pubkey } = &tx.tx_type {
+                if let crate::core::transaction::TransactionType::Stake { validator_pubkey } =
+                    &tx.tx_type
+                {
                     let epoch = crate::consensus::authorities::epoch_for_height(block.index);
-                    new_state.register_validator(&tx.sender, validator_pubkey.clone(), tx.amount, epoch);
+                    new_state.register_validator(
+                        &tx.sender,
+                        validator_pubkey.clone(),
+                        tx.amount,
+                        epoch,
+                    );
                 }
 
                 // Apply SlashEvidence: execute the slash
                 if let crate::core::transaction::TransactionType::SlashEvidence {
-                    offender, height: _, round: _, sig_a: _, hash_a: _, sig_b: _, hash_b: _,
-                } = &tx.tx_type {
+                    offender,
+                    height: _,
+                    round: _,
+                    sig_a: _,
+                    hash_a: _,
+                    sig_b: _,
+                    hash_b: _,
+                } = &tx.tx_type
+                {
                     let epoch = crate::consensus::authorities::epoch_for_height(block.index);
                     if let Some((burned, reward)) = new_state.slash_validator(
                         offender,
@@ -2240,14 +2496,20 @@ impl Blockchain {
                         new_state.credit_account_direct(&tx.sender, reward);
                         tracing::warn!(
                             "SLASH applied: {} burned={} reward_to_whistleblower={}",
-                            offender, burned, reward
+                            offender,
+                            burned,
+                            reward
                         );
                     }
                 }
             }
             // GENESIS premine: maturity=0 (immediately spendable)
             // All other txs (including COINBASE mining rewards): COINBASE_MATURITY
-            let maturity = if tx.is_genesis_premine() { 0 } else { COINBASE_MATURITY };
+            let maturity = if tx.is_genesis_premine() {
+                0
+            } else {
+                COINBASE_MATURITY
+            };
             new_state.credit_account(tx, block.index, maturity);
         }
 
@@ -2258,7 +2520,11 @@ impl Blockchain {
         use crate::consensus::authorities::EPOCH_SIZE;
         if block.index > 0 && block.index % EPOCH_SIZE == 0 {
             let epoch = crate::consensus::authorities::epoch_for_height(block.index);
-            tracing::info!("Epoch boundary at block {} (epoch {}): processing stake returns and downtime", block.index, epoch);
+            tracing::info!(
+                "Epoch boundary at block {} (epoch {}): processing stake returns and downtime",
+                block.index,
+                epoch
+            );
             let credits = new_state.process_epoch_boundary(epoch, DOWNTIME_SLASH_PCT, BURN_ADDRESS);
             for (addr, amount) in credits {
                 if addr == BURN_ADDRESS {
@@ -2291,8 +2557,15 @@ impl Blockchain {
         // checkpoint and replay only the delta instead of from genesis.
         const CHECKPOINT_INTERVAL: u64 = 1000;
         if block.index % CHECKPOINT_INTERVAL == 0 && block.index > 0 {
-            if let Err(e) = self.storage.save_account_state_at_height(block.index, &new_state) {
-                tracing::warn!("Failed to save account-state checkpoint at {}: {}", block.index, e);
+            if let Err(e) = self
+                .storage
+                .save_account_state_at_height(block.index, &new_state)
+            {
+                tracing::warn!(
+                    "Failed to save account-state checkpoint at {}: {}",
+                    block.index,
+                    e
+                );
             }
         }
 
@@ -2306,9 +2579,7 @@ impl Blockchain {
         pending.retain(|tx| {
             !block.transactions.iter().any(|btx| {
                 btx.hash() == tx.hash()
-                    || (!btx.is_coinbase()
-                        && btx.sender == tx.sender
-                        && btx.nonce == tx.nonce)
+                    || (!btx.is_coinbase() && btx.sender == tx.sender && btx.nonce == tx.nonce)
             })
         });
         drop(pending);
@@ -2327,15 +2598,18 @@ impl Blockchain {
         // Stale-nonce sweep: remove any entry where our cached pending nonce is
         // now <= the confirmed chain nonce (the tx was confirmed or reorg erased it).
         let confirmed_state = self.account_state.read();
-        self.pending_nonces.retain(|addr, cached_nonce| {
-            *cached_nonce > confirmed_state.get_nonce(addr)
-        });
+        self.pending_nonces
+            .retain(|addr, cached_nonce| *cached_nonce > confirmed_state.get_nonce(addr));
         drop(confirmed_state);
 
         // 11. Notify BFT proposer: chain has moved, restart block template.
         let _ = self.new_block_tx.send(block.index + 1);
 
-        tracing::info!("Network block {} accepted at height {}", block.index, block.index);
+        tracing::info!(
+            "Network block {} accepted at height {}",
+            block.index,
+            block.index
+        );
         Ok(())
     }
 
@@ -2345,9 +2619,9 @@ impl Blockchain {
             let latest = self.get_latest_block();
             let expected_index = latest.index + 1;
             let expected_prev_hash = latest.hash.clone();
-            
+
             let mut orphans = self.orphaned_blocks.write();
-            
+
             // Find an orphan that connects to our new tip
             let mut found_index = None;
             for (i, orphan) in orphans.iter().enumerate() {
@@ -2356,13 +2630,17 @@ impl Blockchain {
                     break;
                 }
             }
-            
+
             if let Some(idx) = found_index {
                 // Remove the connected orphan
                 let block = orphans.remove(idx).unwrap();
                 drop(orphans); // Drop lock before adding to main chain
-                
-                tracing::info!("Orphan block {} connects to main chain at height {}", &block.hash[..8], block.index);
+
+                tracing::info!(
+                    "Orphan block {} connects to main chain at height {}",
+                    &block.hash[..8],
+                    block.index
+                );
                 if let Err(e) = self.add_block_to_main_chain(block) {
                     tracing::warn!("Failed to add formerly orphaned block: {}", e);
                     break;
@@ -2470,7 +2748,10 @@ impl Blockchain {
     /// Returns `None` only when the address has never appeared on-chain.
     /// Returns spendable balance, total balance (including locked), nonce,
     /// and the list of active locked entries.
-    pub fn get_address_info(&self, address: &str) -> Option<crate::core::transaction::AccountBalance> {
+    pub fn get_address_info(
+        &self,
+        address: &str,
+    ) -> Option<crate::core::transaction::AccountBalance> {
         let state = self.account_state.read();
         state.get_account(address).cloned()
     }
@@ -2480,7 +2761,10 @@ impl Blockchain {
     /// Uses the O(1) storage index built at save-time — no full chain scan.
     /// Returns `None` if the transaction is not found in confirmed blocks
     /// (it might still be in the mempool).
-    pub fn find_transaction_by_hash(&self, tx_hash: &str) -> Option<crate::core::transaction::Transaction> {
+    pub fn find_transaction_by_hash(
+        &self,
+        tx_hash: &str,
+    ) -> Option<crate::core::transaction::Transaction> {
         self.storage.find_transaction(tx_hash).ok()
     }
 
@@ -2517,12 +2801,12 @@ impl Blockchain {
             return vec![];
         }
         let scan_start = height.saturating_sub(1);
-        let scan_end  = scan_start.saturating_sub(max_blocks.min(height));
+        let scan_end = scan_start.saturating_sub(max_blocks.min(height));
 
         let mut results: Vec<AddressTransaction> = Vec::new();
 
         let i_start = scan_start;
-        let i_end   = scan_end;
+        let i_end = scan_end;
 
         let mut h = i_start;
         loop {
@@ -2573,11 +2857,17 @@ impl Blockchain {
     /// - On any validation failure the reorg is aborted and the node stays on
     ///   its current (now partially-rolled-back) chain; a subsequent sync will
     ///   re-attempt.
-    pub fn deep_reorg(&self, rollback_to: u64, new_chain: Vec<Block>) -> Result<(), BlockchainError> {
+    pub fn deep_reorg(
+        &self,
+        rollback_to: u64,
+        new_chain: Vec<Block>,
+    ) -> Result<(), BlockchainError> {
         let our_height = self.get_height();
         tracing::warn!(
             "DEEP REORG: rolling back from height {} to {}, then applying {} new blocks",
-            our_height, rollback_to, new_chain.len()
+            our_height,
+            rollback_to,
+            new_chain.len()
         );
 
         // --- Safety checks ---
@@ -2596,7 +2886,8 @@ impl Blockchain {
                 // We would be rolling back past this checkpoint.
                 tracing::error!(
                     "Deep reorg refused: would cross checkpoint at height {} ({})",
-                    cp_height, cp_hash
+                    cp_height,
+                    cp_hash
                 );
                 return Err(BlockchainError::InvalidBlock);
             }
@@ -2622,7 +2913,8 @@ impl Blockchain {
         if effective_rollback != rollback_to && effective_rollback + 1 != rollback_to {
             tracing::warn!(
                 "Deep reorg: first new block is at height {} but expected {} (±1) — aborting",
-                effective_rollback, rollback_to
+                effective_rollback,
+                rollback_to
             );
             return Err(BlockchainError::InvalidBlock);
         }
@@ -2663,7 +2955,10 @@ impl Blockchain {
         let rebuilt_state = self.rebuild_account_state_up_to(rollback_to - 1);
         self.storage.save_account_state(&rebuilt_state)?;
         *self.account_state.write() = rebuilt_state;
-        tracing::info!("Deep reorg: account state rebuilt up to height {}", rollback_to - 1);
+        tracing::info!(
+            "Deep reorg: account state rebuilt up to height {}",
+            rollback_to - 1
+        );
 
         // SYNC FIX: Reset cumulative_work to the value AT rollback_to using the O(1)
         // cumulative_work_at() fast path instead of scanning all rollback_to blocks.
@@ -2681,7 +2976,11 @@ impl Blockchain {
             *cw = base_work;
         }
         let _ = self.storage.set_cumulative_work(base_work);
-        tracing::info!("Deep reorg: cumulative_work reset to {} at rollback height {} (O(1) lookup)", base_work, rollback_to);
+        tracing::info!(
+            "Deep reorg: cumulative_work reset to {} at rollback height {} (O(1) lookup)",
+            base_work,
+            rollback_to
+        );
 
         // Clear the orphan pool — everything in it belongs to a now-stale fork.
         self.orphaned_blocks.write().clear();
@@ -2693,12 +2992,18 @@ impl Blockchain {
             match self.add_block_to_main_chain_reorg(block.clone()) {
                 Ok(_) => {
                     applied += 1;
-                    tracing::info!("Deep reorg: applied block {} ({}...)", block.index, &block.hash[..8]);
+                    tracing::info!(
+                        "Deep reorg: applied block {} ({}...)",
+                        block.index,
+                        &block.hash[..8]
+                    );
                 }
                 Err(e) => {
                     tracing::warn!(
                         "Deep reorg: failed to apply block {} (height {}) — aborting reorg: {}",
-                        &block.hash[..8], block.index, e
+                        &block.hash[..8],
+                        block.index,
+                        e
                     );
                     // Log extra context to help diagnose which validation failed
                     tracing::warn!(
@@ -2717,16 +3022,19 @@ impl Blockchain {
             let restored_state = self.rebuild_account_state_up_to(rollback_to - 1);
             let _ = self.storage.save_account_state(&restored_state);
             *self.account_state.write() = restored_state;
-            
+
             for block in original_chain {
                 if let Err(e) = self.add_block_to_main_chain_reorg(block.clone()) {
-                    tracing::error!("CRITICAL: Failed to restore original chain at block {}: {}", block.index, e);
+                    tracing::error!(
+                        "CRITICAL: Failed to restore original chain at block {}: {}",
+                        block.index,
+                        e
+                    );
                     break;
                 }
             }
             return Err(BlockchainError::InvalidBlock);
         }
-
 
         // --- Single explicitly placed fsync at the very end to make storage durable ---
         self.flush_storage();
@@ -2734,7 +3042,8 @@ impl Blockchain {
         let final_height = self.get_height();
         tracing::warn!(
             "DEEP REORG COMPLETE: applied {} blocks, final height: {}",
-            applied, final_height
+            applied,
+            final_height
         );
         Ok(())
     }
@@ -2758,8 +3067,8 @@ pub struct BlockchainStats {
     pub chain_length: usize,
     pub total_transactions: usize,
     pub current_epoch: u64,
-    pub mining_reward: u64,      // microunits
-    pub total_supply: u64,       // microunits
+    pub mining_reward: u64, // microunits
+    pub total_supply: u64,  // microunits
     pub pending_transactions: usize,
 }
 
@@ -2774,15 +3083,18 @@ mod tests {
     fn test_fee_distribution_no_rounding_loss() {
         let total_fees: u64 = 1_000_000; // 1 QUA in microunits
 
-        let fee_burned       = (total_fees * FEE_BURN_PERCENT) / 100;      // 700_000
-        let fee_to_treasury  = (total_fees * FEE_TREASURY_PERCENT) / 100;  // 200_000
-        let fee_to_miner     = total_fees - fee_burned - fee_to_treasury;  // 100_000 (remainder)
+        let fee_burned = (total_fees * FEE_BURN_PERCENT) / 100; // 700_000
+        let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100; // 200_000
+        let fee_to_miner = total_fees - fee_burned - fee_to_treasury; // 100_000 (remainder)
 
-        assert_eq!(fee_burned,      700_000, "70% should be burned");
+        assert_eq!(fee_burned, 700_000, "70% should be burned");
         assert_eq!(fee_to_treasury, 200_000, "20% goes to treasury");
-        assert_eq!(fee_to_miner,    100_000, "10% to miner (no rounding loss)");
-        assert_eq!(fee_burned + fee_to_treasury + fee_to_miner, total_fees,
-            "fee split must be lossless");
+        assert_eq!(fee_to_miner, 100_000, "10% to miner (no rounding loss)");
+        assert_eq!(
+            fee_burned + fee_to_treasury + fee_to_miner,
+            total_fees,
+            "fee split must be lossless"
+        );
     }
 
     /// Odd fee amounts should give remainder to miner, not lose value
@@ -2790,13 +3102,16 @@ mod tests {
     fn test_fee_distribution_odd_amounts() {
         let total_fees: u64 = 999; // deliberately not divisible by 100
 
-        let fee_burned       = (total_fees * FEE_BURN_PERCENT) / 100;
-        let fee_to_treasury  = (total_fees * FEE_TREASURY_PERCENT) / 100;
-        let fee_to_miner     = total_fees - fee_burned - fee_to_treasury; // remainder
+        let fee_burned = (total_fees * FEE_BURN_PERCENT) / 100;
+        let fee_to_treasury = (total_fees * FEE_TREASURY_PERCENT) / 100;
+        let fee_to_miner = total_fees - fee_burned - fee_to_treasury; // remainder
 
         // All microunits must be accounted for
-        assert_eq!(fee_burned + fee_to_treasury + fee_to_miner, total_fees,
-            "every microunit must go somewhere — no value created or destroyed");
+        assert_eq!(
+            fee_burned + fee_to_treasury + fee_to_miner,
+            total_fees,
+            "every microunit must go somewhere — no value created or destroyed"
+        );
     }
 
     // ─── Block Reward Math ───────────────────────────────────────────────────
@@ -2807,13 +3122,12 @@ mod tests {
         let reward: u64 = 100_000_000; // 100 QUA Year-1 reward
 
         let treasury_allocation = (reward * TREASURY_ALLOCATION_PERCENT) / 100; // 5 QUA
-        let miner_reward        = reward - treasury_allocation;                  // 95 QUA
+        let miner_reward = reward - treasury_allocation; // 95 QUA
 
         assert_eq!(treasury_allocation, 5_000_000, "5% of 100 QUA = 5 QUA");
-        assert_eq!(miner_reward,       95_000_000, "95% of 100 QUA = 95 QUA");
+        assert_eq!(miner_reward, 95_000_000, "95% of 100 QUA = 95 QUA");
         assert_eq!(treasury_allocation + miner_reward, reward, "no value lost");
     }
-
 
     // ─── Reward Reduction ────────────────────────────────────────────────────
 
@@ -2828,9 +3142,16 @@ mod tests {
     #[test]
     fn test_reward_floor_after_many_years() {
         let reward = apply_annual_reduction(YEAR_1_REWARD, 50); // 50 years
-        assert!(reward >= MIN_REWARD,
-            "Reward {} must not drop below MIN_REWARD {}", reward, MIN_REWARD);
-        assert_eq!(reward, MIN_REWARD, "After 50 years must be exactly at floor");
+        assert!(
+            reward >= MIN_REWARD,
+            "Reward {} must not drop below MIN_REWARD {}",
+            reward,
+            MIN_REWARD
+        );
+        assert_eq!(
+            reward, MIN_REWARD,
+            "After 50 years must be exactly at floor"
+        );
     }
 
     /// Reward at year 1 must be 85% of year 0 (15% annual reduction)
@@ -2840,8 +3161,10 @@ mod tests {
         let year1 = apply_annual_reduction(YEAR_1_REWARD, 1);
         // Integer math: year1 = year0 * 85 / 100
         let expected = year0 * 85 / 100;
-        assert_eq!(year1, expected,
-            "Year 1 reward must be exactly 85% of year 0 (integer math)");
+        assert_eq!(
+            year1, expected,
+            "Year 1 reward must be exactly 85% of year 0 (integer math)"
+        );
     }
 
     // ─── Treasury Address ─────────────────────────────────────────────────────
@@ -2849,16 +3172,23 @@ mod tests {
     /// Treasury address constant must be the real 3-of-5 multisig, not the placeholder
     #[test]
     fn test_treasury_address_is_not_placeholder() {
-        assert_ne!(TREASURY_ADDRESS, "0x0000000000000000000000000000000000000001",
-            "Treasury must be set to the real multisig address, not the placeholder");
-        assert!(TREASURY_ADDRESS.starts_with("ms"),
-            "Treasury address must start with 'ms' (multisig prefix), got: {}", TREASURY_ADDRESS);
+        assert_ne!(
+            TREASURY_ADDRESS, "0x0000000000000000000000000000000000000001",
+            "Treasury must be set to the real multisig address, not the placeholder"
+        );
+        assert!(
+            TREASURY_ADDRESS.starts_with("ms"),
+            "Treasury address must start with 'ms' (multisig prefix), got: {}",
+            TREASURY_ADDRESS
+        );
     }
 
     /// Treasury address must be the exact known 3-of-5 address we generated
     #[test]
     fn test_treasury_address_exact_value() {
-        assert_eq!(TREASURY_ADDRESS, "ms69216b1d10425689704d5ae3b2a4aa17049f59b1",
-            "TREASURY_ADDRESS changed! Update this test AND generate a new genesis block.");
+        assert_eq!(
+            TREASURY_ADDRESS, "ms69216b1d10425689704d5ae3b2a4aa17049f59b1",
+            "TREASURY_ADDRESS changed! Update this test AND generate a new genesis block."
+        );
     }
 }

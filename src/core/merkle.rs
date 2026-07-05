@@ -1,5 +1,5 @@
-use crate::crypto::sha3_hash;
 use crate::core::transaction::Transaction;
+use crate::crypto::sha3_hash;
 use serde::{Deserialize, Serialize};
 
 /// Hash type - always 32 bytes (SHA3-256)
@@ -16,8 +16,14 @@ fn hash_to_bytes(hash_str: &str) -> Hash {
 /// Merkle tree node - stores raw bytes, not strings
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum MerkleNode {
-    Leaf { hash: Hash },
-    Branch { hash: Hash, left: Box<MerkleNode>, right: Box<MerkleNode> },
+    Leaf {
+        hash: Hash,
+    },
+    Branch {
+        hash: Hash,
+        left: Box<MerkleNode>,
+        right: Box<MerkleNode>,
+    },
 }
 
 impl MerkleNode {
@@ -74,7 +80,7 @@ impl MerkleTree {
             leaves: hashes,
         }
     }
-    
+
     /// Create from transaction hashes (DEPRECATED - converts strings to bytes)
     #[deprecated(note = "Use from_hashes_bytes() instead")]
     pub fn from_hashes(hashes: Vec<String>) -> Self {
@@ -85,9 +91,7 @@ impl MerkleTree {
     /// Build the tree recursively - hashes RAW BYTES, not strings
     fn build_tree(hashes: &[Hash]) -> MerkleNode {
         if hashes.len() == 1 {
-            return MerkleNode::Leaf {
-                hash: hashes[0],
-            };
+            return MerkleNode::Leaf { hash: hashes[0] };
         }
 
         let mid = (hashes.len() + 1) / 2;
@@ -105,7 +109,7 @@ impl MerkleTree {
         let mut combined = Vec::with_capacity(64);
         combined.extend_from_slice(left.hash());
         combined.extend_from_slice(right.hash());
-        
+
         // Hash the raw bytes
         let hash_bytes = sha3_hash(&combined);
         let mut hash = [0u8; 32];
@@ -122,7 +126,7 @@ impl MerkleTree {
     pub fn root_hash_bytes(&self) -> Option<Hash> {
         self.root.as_ref().map(|node| *node.hash())
     }
-    
+
     /// Get the root hash as hex string (for display/RPC)
     pub fn root_hash(&self) -> Option<String> {
         self.root_hash_bytes().map(|hash| hex::encode(hash))
@@ -132,15 +136,15 @@ impl MerkleTree {
     pub fn generate_proof(&self, tx_hash: &Hash) -> Option<MerkleProof> {
         let index = self.leaves.iter().position(|h| h == tx_hash)?;
         let mut proof = Vec::new();
-        
+
         self.collect_proof(self.root.as_ref()?, index, 0, self.leaves.len(), &mut proof);
-        
+
         Some(MerkleProof {
             tx_hash: *tx_hash,
             proof, // Bottom-up order from collect_proof
         })
     }
-    
+
     /// Generate proof from hex string (TEMPORARY)
     pub fn generate_proof_hex(&self, tx_hash_hex: &str) -> Option<MerkleProof> {
         let tx_hash = hash_to_bytes(tx_hash_hex);
@@ -157,10 +161,10 @@ impl MerkleTree {
         proof: &mut Vec<(Hash, bool)>,
     ) {
         match node {
-            MerkleNode::Leaf { .. } => {},
+            MerkleNode::Leaf { .. } => {}
             MerkleNode::Branch { left, right, .. } => {
                 let mid = (start + end) / 2;
-                
+
                 if target_index < mid {
                     // Target is in left subtree, add right sibling
                     proof.push((*right.hash(), false)); // false = right
@@ -201,7 +205,7 @@ impl MerkleProof {
     /// Verify the proof against a root hash (bytes)
     pub fn verify(&self, root_hash: &Hash) -> bool {
         let mut current_hash = self.tx_hash;
-        
+
         for (sibling_hash, is_left) in &self.proof {
             // Concatenate bytes in correct order
             let mut combined = Vec::with_capacity(64);
@@ -212,19 +216,18 @@ impl MerkleProof {
                 combined.extend_from_slice(&current_hash);
                 combined.extend_from_slice(sibling_hash);
             }
-            
+
             // Hash the bytes
             let hash_bytes = sha3_hash(&combined);
             current_hash.copy_from_slice(&hash_bytes[..32]);
         }
-        
+
         &current_hash == root_hash
     }
-    
+
     /// Verify against hex string root (for convenience)
     pub fn verify_hex(&self, root_hash_hex: &str) -> bool {
         let root_hash = hash_to_bytes(root_hash_hex);
         self.verify(&root_hash)
     }
 }
-

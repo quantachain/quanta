@@ -1,17 +1,10 @@
 use super::types::*;
 use crate::consensus::Blockchain;
 use crate::network::Network;
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::Json,
-    routing::post,
-    Router,
-};
+use axum::{extract::State, http::StatusCode, response::Json, routing::post, Router};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use std::time::Instant;
-
+use tokio::sync::RwLock;
 
 pub struct RpcServer {
     pub blockchain: Arc<RwLock<Blockchain>>,
@@ -22,8 +15,6 @@ pub struct RpcServer {
     pub network_port: u16,
     pub rpc_port: u16,
 }
-
-
 
 #[derive(Clone)]
 struct AppState {
@@ -72,9 +63,9 @@ impl RpcServer {
 
         let addr = format!("127.0.0.1:{}", port);
         let listener = tokio::net::TcpListener::bind(&addr).await?;
-        
+
         tracing::info!("RPC server listening on {}", addr);
-        
+
         axum::serve(listener, app).await?;
         Ok(())
     }
@@ -134,21 +125,16 @@ async fn handle_node_status(state: &AppState) -> JsonRpcResponse {
     JsonRpcResponse::success(1, serde_json::to_value(status).unwrap())
 }
 
-
 async fn handle_get_block(state: &AppState, params: &serde_json::Value) -> JsonRpcResponse {
     let height: u64 = match params.get("height").and_then(|v| v.as_u64()) {
         Some(h) => h,
         None => {
-            return JsonRpcResponse::error(
-                1,
-                -32602,
-                "Invalid params: height required".to_string(),
-            )
+            return JsonRpcResponse::error(1, -32602, "Invalid params: height required".to_string())
         }
     };
 
     let blockchain = state.blockchain.read().await;
-    
+
     if let Some(block) = blockchain.get_block_by_height(height) {
         let block_info = BlockInfo {
             height: block.index,
@@ -211,7 +197,7 @@ async fn handle_get_peers(state: &AppState) -> JsonRpcResponse {
 async fn handle_get_mempool(state: &AppState) -> JsonRpcResponse {
     let blockchain = state.blockchain.read().await;
     let transactions = blockchain.get_pending_transactions();
-    
+
     let tx_data: Vec<serde_json::Value> = transactions
         .iter()
         .map(|tx| {
@@ -231,7 +217,7 @@ async fn handle_get_mempool(state: &AppState) -> JsonRpcResponse {
 
 async fn handle_shutdown(_state: &AppState) -> JsonRpcResponse {
     tracing::info!("Shutdown requested via RPC");
-    
+
     // Spawn a task to shutdown after a brief delay
     tokio::spawn(async {
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;

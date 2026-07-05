@@ -10,7 +10,6 @@
 ///
 /// Run this whenever block.rs changes to get the new hash to paste into
 /// blockchain.rs as TESTNET_GENESIS_HASH.
-
 use quanta::core::block::Block;
 
 fn main() {

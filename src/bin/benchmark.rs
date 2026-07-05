@@ -46,7 +46,7 @@ mod benchmark {
     pub use quanta::benchmark::*;
 }
 
-use quanta::benchmark::report::{write_json, write_markdown, run_all_benchmarks, BenchmarkSection};
+use quanta::benchmark::report::{run_all_benchmarks, write_json, write_markdown, BenchmarkSection};
 use std::env;
 
 #[tokio::main]
@@ -59,9 +59,9 @@ async fn main() {
         return;
     }
 
-    let quick         = args.iter().any(|a| a == "--quick");
-    let full_pow      = args.iter().any(|a| a == "--full-pow") && !quick;
-    let json_only     = args.iter().any(|a| a == "--json-only");
+    let quick = args.iter().any(|a| a == "--quick");
+    let full_pow = args.iter().any(|a| a == "--full-pow") && !quick;
+    let json_only = args.iter().any(|a| a == "--json-only");
 
     let iterations = if quick {
         100
@@ -69,22 +69,27 @@ async fn main() {
         parse_arg(&args, "--iterations").unwrap_or(500)
     };
 
-    let output_dir = args.windows(2)
+    let output_dir = args
+        .windows(2)
         .find(|w| w[0] == "--output-dir")
         .map(|w| w[1].clone())
         .unwrap_or_else(|| "./benchmark_results".to_string());
 
-    let live_node_url = if quick { None } else {
+    let live_node_url = if quick {
+        None
+    } else {
         args.windows(2)
             .find(|w| w[0] == "--live-node")
             .map(|w| w[1].clone())
     };
 
     // Optional: path to faucet_accounts_export.json (keeps private keys OUT of git)
-    let wallet_file = args.windows(2)
+    let wallet_file = args
+        .windows(2)
         .find(|w| w[0] == "--wallet-file")
         .map(|w| w[1].clone());
-    let wallet_index: usize = args.windows(2)
+    let wallet_index: usize = args
+        .windows(2)
         .find(|w| w[0] == "--wallet-index")
         .and_then(|w| w[1].parse().ok())
         .unwrap_or(1); // default = Faucet 1 (Faucet 0 is the live faucet sender)
@@ -94,8 +99,13 @@ async fn main() {
 
     // ── Live node section (async) ─────────────────────────────────────────────
     let network_section = if let Some(ref url) = live_node_url {
-        let tx_count = if quick { 20 } else { parse_arg(&args, "--live-txs").unwrap_or(100) };
-        quanta::benchmark::network_bench::run(url, tx_count, wallet_file.as_deref(), wallet_index).await
+        let tx_count = if quick {
+            20
+        } else {
+            parse_arg(&args, "--live-txs").unwrap_or(100)
+        };
+        quanta::benchmark::network_bench::run(url, tx_count, wallet_file.as_deref(), wallet_index)
+            .await
     } else {
         quanta::benchmark::network_bench::run_skipped()
     };
@@ -110,11 +120,15 @@ async fn main() {
     for section in &report.sections {
         println!("\n▸ {}", section.name);
         for stat in &section.stats {
-            if stat.iterations == 0 { continue; }
-            let tp_str = stat.throughput
+            if stat.iterations == 0 {
+                continue;
+            }
+            let tp_str = stat
+                .throughput
                 .map(|t| format!("  [{:.0} ops/s]", t))
                 .unwrap_or_default();
-            println!("    {:<55} mean={:>10.3} {}{}",
+            println!(
+                "    {:<55} mean={:>10.3} {}{}",
                 truncate(&stat.name, 55),
                 stat.mean_ms,
                 stat.unit,
@@ -127,12 +141,12 @@ async fn main() {
     println!("\n{}", "═".repeat(70));
     match write_json(&report, &output_dir) {
         Ok(path) => println!(" ✅ JSON report: {}", path),
-        Err(e)   => eprintln!(" ❌ Failed to write JSON: {}", e),
+        Err(e) => eprintln!(" ❌ Failed to write JSON: {}", e),
     }
     if !json_only {
         match write_markdown(&report, &output_dir) {
             Ok(path) => println!(" ✅ Markdown report: {}", path),
-            Err(e)   => eprintln!(" ❌ Failed to write Markdown: {}", e),
+            Err(e) => eprintln!(" ❌ Failed to write Markdown: {}", e),
         }
     }
 
@@ -148,12 +162,16 @@ fn parse_arg(args: &[String], flag: &str) -> Option<usize> {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max { s.to_string() }
-    else { format!("{}…", &s[..max - 1]) }
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max - 1])
+    }
 }
 
 fn print_help() {
-    println!(r#"
+    println!(
+        r#"
 Quanta PQC Benchmark Suite — {version}
 
 USAGE:

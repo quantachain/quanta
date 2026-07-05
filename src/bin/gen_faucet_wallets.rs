@@ -1,3 +1,5 @@
+use bip39::{Language, Mnemonic};
+use quanta::core::block::Block;
 /// gen_faucet_wallets — Generate 10 HD faucet accounts for genesis testnet
 ///
 /// No BIP39 passphrase is used — standard HD derivation (Falcon-512 is already PQC).
@@ -18,10 +20,7 @@
 ///   - faucet_wallet.json  — encrypted with FAUCET_WALLET_PASSWORD
 ///   - 10 addresses ready to paste into blockchain.rs (~line 346 and ~line 485)
 ///   - Current TESTNET_GENESIS_HASH ready to paste into blockchain.rs (~line 208)
-
 use quanta::crypto::HDWallet;
-use quanta::core::block::Block;
-use bip39::{Mnemonic, Language};
 use rand::RngCore;
 
 fn main() {
@@ -103,7 +102,10 @@ fn main() {
     println!();
     println!("    let testnet_faucets = vec![");
     for account in wallet.get_accounts() {
-        println!("        \"{}\",  // Faucet {}", account.address, account.index);
+        println!(
+            "        \"{}\",  // Faucet {}",
+            account.address, account.index
+        );
     }
     println!("    ];");
     println!();
@@ -127,8 +129,7 @@ fn main() {
         .export_encrypted(&file_password)
         .expect("Failed to encrypt wallet");
 
-    std::fs::write("faucet_wallet.json", &encrypted)
-        .expect("Failed to write faucet_wallet.json");
+    std::fs::write("faucet_wallet.json", &encrypted).expect("Failed to write faucet_wallet.json");
 
     println!("  ✓  Saved: faucet_wallet.json");
     println!("     Encrypted with FAUCET_WALLET_PASSWORD (Argon2 + ChaCha20-Poly1305).");

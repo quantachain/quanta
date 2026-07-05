@@ -1,6 +1,6 @@
-use serde::{Serialize, Deserialize};
-use crate::crypto::{verify_signature_strict, canonical_signing_hash};
-use crate::core::{TESTNET_NETWORK_ID};
+use crate::core::TESTNET_NETWORK_ID;
+use crate::crypto::{canonical_signing_hash, verify_signature_strict};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
@@ -17,7 +17,18 @@ use std::collections::HashMap;
 /// FROZEN VALUES — do not reorder or delete:
 ///   0 = Falcon512  (current, post-quantum)
 ///   1 = Reserved   (placeholder; no implementation)
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, std::hash::Hash, Copy, codec::Encode, codec::Decode)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    std::hash::Hash,
+    Copy,
+    codec::Encode,
+    codec::Decode,
+)]
 #[repr(u8)]
 pub enum SignatureScheme {
     /// Falcon-512 (NIST PQC Round 3 — compact lattice signatures).
@@ -48,7 +59,17 @@ impl Default for SignatureScheme {
 /// CONSENSUS RULE:
 ///   Nodes must only call `verify()` inside consensus logic.
 ///   Signing (keypair operations) must never occur inside the consensus path.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, std::hash::Hash, codec::Encode, codec::Decode)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    std::hash::Hash,
+    codec::Encode,
+    codec::Decode,
+)]
 pub struct Transaction {
     pub sender: String,
     pub recipient: String,
@@ -95,7 +116,17 @@ pub struct Transaction {
 ///   5 = ContractDeploy (v2 — deploy a named contract template)
 ///   6 = ContractCall   (v2 — invoke a deployed contract)
 ///   7 = SlashEvidence  (v3 — submit double-signing proof for slashing)
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, std::hash::Hash, codec::Encode, codec::Decode)]
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
+    std::hash::Hash,
+    codec::Encode,
+    codec::Decode,
+)]
 pub enum TransactionType {
     /// Standard value transfer.
     Transfer,
@@ -118,7 +149,11 @@ pub enum TransactionType {
     /// `contract_address` is the on-chain address of the contract.
     /// `method` is the UTF-8 method name.
     /// `call_args` is a JSON-encoded argument map.
-    ContractCall { contract_address: String, method: String, call_args: Vec<u8> },
+    ContractCall {
+        contract_address: String,
+        method: String,
+        call_args: Vec<u8>,
+    },
     /// v3: Submit equivocation proof to slash a double-signing validator.
     ///
     /// The submitter provides two conflicting BFT signatures from the SAME
@@ -274,18 +309,33 @@ impl Transaction {
                 buf.extend_from_slice(validator_pubkey);
             }
             TransactionType::Unstake => buf.push(4u8),
-            TransactionType::ContractDeploy { template_id, init_args } => {
+            TransactionType::ContractDeploy {
+                template_id,
+                init_args,
+            } => {
                 buf.push(5u8);
                 buf.push(*template_id);
                 buf.extend_from_slice(init_args);
             }
-            TransactionType::ContractCall { contract_address, method, call_args } => {
+            TransactionType::ContractCall {
+                contract_address,
+                method,
+                call_args,
+            } => {
                 buf.push(6u8);
                 buf.extend_from_slice(contract_address.as_bytes());
                 buf.extend_from_slice(method.as_bytes());
                 buf.extend_from_slice(call_args);
             }
-            TransactionType::SlashEvidence { offender, height, round, sig_a, hash_a, sig_b, hash_b } => {
+            TransactionType::SlashEvidence {
+                offender,
+                height,
+                round,
+                sig_a,
+                hash_a,
+                sig_b,
+                hash_b,
+            } => {
                 buf.push(7u8);
                 buf.extend_from_slice(offender.as_bytes());
                 buf.extend_from_slice(&height.to_le_bytes());
@@ -354,17 +404,32 @@ impl Transaction {
                 hasher.update(validator_pubkey);
             }
             TransactionType::Unstake => hasher.update(&[4u8]),
-            TransactionType::ContractDeploy { template_id, init_args } => {
+            TransactionType::ContractDeploy {
+                template_id,
+                init_args,
+            } => {
                 hasher.update(&[5u8, *template_id]);
                 hasher.update(init_args);
             }
-            TransactionType::ContractCall { contract_address, method, call_args } => {
+            TransactionType::ContractCall {
+                contract_address,
+                method,
+                call_args,
+            } => {
                 hasher.update(&[6u8]);
                 hasher.update(contract_address.as_bytes());
                 hasher.update(method.as_bytes());
                 hasher.update(call_args);
             }
-            TransactionType::SlashEvidence { offender, height, round, sig_a, hash_a, sig_b, hash_b } => {
+            TransactionType::SlashEvidence {
+                offender,
+                height,
+                round,
+                sig_a,
+                hash_a,
+                sig_b,
+                hash_b,
+            } => {
                 hasher.update(&[7u8]);
                 hasher.update(offender.as_bytes());
                 hasher.update(&height.to_le_bytes());
@@ -412,7 +477,8 @@ impl Transaction {
         if self.sender != derived {
             tracing::warn!(
                 "Transaction verify: sender address mismatch — claimed {}, derived {}",
-                self.sender, derived
+                self.sender,
+                derived
             );
             return false;
         }
@@ -476,7 +542,6 @@ impl Transaction {
     pub fn is_slash_evidence(&self) -> bool {
         matches!(self.tx_type, TransactionType::SlashEvidence { .. })
     }
-
 } // impl Transaction
 
 // ---------------------------------------------------------------------------
@@ -635,7 +700,12 @@ impl AccountState {
     /// Credit an account from a transaction.
     ///   - Coinbase credits are locked until `current_height + coinbase_maturity`.
     ///   - Regular credits are immediately spendable.
-    pub fn credit_account(&mut self, tx: &Transaction, current_height: u64, coinbase_maturity: u64) {
+    pub fn credit_account(
+        &mut self,
+        tx: &Transaction,
+        current_height: u64,
+        coinbase_maturity: u64,
+    ) {
         // Automatically route any ContractDeploy/ContractCall logic
         crate::core::contracts::NativeContracts::execute(self, tx, current_height);
 
@@ -643,12 +713,15 @@ impl AccountState {
             return;
         }
 
-        let account = self.accounts.entry(tx.recipient.clone()).or_insert(AccountBalance {
-            address: tx.recipient.clone(),
-            balance: 0,
-            nonce: 0,
-            locked_balances: Vec::new(),
-        });
+        let account = self
+            .accounts
+            .entry(tx.recipient.clone())
+            .or_insert(AccountBalance {
+                address: tx.recipient.clone(),
+                balance: 0,
+                nonce: 0,
+                locked_balances: Vec::new(),
+            });
 
         if tx.is_coinbase() {
             // Mining rewards: locked for coinbase_maturity blocks before spending.
@@ -692,12 +765,15 @@ impl AccountState {
         if amount == 0 {
             return;
         }
-        let account = self.accounts.entry(address.to_string()).or_insert(AccountBalance {
-            address: address.to_string(),
-            balance: 0,
-            nonce: 0,
-            locked_balances: Vec::new(),
-        });
+        let account = self
+            .accounts
+            .entry(address.to_string())
+            .or_insert(AccountBalance {
+                address: address.to_string(),
+                balance: 0,
+                nonce: 0,
+                locked_balances: Vec::new(),
+            });
         account.balance = account.balance.saturating_add(amount);
     }
 
@@ -720,26 +796,38 @@ impl AccountState {
 
     /// Add a locked balance with a specific unlock height (vesting / anti-dump).
     pub fn add_locked_balance(&mut self, address: &str, amount: u64, unlock_height: u64) {
-        let account = self.accounts.entry(address.to_string()).or_insert(AccountBalance {
-            address: address.to_string(),
-            balance: 0,
-            nonce: 0,
-            locked_balances: Vec::new(),
+        let account = self
+            .accounts
+            .entry(address.to_string())
+            .or_insert(AccountBalance {
+                address: address.to_string(),
+                balance: 0,
+                nonce: 0,
+                locked_balances: Vec::new(),
+            });
+        account.locked_balances.push(LockedBalance {
+            amount,
+            unlock_height,
         });
-        account.locked_balances.push(LockedBalance { amount, unlock_height });
     }
 
     /// Spendable balance for an address.
     pub fn get_balance(&self, address: &str) -> u64 {
-        self.accounts.get(address).map(|acc| acc.balance).unwrap_or(0)
+        self.accounts
+            .get(address)
+            .map(|acc| acc.balance)
+            .unwrap_or(0)
     }
 
     /// Total balance (spendable + all locked entries).
     pub fn get_total_balance(&self, address: &str) -> u64 {
-        self.accounts.get(address).map(|acc| {
-            let locked: u64 = acc.locked_balances.iter().map(|l| l.amount).sum();
-            acc.balance + locked
-        }).unwrap_or(0)
+        self.accounts
+            .get(address)
+            .map(|acc| {
+                let locked: u64 = acc.locked_balances.iter().map(|l| l.amount).sum();
+                acc.balance + locked
+            })
+            .unwrap_or(0)
     }
 
     /// Current nonce for an address.
@@ -752,12 +840,15 @@ impl AccountState {
         if let Some(acc) = self.accounts.get_mut(address) {
             acc.nonce += 1;
         } else {
-            self.accounts.insert(address.to_string(), AccountBalance {
-                address: address.to_string(),
-                balance: 0,
-                nonce: 1,
-                locked_balances: Vec::new(),
-            });
+            self.accounts.insert(
+                address.to_string(),
+                AccountBalance {
+                    address: address.to_string(),
+                    balance: 0,
+                    nonce: 1,
+                    locked_balances: Vec::new(),
+                },
+            );
         }
     }
 
@@ -768,12 +859,15 @@ impl AccountState {
         if let Some(acc) = self.accounts.get_mut(address) {
             acc.nonce = nonce;
         } else {
-            self.accounts.insert(address.to_string(), AccountBalance {
-                address: address.to_string(),
-                balance: 0,
-                nonce,
-                locked_balances: Vec::new(),
-            });
+            self.accounts.insert(
+                address.to_string(),
+                AccountBalance {
+                    address: address.to_string(),
+                    balance: 0,
+                    nonce,
+                    locked_balances: Vec::new(),
+                },
+            );
         }
     }
 
@@ -809,17 +903,20 @@ impl AccountState {
         stake: u64,
         current_epoch: u64,
     ) {
-        self.validators.insert(address.to_string(), ValidatorInfo {
-            falcon_pk,
-            stake,
-            registered_epoch: current_epoch,
-            active: true,
-            unbonding_epoch: 0,
-            slash_cooldown_until_epoch: 0,
-            last_proposed_height: 0,
-            epoch_slots_assigned: 0,
-            epoch_slots_produced: 0,
-        });
+        self.validators.insert(
+            address.to_string(),
+            ValidatorInfo {
+                falcon_pk,
+                stake,
+                registered_epoch: current_epoch,
+                active: true,
+                unbonding_epoch: 0,
+                slash_cooldown_until_epoch: 0,
+                last_proposed_height: 0,
+                epoch_slots_assigned: 0,
+                epoch_slots_produced: 0,
+            },
+        );
     }
 
     /// Deregister a validator (Unstake transaction).
@@ -857,10 +954,10 @@ impl AccountState {
     pub fn process_epoch_boundary(
         &mut self,
         current_epoch: u64,
-        soft_slash_pct: u64,  // % of stake burned for downtime (e.g. 5)
+        soft_slash_pct: u64, // % of stake burned for downtime (e.g. 5)
         burn_address: &str,
     ) -> Vec<(String, u64)> {
-        use crate::consensus::authorities::{UNBONDING_EPOCHS, MAX_MISSED_SLOTS_PCT};
+        use crate::consensus::authorities::{MAX_MISSED_SLOTS_PCT, UNBONDING_EPOCHS};
         let mut stake_returns: Vec<(String, u64)> = Vec::new();
         let mut to_remove: Vec<String> = Vec::new();
 
@@ -881,7 +978,9 @@ impl AccountState {
 
             // --- DOWNTIME SOFT-SLASH ---
             if info.active && info.epoch_slots_assigned > 0 {
-                let missed = info.epoch_slots_assigned.saturating_sub(info.epoch_slots_produced);
+                let missed = info
+                    .epoch_slots_assigned
+                    .saturating_sub(info.epoch_slots_produced);
                 let missed_pct = missed * 100 / info.epoch_slots_assigned;
                 if missed_pct > MAX_MISSED_SLOTS_PCT {
                     let slash_amount = info.stake * soft_slash_pct / 100;
@@ -938,7 +1037,10 @@ impl AccountState {
         tracing::warn!(
             "SLASHED validator {}: burned {} microunits, whistleblower reward {} microunits, \
              cooldown until epoch {}",
-            offender, burned, whistleblower_reward, info.slash_cooldown_until_epoch
+            offender,
+            burned,
+            whistleblower_reward,
+            info.slash_cooldown_until_epoch
         );
         Some((burned, whistleblower_reward))
     }
@@ -963,15 +1065,14 @@ impl AccountState {
     ///
     /// `max_committee_size` is typically 21.
     pub fn compute_epoch_committee(&self, max_committee_size: usize) -> Vec<String> {
-        let mut active: Vec<(&String, &ValidatorInfo)> = self
-            .validators
-            .iter()
-            .filter(|(_, v)| v.active)
-            .collect();
+        let mut active: Vec<(&String, &ValidatorInfo)> =
+            self.validators.iter().filter(|(_, v)| v.active).collect();
 
         // Primary sort: stake descending. Secondary sort: address ascending (tie-break).
         active.sort_by(|(addr_a, info_a), (addr_b, info_b)| {
-            info_b.stake.cmp(&info_a.stake)
+            info_b
+                .stake
+                .cmp(&info_a.stake)
                 .then_with(|| addr_a.cmp(addr_b))
         });
 
@@ -999,7 +1100,6 @@ impl AccountState {
         self.contracts.get(address)
     }
 }
-
 
 // ---------------------------------------------------------------------------
 // Unit tests
@@ -1042,7 +1142,10 @@ mod tests {
         let kp = FalconKeypair::generate();
         let mut tx = signed_transfer(&kp, 1_000, 1);
         tx.sig_scheme = SignatureScheme::Reserved;
-        assert!(!tx.verify(), "Reserved signature scheme must be rejected by verify()");
+        assert!(
+            !tx.verify(),
+            "Reserved signature scheme must be rejected by verify()"
+        );
     }
 
     #[test]
@@ -1050,7 +1153,10 @@ mod tests {
         let kp = FalconKeypair::generate();
         let mut tx = signed_transfer(&kp, 1_000, 1);
         tx.amount = 9_999_999;
-        assert!(!tx.verify(), "Tampering with amount must invalidate signature");
+        assert!(
+            !tx.verify(),
+            "Tampering with amount must invalidate signature"
+        );
     }
 
     #[test]
@@ -1075,7 +1181,11 @@ mod tests {
     fn test_hash_is_deterministic() {
         let kp = FalconKeypair::generate();
         let tx = signed_transfer(&kp, 500_000, 2);
-        assert_eq!(tx.hash(), tx.hash(), "Transaction hash must be deterministic");
+        assert_eq!(
+            tx.hash(),
+            tx.hash(),
+            "Transaction hash must be deterministic"
+        );
     }
 
     #[test]
@@ -1107,12 +1217,15 @@ mod tests {
     }
 
     fn insert_balance(state: &mut AccountState, address: &str, balance: u64) {
-        state.accounts.insert(address.to_string(), AccountBalance {
-            address: address.to_string(),
-            balance,
-            nonce: 0,
-            locked_balances: Vec::new(),
-        });
+        state.accounts.insert(
+            address.to_string(),
+            AccountBalance {
+                address: address.to_string(),
+                balance,
+                nonce: 0,
+                locked_balances: Vec::new(),
+            },
+        );
     }
 
     #[test]
@@ -1121,14 +1234,17 @@ mod tests {
         insert_balance(&mut state, "0xAlice", 1000);
         insert_balance(&mut state, "0xBob", 500);
         let root1 = state.calculate_state_root();
-        
+
         let mut state2 = AccountState::new();
         // Insert in reverse order to ensure sorting works
         insert_balance(&mut state2, "0xBob", 500);
         insert_balance(&mut state2, "0xAlice", 1000);
         let root2 = state2.calculate_state_root();
-        
-        assert_eq!(root1, root2, "State root must be deterministic regardless of insertion order");
+
+        assert_eq!(
+            root1, root2,
+            "State root must be deterministic regardless of insertion order"
+        );
         assert_ne!(root1, "", "State root should not be empty");
     }
 
@@ -1156,7 +1272,7 @@ mod tests {
     /// to Mainnet — proving cross-chain replay protection is in effect.
     #[test]
     fn test_cross_chain_replay_rejected() {
-        use crate::core::{TESTNET_NETWORK_ID, MAINNET_NETWORK_ID};
+        use crate::core::{MAINNET_NETWORK_ID, TESTNET_NETWORK_ID};
         let kp = FalconKeypair::generate();
         // Sign as Testnet (network_id = 0)
         let mut tx = signed_transfer(&kp, 1_000, 1);
@@ -1186,11 +1302,14 @@ mod tests {
         tx.fee = 1_000;
         tx.nonce = 1;
         tx.payload = b"{\"ai_agent\":\"alpha\",\"task\":\"fetch_data\"}".to_vec();
-        
+
         let signing_data = tx.get_signing_data();
         tx.signature = kp.sign_transaction_canonical(&signing_data);
 
-        assert!(tx.verify(), "AI Payload transaction should verify correctly");
+        assert!(
+            tx.verify(),
+            "AI Payload transaction should verify correctly"
+        );
 
         // Tamper with the payload — signature must become invalid
         tx.payload = b"{\"ai_agent\":\"alpha\",\"task\":\"fetch_data_modified\"}".to_vec();
