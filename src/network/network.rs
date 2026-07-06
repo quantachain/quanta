@@ -273,10 +273,12 @@ impl Network {
                                 let cumulative_work = blockchain.cumulative_work_at(height);
                                 drop(blockchain);
 
-                                if let Ok(_) = peer
+                                if peer
                                     .handshake(PROTOCOL_VERSION, height, cumulative_work, node_id)
                                     .await
+                                    .is_ok()
                                 {
+                                    info!("Successful handshake with {}", addr);
                                     match peer_manager.add_peer(Arc::clone(&peer)).await {
                                         Ok(_) => {
                                             // BETA FIX: Add the peer's IP to discovery with the default port

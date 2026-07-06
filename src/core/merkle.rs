@@ -153,6 +153,7 @@ impl MerkleTree {
     }
 
     /// Recursively collect proof nodes (bottom-up)
+    #[allow(clippy::only_used_in_recursion)]
     fn collect_proof(
         &self,
         node: &MerkleNode,

@@ -1883,8 +1883,8 @@ impl Blockchain {
         let mut timestamps = Vec::new();
 
         // Load blocks from storage
-        for i in start..=end_index {
-            if let Ok(block) = self.storage.load_block(i) {
+        for h in start..=end_index {
+            if let Ok(block) = self.storage.load_block(h) {
                 timestamps.push(block.timestamp);
             }
         }

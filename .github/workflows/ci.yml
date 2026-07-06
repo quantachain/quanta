@@ -1,4 +1,4 @@
-name: Blockchain CI/CD Pipeline
+name: Fast CI
 
 on:
   push:
@@ -12,7 +12,6 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # Code Quality Checks
   lint:
     name: Lint and Format Check
     runs-on: ubuntu-latest
@@ -25,119 +24,34 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo build
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
         run: cargo fmt -- --check
 
       - name: Run Clippy
-        run: cargo clippy --all-targets --all-features
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
-
-
-  # Build and Test on Multiple Platforms
-  build:
-    name: Build
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        rust: [stable, beta]
-    runs-on: ${{ matrix.os }}
-    
+  test:
+    name: Build & Test
+    needs: [lint] # Fail fast if linting fails
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ matrix.rust }}
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ matrix.rust }}-${{ hashFiles('**/Cargo.lock') }}
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
 
-      - name: Build
-        run: cargo build --verbose
-
-      - name: Build library
-        run: cargo build --lib --verbose
+      - name: Check compilation
+        run: cargo check --workspace --all-targets
 
       - name: Run tests
-        run: cargo test --verbose
-
-  # Build Development Binary
-  build-dev:
-    name: Build Development Binary
-    needs: [lint, build]
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Build binary
-        run: cargo build --verbose
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: quanta-dev-build
-          path: target/debug/quanta
-
-
-
-  # Documentation Generation
-  docs:
-    name: Documentation
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Generate documentation
-        run: cargo doc --no-deps --all-features
-
-      - name: Check for broken doc links
-        run: cargo doc --no-deps --all-features
-
-  # Dependency Check
-  dependencies:
-    name: Dependency Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        run: cargo test --workspace --verbose
 
       - name: Install cargo-outdated
         run: cargo install cargo-outdated --version 0.18.0 --locked
@@ -145,4 +59,3 @@ jobs:
       - name: Check for outdated dependencies
         run: cargo outdated
         continue-on-error: true
-
