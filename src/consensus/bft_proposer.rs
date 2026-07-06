@@ -68,10 +68,11 @@ pub use crate::consensus::authorities::SESSION_LENGTH;
 // round number.  Keeping this well below SESSION_LENGTH * expected_rounds_per_block
 // ensures the exponential never has time to accumulate within one session.
 //
-// TUNED 2026-06-15: Reduced from 2000 → 500. Triggers session rotation sooner
-// if rounds accumulate faster than expected (e.g. during network partitions),
-// bounding the worst-case delay growth within any single session.
-const MAX_ROUNDS_PER_SESSION: u32 = 500;
+// TUNED 2026-07-06: Increased from 500 → 7000. 500 was too low and caused
+// permanent network deadlocks if a session hit round 500 before producing
+// all blocks for the session (since restarting the same session instantly
+// hits the 500 limit again). 7000 gives enough headroom for recovery.
+const MAX_ROUNDS_PER_SESSION: u32 = 7000;
 
 pub async fn run_bft_proposer(
     blockchain: Arc<RwLock<Blockchain>>,
