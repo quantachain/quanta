@@ -1,4 +1,3 @@
-
 use crate::core::block::Block;
 use crate::core::transaction::AccountState;
 use crate::crypto::verify_signature_strict;

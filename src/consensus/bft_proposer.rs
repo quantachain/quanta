@@ -1,6 +1,5 @@
 use aleph_bft::{
-    default_config, run_session, LocalIO, NodeCount, NodeIndex, SpawnHandle,
-    Terminator,
+    default_config, run_session, LocalIO, NodeCount, NodeIndex, SpawnHandle, Terminator,
 };
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
