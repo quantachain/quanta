@@ -1,5 +1,5 @@
 use aleph_bft::{
-    default_config, run_session, LocalIO, NodeCount, NodeIndex, SpawnHandle, Terminator,
+    create_config, default_delay_config, run_session, LocalIO, NodeCount, NodeIndex, SpawnHandle, Terminator,
 };
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
@@ -332,14 +332,29 @@ pub async fn run_bft_proposer(
         // delay config uses an exponential that grows with round number, so an
         // ever-increasing round counter causes ever-increasing block times.
         // Rotating sessions resets the round counter to 0.
-        let config = default_config(
+        // FIX: Override AlephBFT's exponential delay schedule.
+        // The default AlephBFT config applies an exponential backoff after round 3000.
+        // If a network partition causes the DAG to reach round 5000, the block delay
+        // becomes ~3 hours! By overriding this to a constant 500ms, the network
+        // immediately recovers at full speed once the partition resolves.
+        let mut delay_config = default_delay_config();
+        delay_config.unit_creation_delay = std::sync::Arc::new(|t| {
+            if t == 0 {
+                std::time::Duration::from_millis(5000)
+            } else {
+                std::time::Duration::from_millis(500)
+            }
+        });
+
+        let config = create_config(
             node_count,
             node_idx,
             session_id,                    // FIX Bug 1: increments per epoch
             MAX_ROUNDS_PER_SESSION as u16, // FIX Bug 3: caps round number (u16)
+            delay_config,
             Duration::from_millis(500),
         )
-        .expect("Valid default config");
+        .expect("Valid config");
 
         let spawn_handle = QuantaSpawnHandle;
         let (terminator_tx, terminator_rx) = futures::channel::oneshot::channel();
