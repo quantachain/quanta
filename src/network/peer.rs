@@ -234,6 +234,13 @@ impl Peer {
                 node_id,
                 ..
             } => {
+                if version != our_version {
+                    tracing::warn!(
+                        "Handshake rejected: peer {} has incompatible version {} (we are {})",
+                        self.info.read().await.address, version, our_version
+                    );
+                    return Err("Incompatible protocol version".to_string());
+                }
                 self.update_info(node_id, version, height, cumulative_work)
                     .await;
 
@@ -277,8 +284,9 @@ impl Peer {
 pub struct PeerManager {
     peers: Arc<RwLock<Vec<Arc<Peer>>>>,
     max_peers: usize,
-    /// HIGH-4: Persistent IP ban list — IpAddr → ban expiry Instant
-    banned_ips: Arc<RwLock<HashMap<IpAddr, Instant>>>,
+    /// HIGH-4: Persistent IP ban list — IpAddr -> ban expiry Instant
+    /// SECURITY FIX: Bounded by LruCache (max 5000) to prevent OOM via IP spoofing
+    banned_ips: Arc<RwLock<lru::LruCache<IpAddr, Instant>>>,
 }
 
 /// Duration of a peer ban triggered by 3+ strikes.
@@ -289,7 +297,9 @@ impl PeerManager {
         Self {
             peers: Arc::new(RwLock::new(Vec::new())),
             max_peers,
-            banned_ips: Arc::new(RwLock::new(HashMap::new())),
+            banned_ips: Arc::new(RwLock::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(5000).unwrap(),
+            ))),
         }
     }
 
@@ -310,7 +320,7 @@ impl PeerManager {
                     ));
                 } else {
                     // Ban has expired — remove it
-                    bans.remove(&peer_ip);
+                    bans.pop(&peer_ip);
                 }
             }
         }
@@ -407,7 +417,7 @@ impl PeerManager {
     /// Called by the network layer when a peer accumulates 3+ strikes.
     pub async fn ban_ip(&self, ip: IpAddr) {
         let expiry = Instant::now() + BAN_DURATION;
-        self.banned_ips.write().await.insert(ip, expiry);
+        self.banned_ips.write().await.put(ip, expiry);
         warn!(
             "IP {} BANNED for {} minutes (persistent — survives reconnect)",
             ip,

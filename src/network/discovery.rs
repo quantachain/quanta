@@ -283,6 +283,11 @@ impl PeerDiscovery {
         let mut peers = self.known_peers.write().await;
         let now = chrono::Utc::now().timestamp();
 
+        // SECURITY FIX: Bounded known_peers map to prevent OOM via malicious Addr floods
+        if peers.len() > 5000 {
+            return;
+        }
+
         for addr in addrs.into_iter().take(max_addrs) {
             // Validate routable IP (reject private unless allowed)
             if !is_routable_addr(&addr) {

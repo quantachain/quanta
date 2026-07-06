@@ -1506,7 +1506,20 @@ impl Blockchain {
                     return Err(BlockchainError::InvalidBlock);
                 }
 
-                // Guard 4: Open registration switch
+                // Guard 4: Cannot re-stake while unbonding (prevents burning old stake)
+                let is_unbonding = temp_state
+                    .get_validator_info(&tx.sender)
+                    .map(|v| v.unbonding_epoch > 0)
+                    .unwrap_or(false);
+                if is_unbonding {
+                    tracing::warn!(
+                        "Stake rejected: {} is currently unbonding. Wait for stake return before re-registering.",
+                        tx.sender
+                    );
+                    return Err(BlockchainError::InvalidBlock);
+                }
+
+                // Guard 5: Open registration switch
                 // Before OPEN_VALIDATOR_REGISTRATION_HEIGHT: Stake txs are recorded but the
                 // validator is NOT added to the active committee (genesis validators dominate).
                 // After: all stakers are eligible for the committee immediately.
