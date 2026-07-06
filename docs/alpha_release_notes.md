@@ -3,7 +3,7 @@
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
 > **v2.1.2-alpha — HARD RESET (2026-07-06)**
-> **WIPE REQUIRED.** Due to unreachable validator nodes, the testnet has been reset to a 4-core validator set. You MUST delete your `quanta_data` folder before starting this version! The network magic has changed to `Q2TB`.
+> **WIPE REQUIRED.** To enable dynamic network scaling and facilitate a faster rollout of upgrades, the testnet has been reset to a streamlined 4-core validator set. You MUST delete your `quanta_data` folder before starting this version! The network magic has changed to `Q2TB`.
 > 
 > **How to update and start your node:**
 > 
@@ -36,59 +36,6 @@ This is a pre-release testnet build. Do not use real funds. APIs and chain param
 
 ---
 
-## What Changed in v2.1.0-alpha
-
-- **Consensus & Network Resilience**
-  - **Fixed BFT session termination**: Replaced `return None` with an async wait in `get_data` to ensure the session remains active while waiting for blocks.
-  - **Fixed 'Backup state behind' errors**: BFT backups are now exclusively wiped during actual session transitions rather than upon restarts.
-  - **Sync-Wait Loop added**: Nodes will now fully sync the blockchain before initializing BFT sessions, preventing old-session network spam.
-  - **Partition Cascade fixed**: Lowered the aggressive connection-failure peer ban duration from 24 hours to 60 seconds, preventing network halt during sequential node restarts.
-- **Documentation & DX**
-  - Refactored README, updated badges, and synced GitBook with V2 CLI/API updates.
-  - Added a comprehensive JSON-RPC guide.
-- **Codebase Optimization**
-  - Cleaned up extensive dead code across the consensus, network, core, and RPC modules.
-  - Fixed database pruning mechanics.
-
----
-
-## What Changed in v2.0.2-alpha
-
-- **Dynamic Validator Expansion** — `MAX_COMMITTEE_SIZE` increased to 21 to allow dynamic expansion of the active validator set.
-- **Genesis Sybil Protection** — Genesis validators removed from the liquid `testnet_faucets` array. This ensures genesis validators only receive locked stake and no liquid QUA, mathematically preventing Sybil attacks.
-- **Network Isolation** — Network magic bytes bumped to `Q2T9` for testnet reset.
-- **AlephBFT unicast routing fixed** — BFT vote/signature messages now route to the single intended validator instead of broadcasting to all. Cuts ~80% of inter-node BFT traffic (was O(N²), now O(N)).
-- **Peer flapping loop fixed** — Dead peers now evicted within 30 s instead of holding their IP slot for 180 s. Stops the "Connection reset by peer" reconnect storm that was generating hundreds of MB/hr of spurious mempool traffic.
-- **Heartbeat interval corrected** — was firing every 10 s, now correctly 60 s per protocol spec. ~83% fewer Ping/Pong messages.
-- **GetMempool on reconnect guarded** — no longer fires unconditionally on every peer connect; only pulls if local mempool is empty.
-
-**Estimated bandwidth impact (7 validators): ~5 GB/day → ~1 GB/day per node.**
-
----
-
-## What Changed in v2.0.1
-
-- **Hard Fork (Network Magic Bump)** — Network magic bytes bumped to `Q2T7` to isolate v2.0.1 nodes due to breaking block size and consensus changes.
-- **Smart Contracts V3** — Full AI contract layer with 5 native templates (Escrow, AgentJob, AgentBid, Stream, AgentRegistry).
-- **Staking & Slashing** — Full validator staking, slashing, and unbonding logic. Open validator registration.
-- **Performance Fixes** — Block size increased to 4MB, TPS ceiling ~400. Round-robin proposer timeout removed to guarantee 6s blocks.
-- **Validator Setup** — Added `setup-validator.sh` script for secure, verifiable deployment.
-- **HD Wallet Key Derivation** — Deterministic Falcon-512 keypair derivation from account seed.
-- **Block timing fixed (v2.0.0)** — Blocks were slowing from 6s to 1–2h due to timestamp drift.
-- **Genesis Reset (v2.0.0)** — Replaced lost validator wallet, rotated faucet wallets, new genesis hash.
-
----
-
-## 🚨 V2 Hard Fork Details 🚨
-- **Consensus Engine:** Migrated from SHA3-256 Proof of Work to AlephBFT (Asynchronous Byzantine Fault Tolerance).
-- **Network Isolation:** Updated network magic bytes to `Q2T4` to prevent old nodes from connecting to the new consensus network.
-- **Block Time:** Exact 6-second deterministic slots (previously ~30s random).
-- **Mining Removed:** All `start_mining` commands and the `quanta-miner` binary have been removed.
-- **AI Agent Support:** Added headless `QUANTA_WALLET_PASSWORD` environment variable support for automated AI escrow workflows.
-- **HD Wallets:** The CLI wallet has been completely rewritten to support deterministic hierarchical generation natively.
-- **Persistent Crash Recovery:** AlephBFT DAG state is now persisted to disk (`alephbft_backup.dat`), allowing seamless recovery and network rejoin after node restarts.
-
----
 
 ## Genesis Block
 
