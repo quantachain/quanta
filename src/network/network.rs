@@ -273,10 +273,13 @@ impl Network {
                                 let cumulative_work = blockchain.cumulative_work_at(height);
                                 drop(blockchain);
 
-                                if peer
-                                    .handshake(PROTOCOL_VERSION, height, cumulative_work, node_id)
-                                    .await
-                                    .is_ok()
+                                if tokio::time::timeout(
+                                    std::time::Duration::from_secs(10),
+                                    peer.handshake(PROTOCOL_VERSION, height, cumulative_work, node_id)
+                                )
+                                .await
+                                .unwrap_or(Err("Handshake timed out".to_string()))
+                                .is_ok()
                                 {
                                     info!("Successful handshake with {}", addr);
                                     match peer_manager.add_peer(Arc::clone(&peer)).await {
@@ -338,11 +341,11 @@ impl Network {
                 match peer.receive_message().await {
                     Ok(msg) => {
                         debug!("Received message from {}: {:?}", addr, msg);
-                        // CRIT-3 FIX: Use try_send on bounded channel.
-                        // If full, add a strike to the misbehaving peer instead of buffering.
-                        if message_tx.try_send((addr, msg)).is_err() {
-                            warn!("Message channel full — dropping message from {} and adding misbehavior score (+20)", addr);
-                            peer.add_misbehavior(20).await;
+                        // FIX: Use .send().await instead of try_send.
+                        // If the shared channel is full due to heavy network load,
+                        // backpressure is applied naturally. We should NOT drop the peer.
+                        if message_tx.send((addr, msg)).await.is_err() {
+                            warn!("Message channel closed, disconnecting from {}", addr);
                             break;
                         }
                     }
@@ -360,8 +363,10 @@ impl Network {
     pub async fn connect_to_peer(&self, addr: SocketAddr) -> Result<(), String> {
         info!("Connecting to peer {}", addr);
 
-        let stream = TcpStream::connect(addr)
+        let connect_future = TcpStream::connect(addr);
+        let stream = tokio::time::timeout(std::time::Duration::from_secs(5), connect_future)
             .await
+            .map_err(|_| "Connection timed out".to_string())?
             .map_err(|e| format!("Failed to connect: {}", e))?;
 
         let peer = Arc::new(Peer::new(stream, addr).await?);
@@ -372,13 +377,17 @@ impl Network {
         let cumulative_work = blockchain.cumulative_work_at(height);
         drop(blockchain);
 
-        peer.handshake(
-            PROTOCOL_VERSION,
-            height,
-            cumulative_work,
-            self.config.node_id.clone(),
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            peer.handshake(
+                PROTOCOL_VERSION,
+                height,
+                cumulative_work,
+                self.config.node_id.clone(),
+            )
         )
-        .await?;
+        .await
+        .unwrap_or(Err("Handshake timed out".to_string()))?;
 
         // Add to peer manager
         self.peer_manager.add_peer(Arc::clone(&peer)).await?;
