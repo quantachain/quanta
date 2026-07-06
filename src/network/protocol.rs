@@ -106,7 +106,7 @@ pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB bloc
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes (prevents testnet/mainnet message mixing)
-pub const TESTNET_MAGIC: [u8; 4] = *b"Q2T9"; // Quanta V2 Testnet (BFT) Reset 9
+pub const TESTNET_MAGIC: [u8; 4] = *b"Q2TA"; // Quanta V2 Testnet (BFT) Reset 10
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;
