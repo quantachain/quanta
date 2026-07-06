@@ -1,13 +1,8 @@
-use crate::consensus::authorities::compute_committee;
-use crate::core::transaction::AccountState;
-use crate::crypto::signatures::FalconKeypair;
 use crate::crypto::wallet::QuantumWallet;
 use aleph_bft::{
     Index, Keychain, MultiKeychain, NodeCount, NodeIndex, PartialMultisignature, SignatureSet,
 };
-use codec::{Decode, Encode};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// AlephBFT Signature Wrapper for Falcon-512 signatures
 #[derive(Debug, Clone, PartialEq, Eq, codec::Encode, codec::Decode)]

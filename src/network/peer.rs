@@ -2,7 +2,6 @@
 use crate::network::protocol::{
     deserialize_message, serialize_message, P2PMessage, MAX_MESSAGE_SIZE,
 };
-use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

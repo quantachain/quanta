@@ -9,4 +9,3 @@ pub mod network_bench;
 pub mod report;
 pub mod tx_bench;
 
-pub use report::{run_all_benchmarks, BenchmarkReport, BenchmarkSection, BenchmarkStat};

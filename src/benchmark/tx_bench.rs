@@ -1,8 +1,7 @@
 use crate::benchmark::crypto_bench::stat;
 use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
 use crate::consensus::performance::verify_transactions_parallel;
-use crate::core::transaction::{SignatureScheme, Transaction, TransactionType};
-use crate::core::TESTNET_NETWORK_ID;
+use crate::core::transaction::Transaction;
 use crate::crypto::signatures::FalconKeypair;
 use chrono::Utc;
 use std::hint::black_box;

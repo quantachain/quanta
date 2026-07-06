@@ -267,7 +267,7 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
-    println!("");
+    println!();
     println!("        QUANTA - Quantum-Resistant Blockchain                  ");
     println!("         Falcon Signatures | Post-Quantum Cryptography         ");
     println!("\n");
@@ -599,7 +599,7 @@ async fn main() {
                 Ok(status) => {
                     println!("\n");
                     println!("            QUANTA NODE STATUS                            ");
-                    println!("");
+                    println!();
                     println!(
                         "  Status:         {}                              ",
                         if status.running {
@@ -661,11 +661,11 @@ async fn main() {
                 Ok(block) => {
                     use chrono::{DateTime, Utc as ChronoUtc};
                     let dt = DateTime::<ChronoUtc>::from_timestamp(block.timestamp, 0)
-                        .unwrap_or_else(|| ChronoUtc::now());
+                        .unwrap_or_else(ChronoUtc::now);
 
                     println!("\n");
                     println!("            BLOCK INFORMATION                             ");
-                    println!("");
+                    println!();
                     println!(
                         "  Height:         {}                                      ",
                         block.height
@@ -714,7 +714,7 @@ async fn main() {
                         "            CONNECTED PEERS ({} total)                      ",
                         peers.len()
                     );
-                    println!("");
+                    println!();
 
                     if peers.is_empty() {
                         println!("  No peers connected                                      ");
@@ -744,7 +744,7 @@ async fn main() {
                 Ok(status) => {
                     println!("\n");
                     println!("            BLOCKCHAIN HEIGHT                             ");
-                    println!("");
+                    println!();
                     println!(
                         "  Current Height: {} blocks                              ",
                         status.chain_height
@@ -1018,9 +1018,9 @@ async fn main() {
             let reward_qua = microunits_to_qua(stats.mining_reward);
             let supply_qua = microunits_to_qua(stats.total_supply);
 
-            println!("");
+            println!();
             println!("                QUANTA BLOCKCHAIN STATISTICS                   ");
-            println!("");
+            println!();
             println!(
                 " Chain Length: {} blocks                                  ",
                 stats.chain_length
@@ -1045,14 +1045,14 @@ async fn main() {
                 " Pending Transactions: {}                                   ",
                 stats.pending_transactions
             );
-            println!("");
+            println!();
             println!(" Quantum Resistance: ACTIVE                                  ");
             println!(" Signature Algorithm: Falcon-512 (NIST PQC)                   ");
             println!(" Hash Algorithm: SHA3-256                                      ");
             println!(" Wallet Encryption: Kyber-1024 + ChaCha20-Poly1305            ");
             println!(" Persistent Storage: Sled Database                            ");
             println!(" Amount Precision: u64 microunits (deterministic)             ");
-            println!("");
+            println!();
         }
 
         Commands::Validate { db, network } => {
@@ -1317,14 +1317,14 @@ async fn run_demo(db_path: &str) {
     // Display comparison
     println!("\n");
     println!("           FALCON vs ECDSA COMPARISON                          ");
-    println!("");
+    println!();
     println!("                    Falcon-512    ECDSA (secp256k1)           ");
     println!(" Public Key Size:    897 bytes    33 bytes                    ");
     println!(" Private Key Size:  1281 bytes    32 bytes                    ");
     println!(" Signature Size:     666 bytes    65 bytes                    ");
     println!(" Quantum Resistant:   YES         NO                        ");
     println!(" NIST PQC Standard:   YES         NO                        ");
-    println!("");
+    println!();
 
     println!("\n Production demo complete!");
     println!(" Blockchain persisted to: {}", db_path);

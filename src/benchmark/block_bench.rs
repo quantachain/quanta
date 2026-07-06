@@ -1,5 +1,5 @@
 use crate::benchmark::crypto_bench::{stat, stat_us};
-use crate::benchmark::report::{BenchmarkSection, BenchmarkStat};
+use crate::benchmark::report::BenchmarkSection;
 use crate::benchmark::tx_bench::make_signed_tx;
 use crate::core::block::Block;
 use crate::core::merkle::MerkleTree;

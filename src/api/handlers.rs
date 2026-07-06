@@ -25,7 +25,6 @@ use tower_http::cors::CorsLayer;
 
 use crate::consensus::mempool::NodeMetrics;
 use crate::core::block::Block;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 /// API state
 pub struct ApiState {

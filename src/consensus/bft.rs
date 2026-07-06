@@ -1,30 +1,7 @@
-/// Quanta v2 — Tendermint-style BFT Consensus Engine
-///
-/// This module implements the BFT certificate verification and voting round
-/// logic used by all nodes (both validators and observers).
-///
-/// # Protocol Summary
-///
-/// Each block height runs through rounds:
-///   1. PROPOSE  — the designated proposer broadcasts a `BftProposal`.
-///   2. PREVOTE  — every committee member verifies the proposal and broadcasts
-///                 a `BftPrevote` (signed block hash).
-///   3. PRECOMMIT— upon seeing ≥ 2/3+ prevotes, members broadcast `BftPrecommit`.
-///   4. COMMIT   — upon seeing ≥ 2/3+ precommits, the block is finalised and
-///                 a BFT certificate (the `bft_signatures` vec) is assembled.
-///
-/// # What This Module Handles
-///
-/// - `verify_bft_certificate()` — used by all nodes to validate incoming blocks.
-/// - `BftVoteCollector`         — accumulates prevotes/precommits during live
-///                                consensus (used by the validator node).
-/// - `BftMessage` types         — wire messages exchanged over P2P.
-use std::collections::HashMap;
 
-use crate::consensus::authorities::{resolve_committee_keys, EPOCH_SIZE, MAX_COMMITTEE_SIZE};
 use crate::core::block::Block;
 use crate::core::transaction::AccountState;
-use crate::crypto::{verify_signature_strict, FalconKeypair};
+use crate::crypto::verify_signature_strict;
 
 // ---------------------------------------------------------------------------
 // BFT wire messages
@@ -203,8 +180,8 @@ pub fn bft_threshold(committee_size: usize) -> usize {
 mod tests {
     use super::*;
     use crate::core::block::Block;
-    use crate::core::transaction::{AccountState, ValidatorInfo};
-    use crate::crypto::{FalconKeypair, FALCON512_PUBKEY_BYTES};
+    use crate::core::transaction::AccountState;
+    use crate::crypto::FalconKeypair;
 
     fn make_validator(state: &mut AccountState) -> (String, FalconKeypair) {
         let kp = FalconKeypair::generate();

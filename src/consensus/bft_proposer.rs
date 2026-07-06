@@ -1,5 +1,5 @@
 use aleph_bft::{
-    default_config, run_session, Config as AlephConfig, LocalIO, NodeCount, NodeIndex, SpawnHandle,
+    default_config, run_session, LocalIO, NodeCount, NodeIndex, SpawnHandle,
     Terminator,
 };
 use std::sync::atomic::{AtomicI64, Ordering};

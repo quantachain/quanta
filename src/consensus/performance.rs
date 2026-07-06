@@ -1,4 +1,3 @@
-use crate::core::block::Block;
 /// PERFORMANCE OPTIMIZATIONS FOR POST-QUANTUM BLOCKCHAIN
 ///
 /// This module contains critical optimizations to handle Falcon-512's larger signatures:
@@ -6,9 +5,7 @@ use crate::core::block::Block;
 /// 2. Signature caching (skip re-verification)
 /// 3. Block compression (4x less bandwidth)
 use crate::core::transaction::Transaction;
-use lru::LruCache;
 use rayon::prelude::*;
-use std::sync::Mutex;
 // use std::num::NonZeroUsize;
 
 /// Verify multiple transactions in parallel
