@@ -1,4 +1,11 @@
 #![allow(dead_code)]
+#![allow(
+    clippy::comparison_chain,
+    clippy::if_same_then_else,
+    clippy::absurd_extreme_comparisons,
+    clippy::redundant_pattern_matching,
+    clippy::empty_line_after_doc_comments
+)]
 use crate::core::block::Block;
 use crate::core::transaction::{AccountState, Transaction};
 use crate::core::ChainNetwork;
