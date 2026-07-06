@@ -301,10 +301,36 @@ impl Block {
     /// CONSENSUS RULE: every validator signs exactly this 32-byte hash.
     /// Format: SHA3-256("QUANTA_BFT_V2:" || block_hash || epoch_le || round_le)
     pub fn bft_signing_payload(&self) -> [u8; 32] {
+        // MUST compute the payload over the signature-less hash!
+        // Otherwise, adding a signature changes the block hash, which changes the payload
+        // and breaks verification for anyone receiving the block.
+        let transactions_str = self
+            .transactions
+            .iter()
+            .map(|tx| tx.hash())
+            .collect::<Vec<String>>()
+            .join(",");
+
+        let data = format!(
+            "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+            self.index,
+            self.timestamp,
+            transactions_str,
+            self.previous_hash,
+            self.merkle_root,
+            self.state_root,
+            self.epoch,
+            self.bft_round,
+            self.proposer,
+            "", // empty signatures_str
+            "", // empty signers_str
+        );
+        let pre_hash = crate::crypto::double_sha3(data.as_bytes());
+
         use sha3::{Digest, Sha3_256};
         let mut hasher = Sha3_256::new();
         hasher.update(b"QUANTA_BFT_V2:");
-        hasher.update(self.hash.as_bytes());
+        hasher.update(pre_hash.as_bytes());
         hasher.update(self.epoch.to_le_bytes());
         hasher.update(self.bft_round.to_le_bytes());
         let result = hasher.finalize();
