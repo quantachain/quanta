@@ -105,8 +105,9 @@ pub const PROTOCOL_VERSION: u32 = 2; // v2: BFT from genesis
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
-/// Network magic bytes (prevents testnet/mainnet message mixing)
-pub const TESTNET_MAGIC: [u8; 4] = *b"Q2TC"; // Quanta V2 Testnet (4-node reset)
+/// Network magic bytes for Quanta Testnet. 
+// Changed to Q2TD to hard-fork away from the staking economy exploit.
+pub const TESTNET_MAGIC: [u8; 4] = *b"Q2TD"; // Quanta V2 Testnet (4-node reset)
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;
