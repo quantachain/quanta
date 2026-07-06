@@ -91,7 +91,7 @@ impl DataProvider for QuantaDataProvider {
                 // Since AlephBFT does not export standard BFT certificates, the Proposer's signature
                 // acts as a verifiable proof of origin during P2P sync.
                 let payload = block.bft_signing_payload();
-                if let Ok(sig) = self.wallet.sign_hash(&payload) {
+                if let Ok(sig) = self.wallet.keypair.sign_hash(&payload) {
                     block.bft_signatures.push(sig);
                     block.bft_signers.push(self.my_address.clone());
                     block.finalize_hash(); // Re-finalize since we mutated it

@@ -227,9 +227,16 @@ impl BlockchainStorage {
         let block = self.load_block(location.block_index)?;
 
         // 3. Return transaction safely
-        block.transactions.get(location.tx_index).cloned().ok_or_else(|| {
-            StorageError::TransactionNotFound(format!("{} (index out of bounds in block)", tx_hash))
-        })
+        block
+            .transactions
+            .get(location.tx_index)
+            .cloned()
+            .ok_or_else(|| {
+                StorageError::TransactionNotFound(format!(
+                    "{} (index out of bounds in block)",
+                    tx_hash
+                ))
+            })
     }
 
     /// Get the height of the blockchain

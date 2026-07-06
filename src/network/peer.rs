@@ -237,7 +237,9 @@ impl Peer {
                 if version != our_version {
                     tracing::warn!(
                         "Handshake rejected: peer {} has incompatible version {} (we are {})",
-                        self.info.read().await.address, version, our_version
+                        self.info.read().await.address,
+                        version,
+                        our_version
                     );
                     return Err("Incompatible protocol version".to_string());
                 }

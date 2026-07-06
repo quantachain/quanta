@@ -96,7 +96,11 @@ pub fn verify_bft_certificate(block: &Block, committee: &[String], state: &Accou
 
     // Ensure the proposer actually signed it (must be the first signer by our convention, or at least in the signers)
     if !block.bft_signers.contains(&block.proposer) {
-        tracing::warn!("BFT verify block {}: proposer {} did not sign the block", block.index, block.proposer);
+        tracing::warn!(
+            "BFT verify block {}: proposer {} did not sign the block",
+            block.index,
+            block.proposer
+        );
         return false;
     }
 

@@ -537,7 +537,9 @@ impl Network {
                 // If we deduplicate before sending to AlephBFT, retries are dropped!
                 if let Some(tx) = &*tx_opt {
                     if let Err(_e) = tx.send(data.clone()) {
-                        tracing::debug!("BFT channel closed/unregistered, dropping message during sync");
+                        tracing::debug!(
+                            "BFT channel closed/unregistered, dropping message during sync"
+                        );
                     }
                 }
 

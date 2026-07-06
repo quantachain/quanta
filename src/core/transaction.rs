@@ -1069,7 +1069,11 @@ impl AccountState {
     /// sorted deterministically by address for tie-breaking.
     ///
     /// `max_committee_size` is typically 21.
-    pub fn compute_epoch_committee(&self, max_committee_size: usize, session_start_height: u64) -> Vec<String> {
+    pub fn compute_epoch_committee(
+        &self,
+        max_committee_size: usize,
+        session_start_height: u64,
+    ) -> Vec<String> {
         let mut active: Vec<(&String, &ValidatorInfo)> = self
             .validators
             .iter()

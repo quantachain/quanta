@@ -1,9 +1,9 @@
-# QuantaChain Testnet — V2 Release (v2.1.2-alpha)
+# QuantaChain Testnet — V2 Release (v2.2.0)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.1.2-alpha — HARD RESET (2026-07-06)**
-> **WIPE REQUIRED.** To enable dynamic network scaling and facilitate a faster rollout of upgrades, the testnet has been reset to a streamlined 4-core validator set. You MUST delete your `quanta_data` folder before starting this version! The network magic has changed to `Q2TB`.
+> **v2.2.0 — MAJOR SECURITY UPGRADE (2026-07-06)**
+> **WIPE REQUIRED.** P2P Sybil sync vulnerability fixed via Proposer BFT Signatures. You MUST delete your `quanta_data` folder before starting this version! The network magic has changed to `Q2TE`.
 > 
 > **How to update and start your node:**
 > 

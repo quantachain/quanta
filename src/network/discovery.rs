@@ -147,7 +147,10 @@ impl PeerDiscovery {
                     meta.banned_until = Some(ban_until);
                     tracing::warn!(
                         "Peer {} BANNED for {} seconds (reputation: {}, failures: {})",
-                        addr, ban_duration, meta.reputation, meta.failures
+                        addr,
+                        ban_duration,
+                        meta.reputation,
+                        meta.failures
                     );
                 } else {
                     warn!(

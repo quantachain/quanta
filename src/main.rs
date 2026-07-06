@@ -37,6 +37,7 @@ fn microunits_to_qua(microunits: u64) -> f64 {
 
 #[derive(Parser)]
 #[command(name = "quanta")]
+#[command(version)]
 #[command(about = "QUANTA - Quantum-Resistant Blockchain with Falcon Signatures", long_about = None)]
 struct Cli {
     #[command(subcommand)]

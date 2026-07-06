@@ -9,6 +9,17 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-07-06
+
+### Security
+- **P2P Sync Vulnerability Patched**: Required BFT proposer signatures on all blocks to mitigate a critical Sybil network sync vulnerability.
+- **API DoS**: Capped transaction history lookups (`/api/address/:address/txs`) to 1000 blocks to prevent asynchronous executor starvation.
+- **Peer Memory Leaks**: Enforced strict `lru::LruCache` constraints on PeerManager banned IPs (5000 max) and PeerDiscovery known peers (5000 max).
+- **Staking Exploit**: Added unbonding guards to `register_validator` to prevent stakes from being inadvertently burned.
+
+### Added
+- **CLI Version Output**: Expose version from the node binary via `quanta -V` and `quanta --version`.
+
 ## [2.1.2-alpha] — 2026-07-06
 
 ### Changed

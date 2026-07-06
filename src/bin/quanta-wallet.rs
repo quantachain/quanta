@@ -632,13 +632,10 @@ async fn main() {
             );
             let pk_hex = hex::encode(&kp.keypair.public_key);
             let sk_hex = hex::encode(kp.keypair.secret_key_bytes());
-            
+
             println!("  Public Key (Hex) : {}", pk_hex);
             println!("  Private Key (Hex): {}", sk_hex);
-            println!(
-                "\n  Combined Key (For Extension): {}|{}",
-                sk_hex, pk_hex
-            );
+            println!("\n  Combined Key (For Extension): {}|{}", sk_hex, pk_hex);
             eprintln!(
                 "\n  Paste these into the wallet extension → Import Wallet → Private Key tab."
             );

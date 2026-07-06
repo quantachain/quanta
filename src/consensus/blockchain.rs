@@ -913,7 +913,8 @@ impl Blockchain {
         let mut temp_state = self.account_state.read().clone();
         temp_state.unlock_mature_coinbase(index);
         let epoch = crate::consensus::authorities::epoch_for_height(index);
-        let registration_open = index >= crate::consensus::authorities::OPEN_VALIDATOR_REGISTRATION_HEIGHT;
+        let registration_open =
+            index >= crate::consensus::authorities::OPEN_VALIDATOR_REGISTRATION_HEIGHT;
         for tx in &all_transactions {
             if !tx.is_coinbase() && tx.sender != "TREASURY" {
                 let required = tx.amount.saturating_add(tx.fee);
@@ -921,7 +922,9 @@ impl Blockchain {
             }
 
             // CRITICAL FIX: Simulate validator registration and deregistration to match validate_block_consensus
-            if let crate::core::transaction::TransactionType::Stake { validator_pubkey } = &tx.tx_type {
+            if let crate::core::transaction::TransactionType::Stake { validator_pubkey } =
+                &tx.tx_type
+            {
                 // We don't apply the full guard logic here, just the state mutation
                 if registration_open {
                     temp_state.register_validator(
@@ -943,7 +946,7 @@ impl Blockchain {
             }
 
             temp_state.credit_account(tx, index, COINBASE_MATURITY);
-            
+
             if !tx.is_coinbase() && tx.sender != "TREASURY" {
                 temp_state.increment_nonce(&tx.sender);
             }
@@ -1210,9 +1213,12 @@ impl Blockchain {
         // ≥ ⌈2/3⌉ of the epoch committee must have signed bft_signing_payload().
         // Committee is derived from base_state (state *before* this block).
         if block.index > 0 {
-            let session_start_height = block.index - (block.index % crate::consensus::authorities::SESSION_LENGTH);
-            let committee = base_state
-                .compute_epoch_committee(crate::consensus::authorities::MAX_COMMITTEE_SIZE, session_start_height);
+            let session_start_height =
+                block.index - (block.index % crate::consensus::authorities::SESSION_LENGTH);
+            let committee = base_state.compute_epoch_committee(
+                crate::consensus::authorities::MAX_COMMITTEE_SIZE,
+                session_start_height,
+            );
             if !crate::consensus::bft::verify_bft_certificate(block, &committee, base_state) {
                 tracing::warn!(
                     "Block {}: BFT certificate verification failed (committee_size={})",
@@ -1677,7 +1683,8 @@ impl Blockchain {
             && !block.state_root.is_empty()
             && block.state_root != computed_state_root
             && !is_checkpointed
-            && block.index != 12615 // SOFT UPDATE: Exemption for consensus bug block
+            && block.index != 12615
+        // SOFT UPDATE: Exemption for consensus bug block
         {
             tracing::warn!(
                 "Invalid state root at block {}: computed={}, block={}",
@@ -1729,9 +1736,12 @@ impl Blockchain {
         // BFT certificate check (skip genesis).
         if block.index > 0 {
             let state = self.get_account_state_snapshot();
-            let session_start_height = block.index - (block.index % crate::consensus::authorities::SESSION_LENGTH);
-            let committee =
-                state.compute_epoch_committee(crate::consensus::authorities::MAX_COMMITTEE_SIZE, session_start_height);
+            let session_start_height =
+                block.index - (block.index % crate::consensus::authorities::SESSION_LENGTH);
+            let committee = state.compute_epoch_committee(
+                crate::consensus::authorities::MAX_COMMITTEE_SIZE,
+                session_start_height,
+            );
             if !crate::consensus::bft::verify_bft_certificate(block, &committee, &state) {
                 tracing::warn!("Reorg block {}: BFT certificate invalid", block.index);
                 return Err(BlockchainError::InvalidBlock);

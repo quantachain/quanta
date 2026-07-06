@@ -212,7 +212,9 @@ pub async fn run_bft_proposer(
         let node_idx = match node_idx_opt {
             Some(idx) => NodeIndex(idx),
             None => {
-                tracing::info!("BFT Proposer: I am not in the committee. Observer mode. Sleeping...");
+                tracing::info!(
+                    "BFT Proposer: I am not in the committee. Observer mode. Sleeping..."
+                );
                 // Sleep for roughly one session duration (6 minutes at 6s/block) before checking again
                 tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
                 continue;
@@ -222,7 +224,8 @@ pub async fn run_bft_proposer(
         let node_count = NodeCount(committee.len());
         tracing::info!(
             "BFT Proposer: I am validator {} out of {} for this session",
-            node_idx.0, node_count.0
+            node_idx.0,
+            node_count.0
         );
 
         // Compute the current session_id from chain height.
