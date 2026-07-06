@@ -1306,8 +1306,8 @@ async fn main() {
             );
             for i in 0..req_sigs {
                 println!(
-                    "   quanta-wallet treasury-sign --proposal {} --key {}_key{}.qua --index {}",
-                    out, "treasury", i, i
+                    "   quanta-wallet treasury-sign --proposal {} --key treasury_key{}.qua --index {}",
+                    out, i, i
                 );
             }
         }

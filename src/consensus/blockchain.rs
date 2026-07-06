@@ -653,7 +653,7 @@ impl Blockchain {
         let height = self.get_height();
         if height == 0 {
             // Return genesis from memory
-            self.chain.read().get(0).unwrap().clone()
+            self.chain.read().first().unwrap().clone()
         } else {
             // Load from storage (not memory!)
             self.storage
@@ -2074,7 +2074,7 @@ impl Blockchain {
                 // If we successfully added a block, see if any orphans can now be attached!
                 self.process_orphans();
             }
-            return res;
+            res
         } else if block.index > latest.index {
             // Potential fork: block is ahead of us
             tracing::warn!(

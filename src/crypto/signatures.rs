@@ -321,7 +321,7 @@ mod tests {
     fn test_strict_verify_wrong_pubkey_length() {
         let tx_data = b"sender:recipient:1000:1234567890:1000:1";
         let (_, signed, hash) = make_canonical_signed(tx_data);
-        assert!(!verify_signature_strict(&hash, &signed, &vec![0u8; 64]));
+        assert!(!verify_signature_strict(&hash, &signed, &[0u8; 64]));
         assert!(!verify_signature_strict(&hash, &signed, &vec![0u8; 1024]));
     }
 

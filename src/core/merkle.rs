@@ -130,7 +130,7 @@ impl MerkleTree {
 
     /// Get the root hash as hex string (for display/RPC)
     pub fn root_hash(&self) -> Option<String> {
-        self.root_hash_bytes().map(|hash| hex::encode(hash))
+        self.root_hash_bytes().map(hex::encode)
     }
 
     /// Generate a Merkle proof for a transaction hash

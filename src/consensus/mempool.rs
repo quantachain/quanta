@@ -44,6 +44,12 @@ pub struct MetricsCollector {
     start_time: std::time::Instant,
 }
 
+impl Default for MetricsCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MetricsCollector {
     pub fn new() -> Self {
         Self {

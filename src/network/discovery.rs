@@ -205,7 +205,7 @@ impl PeerDiscovery {
             .values()
             .filter(|meta| {
                 // Not currently banned
-                let not_banned = meta.banned_until.map_or(true, |ban_until| now > ban_until);
+                let not_banned = meta.banned_until.is_none_or(|ban_until| now > ban_until);
                 // Good reputation and recent activity
                 let healthy =
                     meta.failures < 3 && meta.reputation > -10 && (now - meta.last_seen) < 3600; // Active in last hour

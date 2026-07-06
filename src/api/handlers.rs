@@ -564,7 +564,7 @@ async fn health_check(State(state): State<Arc<ApiState>>) -> Json<HealthResponse
     };
 
     let uptime = START_TIME
-        .get_or_init(|| std::time::Instant::now())
+        .get_or_init(std::time::Instant::now)
         .elapsed()
         .as_secs();
 

@@ -60,6 +60,12 @@ pub struct QuantumWallet {
     pub address: String,
 }
 
+impl Default for QuantumWallet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl QuantumWallet {
     /// Create a new quantum-resistant wallet
     pub fn new() -> Self {
@@ -245,7 +251,7 @@ impl QuantumWallet {
     pub fn display_info(&self, balance: f64) {
         println!("\n");
         println!("       QUANTA QUANTUM-RESISTANT WALLET (MAXIMUM SECURITY)      ");
-        println!("");
+        println!();
         println!(" Address: {}                         ", self.address);
         println!(
             " Balance: {:.6} QUA                                    ",

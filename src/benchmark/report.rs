@@ -227,7 +227,7 @@ fn render_markdown(r: &BenchmarkReport) -> String {
                 md.push_str(&format!("| | *{}* | | | | | | | | | |\n", note));
             }
         }
-        md.push_str("\n");
+        md.push('\n');
     }
 
     // Footer
@@ -270,8 +270,8 @@ fn collect_system_info() -> SystemInfo {
     let os = format!(
         "{} {} {}",
         System::name().unwrap_or_else(|| "Unknown OS".to_string()),
-        System::os_version().unwrap_or_else(|| "".to_string()),
-        System::kernel_version().unwrap_or_else(|| "".to_string()),
+        System::os_version().unwrap_or_default(),
+        System::kernel_version().unwrap_or_default(),
     );
 
     SystemInfo {

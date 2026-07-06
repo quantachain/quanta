@@ -157,7 +157,7 @@ impl Block {
         let signatures_str = self
             .bft_signatures
             .iter()
-            .map(|sig| hex::encode(sig))
+            .map(hex::encode)
             .collect::<Vec<String>>()
             .join(",");
 
@@ -305,8 +305,8 @@ impl Block {
         let mut hasher = Sha3_256::new();
         hasher.update(b"QUANTA_BFT_V2:");
         hasher.update(self.hash.as_bytes());
-        hasher.update(&self.epoch.to_le_bytes());
-        hasher.update(&self.bft_round.to_le_bytes());
+        hasher.update(self.epoch.to_le_bytes());
+        hasher.update(self.bft_round.to_le_bytes());
         let result = hasher.finalize();
         let mut out = [0u8; 32];
         out.copy_from_slice(&result);

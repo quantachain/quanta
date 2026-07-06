@@ -112,7 +112,7 @@ pub fn multisig_address(public_keys: &[Vec<u8>], required: usize, total: usize) 
     sorted_keys.sort();
 
     let mut hasher = Sha3_256::new();
-    hasher.update(&[required as u8, total as u8]);
+    hasher.update([required as u8, total as u8]);
     for pk in &sorted_keys {
         hasher.update(pk);
     }

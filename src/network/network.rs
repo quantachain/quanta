@@ -338,7 +338,7 @@ impl Network {
                         debug!("Received message from {}: {:?}", addr, msg);
                         // CRIT-3 FIX: Use try_send on bounded channel.
                         // If full, add a strike to the misbehaving peer instead of buffering.
-                        if let Err(_) = message_tx.try_send((addr, msg)) {
+                        if message_tx.try_send((addr, msg)).is_err() {
                             warn!("Message channel full — dropping message from {} and adding misbehavior score (+20)", addr);
                             peer.add_misbehavior(20).await;
                             break;

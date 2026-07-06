@@ -31,19 +31,16 @@ use std::collections::HashMap;
     codec::Decode,
 )]
 #[repr(u8)]
+#[derive(Default)]
 pub enum SignatureScheme {
     /// Falcon-512 (NIST PQC Round 3 — compact lattice signatures).
+    #[default]
     Falcon512 = 0,
     /// Reserved for future algorithms. Transactions using this value will be
     /// rejected by all current nodes until a soft fork activates support.
     Reserved = 1,
 }
 
-impl Default for SignatureScheme {
-    fn default() -> Self {
-        SignatureScheme::Falcon512
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Transaction
@@ -381,35 +378,35 @@ impl Transaction {
 
         hasher.update(self.sender.as_bytes());
         hasher.update(self.recipient.as_bytes());
-        hasher.update(&self.amount.to_le_bytes());
-        hasher.update(&self.timestamp.to_le_bytes());
-        hasher.update(&self.fee.to_le_bytes());
-        hasher.update(&self.nonce.to_le_bytes());
-        hasher.update(&self.lock_time.to_le_bytes());
+        hasher.update(self.amount.to_le_bytes());
+        hasher.update(self.timestamp.to_le_bytes());
+        hasher.update(self.fee.to_le_bytes());
+        hasher.update(self.nonce.to_le_bytes());
+        hasher.update(self.lock_time.to_le_bytes());
         hasher.update(&self.public_key);
-        hasher.update(&[self.sig_scheme as u8]);
-        hasher.update(&self.network_id.to_le_bytes());
+        hasher.update([self.sig_scheme as u8]);
+        hasher.update(self.network_id.to_le_bytes());
 
         match &self.tx_type {
-            TransactionType::Transfer => hasher.update(&[0u8]),
+            TransactionType::Transfer => hasher.update([0u8]),
             TransactionType::TimeLockTransfer { unlock_height } => {
-                hasher.update(&[1u8]);
-                hasher.update(&unlock_height.to_le_bytes());
+                hasher.update([1u8]);
+                hasher.update(unlock_height.to_le_bytes());
             }
             TransactionType::MultiSigTransfer { signers_required } => {
-                hasher.update(&[2u8]);
-                hasher.update(&[*signers_required]);
+                hasher.update([2u8]);
+                hasher.update([*signers_required]);
             }
             TransactionType::Stake { validator_pubkey } => {
-                hasher.update(&[3u8]);
+                hasher.update([3u8]);
                 hasher.update(validator_pubkey);
             }
-            TransactionType::Unstake => hasher.update(&[4u8]),
+            TransactionType::Unstake => hasher.update([4u8]),
             TransactionType::ContractDeploy {
                 template_id,
                 init_args,
             } => {
-                hasher.update(&[5u8, *template_id]);
+                hasher.update([5u8, *template_id]);
                 hasher.update(init_args);
             }
             TransactionType::ContractCall {
@@ -417,7 +414,7 @@ impl Transaction {
                 method,
                 call_args,
             } => {
-                hasher.update(&[6u8]);
+                hasher.update([6u8]);
                 hasher.update(contract_address.as_bytes());
                 hasher.update(method.as_bytes());
                 hasher.update(call_args);
@@ -431,10 +428,10 @@ impl Transaction {
                 sig_b,
                 hash_b,
             } => {
-                hasher.update(&[7u8]);
+                hasher.update([7u8]);
                 hasher.update(offender.as_bytes());
-                hasher.update(&height.to_le_bytes());
-                hasher.update(&round.to_le_bytes());
+                hasher.update(height.to_le_bytes());
+                hasher.update(round.to_le_bytes());
                 hasher.update(sig_a);
                 hasher.update(hash_a.as_bytes());
                 hasher.update(sig_b);
@@ -640,6 +637,12 @@ pub struct AccountState {
     pub contracts: HashMap<String, ContractState>,
 }
 
+impl Default for AccountState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AccountState {
     pub fn new() -> Self {
         Self {
@@ -667,13 +670,13 @@ impl AccountState {
         for key in account_keys {
             if let Some(acc) = self.accounts.get(key) {
                 hasher.update(acc.address.as_bytes());
-                hasher.update(&acc.balance.to_le_bytes());
-                hasher.update(&acc.nonce.to_le_bytes());
+                hasher.update(acc.balance.to_le_bytes());
+                hasher.update(acc.nonce.to_le_bytes());
                 let mut sorted_locks: Vec<&LockedBalance> = acc.locked_balances.iter().collect();
                 sorted_locks.sort_by_key(|l| (l.unlock_height, l.amount));
                 for locked in sorted_locks {
-                    hasher.update(&locked.amount.to_le_bytes());
-                    hasher.update(&locked.unlock_height.to_le_bytes());
+                    hasher.update(locked.amount.to_le_bytes());
+                    hasher.update(locked.unlock_height.to_le_bytes());
                 }
             }
         }
@@ -684,14 +687,14 @@ impl AccountState {
         for key in val_keys {
             if let Some(v) = self.validators.get(key) {
                 hasher.update(key.as_bytes());
-                hasher.update(&v.stake.to_le_bytes());
-                hasher.update(&[v.active as u8]);
-                hasher.update(&v.registered_height.to_le_bytes());
-                hasher.update(&v.unbonding_epoch.to_le_bytes());
-                hasher.update(&v.slash_cooldown_until_epoch.to_le_bytes());
-                hasher.update(&v.last_proposed_height.to_le_bytes());
-                hasher.update(&v.epoch_slots_assigned.to_le_bytes());
-                hasher.update(&v.epoch_slots_produced.to_le_bytes());
+                hasher.update(v.stake.to_le_bytes());
+                hasher.update([v.active as u8]);
+                hasher.update(v.registered_height.to_le_bytes());
+                hasher.update(v.unbonding_epoch.to_le_bytes());
+                hasher.update(v.slash_cooldown_until_epoch.to_le_bytes());
+                hasher.update(v.last_proposed_height.to_le_bytes());
+                hasher.update(v.epoch_slots_assigned.to_le_bytes());
+                hasher.update(v.epoch_slots_produced.to_le_bytes());
             }
         }
 

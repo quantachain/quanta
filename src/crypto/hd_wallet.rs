@@ -331,18 +331,18 @@ impl HDWallet {
     pub fn display_info(&self) {
         println!("\n");
         println!("              HD WALLET INFORMATION                         ");
-        println!("");
+        println!();
         println!(" Mnemonic (24 words):                                       ");
         println!(" {}   ", self.mnemonic);
         if !self.passphrase.is_empty() {
             println!(" Passphrase: [SET] (plausible deniability enabled)         ");
         }
-        println!("");
+        println!();
         println!(
             " Accounts: {}                                               ",
             self.accounts.len()
         );
-        println!("");
+        println!();
 
         for account in &self.accounts {
             let label = account.label.as_deref().unwrap_or("Unnamed");
@@ -360,7 +360,7 @@ impl HDWallet {
                 &addr[tail..]
             );
             println!(" Pub Key: {} bytes", account.public_key.len());
-            println!("");
+            println!();
         }
 
         println!("\n  IMPORTANT: Keep your mnemonic phrase safe!");

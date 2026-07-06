@@ -149,7 +149,7 @@ fn test_full_wallet_to_node_flow() {
 
     println!("sender:    {}", sender);
     println!("payload:   {} bytes", payload.len());
-    println!("sig hash:  {}", hex::encode(&signing_hash));
+    println!("sig hash:  {}", hex::encode(signing_hash));
     println!("sig bytes: {} B, blob: {} B", sig_bytes.len(), blob.len());
 
     // STEP 3: Node verifies — mirrors Transaction::verify() → verify_signature_strict()
