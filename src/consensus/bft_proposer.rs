@@ -62,7 +62,7 @@ impl SpawnHandle for QuantaSpawnHandle {
 // accumulates over the lifetime of a session — cutting to 60 blocks (~25 min)
 // prevents the exponent from growing large enough to matter.
 // ---------------------------------------------------------------------------
-const SESSION_LENGTH: u64 = 60;
+pub use crate::consensus::authorities::SESSION_LENGTH;
 
 // Maximum DAG rounds within a single session.  AlephBFT's built-in delay
 // function applies an exponential back-off whose exponent grows with the
@@ -187,8 +187,10 @@ pub async fn run_bft_proposer(
         // DYNAMIC COMMITTEE FIX: Compute committee HERE, every session, instead of at startup!
         let (committee, committee_pubkeys) = {
             let bc = blockchain.read().await;
+            let current_height = bc.get_height();
+            let session_start_height = current_height - (current_height % SESSION_LENGTH);
             let snap = bc.get_account_state_snapshot();
-            let comm = super::authorities::compute_committee(&snap);
+            let comm = super::authorities::compute_committee(&snap, session_start_height);
             let mut pubkeys = Vec::new();
             for addr in &comm {
                 if let Some(info) = snap.get_validator_info(addr) {

@@ -928,14 +928,14 @@ impl Blockchain {
                         &tx.sender,
                         validator_pubkey.clone(),
                         tx.amount,
-                        epoch,
+                        index,
                     );
                 } else {
                     temp_state.register_validator(
                         &tx.sender,
                         validator_pubkey.clone(),
                         tx.amount,
-                        epoch,
+                        index,
                     );
                 }
             } else if tx.is_unstake() {
@@ -1210,8 +1210,9 @@ impl Blockchain {
         // ≥ ⌈2/3⌉ of the epoch committee must have signed bft_signing_payload().
         // Committee is derived from base_state (state *before* this block).
         if block.index > 0 {
+            let session_start_height = block.index - (block.index % crate::consensus::authorities::SESSION_LENGTH);
             let committee = base_state
-                .compute_epoch_committee(crate::consensus::authorities::MAX_COMMITTEE_SIZE);
+                .compute_epoch_committee(crate::consensus::authorities::MAX_COMMITTEE_SIZE, session_start_height);
             if !crate::consensus::bft::verify_bft_certificate(block, &committee, base_state) {
                 tracing::warn!(
                     "Block {}: BFT certificate verification failed (committee_size={})",
@@ -1498,7 +1499,6 @@ impl Blockchain {
                 if slash_cooldown > epoch {
                     tracing::warn!(
                         "Stake rejected: {} is in slash cooldown until epoch {} (current: {})",
-                        tx.sender,
                         slash_cooldown,
                         epoch
                     );
@@ -1515,7 +1515,7 @@ impl Blockchain {
                         &tx.sender,
                         validator_pubkey.clone(),
                         tx.amount,
-                        epoch,
+                        block.index,
                     );
                     tracing::info!(
                         "Validator registered (open set): {} (epoch={}, stake={} microunits)",
@@ -1530,7 +1530,7 @@ impl Blockchain {
                         &tx.sender,
                         validator_pubkey.clone(),
                         tx.amount,
-                        epoch,
+                        block.index,
                     );
                     tracing::info!(
                         "Validator pre-registered (opens at height {}): {} (stake={} microunits)",
@@ -1715,8 +1715,9 @@ impl Blockchain {
         // BFT certificate check (skip genesis).
         if block.index > 0 {
             let state = self.get_account_state_snapshot();
+            let session_start_height = block.index - (block.index % crate::consensus::authorities::SESSION_LENGTH);
             let committee =
-                state.compute_epoch_committee(crate::consensus::authorities::MAX_COMMITTEE_SIZE);
+                state.compute_epoch_committee(crate::consensus::authorities::MAX_COMMITTEE_SIZE, session_start_height);
             if !crate::consensus::bft::verify_bft_certificate(block, &committee, &state) {
                 tracing::warn!("Reorg block {}: BFT certificate invalid", block.index);
                 return Err(BlockchainError::InvalidBlock);
@@ -2452,12 +2453,11 @@ impl Blockchain {
                 if let crate::core::transaction::TransactionType::Stake { validator_pubkey } =
                     &tx.tx_type
                 {
-                    let epoch = crate::consensus::authorities::epoch_for_height(block.index);
                     new_state.register_validator(
                         &tx.sender,
                         validator_pubkey.clone(),
                         tx.amount,
-                        epoch,
+                        block.index,
                     );
                 }
 

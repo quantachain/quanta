@@ -141,14 +141,13 @@ impl PeerDiscovery {
             if (failures > 3 && reputation < -20) || failures > 10 {
                 if !is_seed {
                     // FIX: Reduce ban to 60 seconds (down from 24 hours) to prevent
-                    // permanent network partitions when nodes are restarted sequentially
-                    // and temporarily accumulate connection failures.
-                    let ban_duration = 60; // 60 seconds
-                    let ban_until = chrono::Utc::now().timestamp() + ban_duration;
+                    // FIX: Use shared ban duration from PeerManager
+                    let ban_duration = crate::network::peer::BAN_DURATION.as_secs(); // 3600 seconds
+                    let ban_until = chrono::Utc::now().timestamp() + ban_duration as i64;
                     meta.banned_until = Some(ban_until);
-                    warn!(
-                        "Peer {} BANNED for 60 seconds (reputation: {}, failures: {})",
-                        addr, reputation, failures
+                    tracing::warn!(
+                        "Peer {} BANNED for {} seconds (reputation: {}, failures: {})",
+                        addr, ban_duration, meta.reputation, meta.failures
                     );
                 } else {
                     warn!(

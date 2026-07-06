@@ -574,8 +574,8 @@ pub struct ValidatorInfo {
     pub falcon_pk: Vec<u8>,
     /// Staked QUA (microunits) locked while registered.
     pub stake: u64,
-    /// Epoch in which this validator registered.
-    pub registered_epoch: u64,
+    /// Block height at which this validator registered.
+    pub registered_height: u64,
     /// Whether this validator is in the active set for the current epoch.
     pub active: bool,
     /// Epoch at which unbonding began (set when Unstake tx is processed).
@@ -901,20 +901,19 @@ impl AccountState {
 
     /// Register a new BFT validator.
     ///
-    /// The caller must have already debited `stake` from the sender’s balance.
     pub fn register_validator(
         &mut self,
         address: &str,
         falcon_pk: Vec<u8>,
         stake: u64,
-        current_epoch: u64,
+        registered_height: u64,
     ) {
         self.validators.insert(
             address.to_string(),
             ValidatorInfo {
                 falcon_pk,
                 stake,
-                registered_epoch: current_epoch,
+                registered_height,
                 active: true,
                 unbonding_epoch: 0,
                 slash_cooldown_until_epoch: 0,
@@ -1070,9 +1069,16 @@ impl AccountState {
     /// sorted deterministically by address for tie-breaking.
     ///
     /// `max_committee_size` is typically 21.
-    pub fn compute_epoch_committee(&self, max_committee_size: usize) -> Vec<String> {
-        let mut active: Vec<(&String, &ValidatorInfo)> =
-            self.validators.iter().filter(|(_, v)| v.active).collect();
+    pub fn compute_epoch_committee(&self, max_committee_size: usize, session_start_height: u64) -> Vec<String> {
+        let mut active: Vec<(&String, &ValidatorInfo)> = self
+            .validators
+            .iter()
+            .filter(|(_, v)| {
+                v.active
+                    && (v.registered_height < session_start_height
+                        || (session_start_height == 0 && v.registered_height == 0))
+            })
+            .collect();
 
         // Primary sort: stake descending. Secondary sort: address ascending (tie-break).
         active.sort_by(|(addr_a, info_a), (addr_b, info_b)| {

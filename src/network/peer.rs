@@ -282,7 +282,7 @@ pub struct PeerManager {
 }
 
 /// Duration of a peer ban triggered by 3+ strikes.
-const BAN_DURATION: Duration = Duration::from_secs(60 * 60); // 1 hour
+pub const BAN_DURATION: Duration = Duration::from_secs(60 * 60); // 1 hour
 
 impl PeerManager {
     pub fn new(max_peers: usize) -> Self {
