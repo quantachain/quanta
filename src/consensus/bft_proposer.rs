@@ -93,42 +93,7 @@ pub async fn run_bft_proposer(
         return;
     };
 
-    let (committee, committee_pubkeys) = {
-        let bc = blockchain.read().await;
-        let snap = bc.get_account_state_snapshot();
-        let comm = super::authorities::compute_committee(&snap);
-        let mut pubkeys = Vec::new();
-        for addr in &comm {
-            if let Some(info) = snap.get_validator_info(addr) {
-                pubkeys.push(info.falcon_pk.clone());
-            } else {
-                pubkeys.push(vec![]);
-            }
-        }
-        (comm, pubkeys)
-    };
-
-    if committee.is_empty() {
-        warn!("BFT Proposer: no active validators — exiting BFT loop.");
-        return;
-    }
-
     let my_address = wallet.address.clone();
-    let node_idx_opt = committee.iter().position(|addr| *addr == my_address);
-
-    let node_idx = match node_idx_opt {
-        Some(idx) => NodeIndex(idx),
-        None => {
-            info!("BFT Proposer: I am not in the committee. Observer mode.");
-            return;
-        }
-    };
-
-    let node_count = NodeCount(committee.len());
-    info!(
-        "BFT Proposer: I am validator {} out of {}",
-        node_idx.0, node_count.0
-    );
 
     // DUPLICATE-APPLY FIX: Single persistent consumer task outside the
     // restart loop — prevents N zombie consumers after N restarts.
@@ -218,6 +183,45 @@ pub async fn run_bft_proposer(
             );
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
+
+        // DYNAMIC COMMITTEE FIX: Compute committee HERE, every session, instead of at startup!
+        let (committee, committee_pubkeys) = {
+            let bc = blockchain.read().await;
+            let snap = bc.get_account_state_snapshot();
+            let comm = super::authorities::compute_committee(&snap);
+            let mut pubkeys = Vec::new();
+            for addr in &comm {
+                if let Some(info) = snap.get_validator_info(addr) {
+                    pubkeys.push(info.falcon_pk.clone());
+                } else {
+                    pubkeys.push(vec![]);
+                }
+            }
+            (comm, pubkeys)
+        };
+
+        if committee.is_empty() {
+            tracing::warn!("BFT Proposer: no active validators. Sleeping until next session...");
+            tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+            continue;
+        }
+
+        let node_idx_opt = committee.iter().position(|addr| *addr == my_address);
+        let node_idx = match node_idx_opt {
+            Some(idx) => NodeIndex(idx),
+            None => {
+                tracing::info!("BFT Proposer: I am not in the committee. Observer mode. Sleeping...");
+                // Sleep for roughly one session duration (6 minutes at 6s/block) before checking again
+                tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
+                continue;
+            }
+        };
+
+        let node_count = NodeCount(committee.len());
+        tracing::info!(
+            "BFT Proposer: I am validator {} out of {} for this session",
+            node_idx.0, node_count.0
+        );
 
         // Compute the current session_id from chain height.
         let current_height = {
