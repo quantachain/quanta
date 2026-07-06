@@ -170,7 +170,7 @@ async fn get_balance_by_path(
 /// Query parameters for address tx history
 #[derive(Deserialize)]
 pub struct AddressTxsQuery {
-    /// How many blocks to scan backwards. Defaults to 10_000. Max enforced at 50_000.
+    /// How many blocks to scan backwards. Defaults to 100. Max enforced at 1_000.
     pub max_blocks: Option<u64>,
 }
 
@@ -182,7 +182,8 @@ async fn get_address_transactions(
     Path(address): Path<String>,
     Query(params): Query<AddressTxsQuery>,
 ) -> Json<AddressTxsResponse> {
-    let max_blocks = params.max_blocks.unwrap_or(10_000).min(50_000);
+    // SECURITY FIX: Capped at 1000 to prevent tokio executor starvation via blocking disk reads
+    let max_blocks = params.max_blocks.unwrap_or(100).min(1_000);
     let blockchain = state.blockchain.read().await;
     let txs = blockchain.get_address_transactions(&address, max_blocks);
     let count = txs.len();
