@@ -2,8 +2,9 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.2.0 — MAJOR SECURITY UPGRADE (2026-07-06)**
-> **WIPE REQUIRED.** P2P Sybil sync vulnerability fixed via Proposer BFT Signatures. You MUST delete your `quanta_data` folder before starting this version! The network magic has changed to `Q2TE`.
+> **v2.2.0 — MAJOR CONSENSUS & STAKING UPGRADE (2026-07-06)**
+> **WIPE REQUIRED.** A critical bug with deterministic BFT payload hashing (`invalid Falcon-512 sig`) has been fully resolved! External nodes can now successfully propose and verify blocks on the AlephBFT network.
+> You MUST delete your `quanta_data` folder before starting this version! The network magic has changed to `Q2TE`.
 > 
 > **How to update and start your node:**
 > 
@@ -27,7 +28,7 @@ Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous By
 >   quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap 34.87.128.33:8333
 > ```
 > 
-> **Staking is OPEN!** We have set `OPEN_VALIDATOR_REGISTRATION_HEIGHT = 0` so new validators can stake and join instantly!
+> **Staking is fully OPEN!** We have successfully tested dynamic BFT committee rotation with external nodes! `OPEN_VALIDATOR_REGISTRATION_HEIGHT = 0` so new validators can stake and join instantly at the next session boundary!
 
 > **v2.1.1-alpha — SOFT UPDATE (2026-07-06)**
 > **NO WIPE REQUIRED.** A bypass was added for block 12615 to resolve the state root consensus bug. The blockchain data format and network magic (`Q2T9`) have not changed. DO NOT delete your `quanta_data` folder!
@@ -93,10 +94,9 @@ docker start quanta-validator
 
 ## Validator Setup (Docker)
 
-> **⚠️ ATTENTION:** This is currently a strictly permissioned testnet designed only for testing. Only the validators explicitly hardcoded in the Genesis set can run a node and produce blocks.
-> Once the network matures, we will implement full DPoS, allowing anyone to stake and participate in consensus. Until then, if you would like early access to participate, please email: **contact@quantachain.org**
-
-If you have been selected as a validator, follow these exact instructions to spin up your validator node and connect to the core network using Docker:
+> **🟢 STAKING IS NOW OPEN!** The network has successfully transitioned to full DPoS mechanics. Anyone who stakes at least **100,000 QUA** can run a validator node, propose blocks, and earn rewards! 
+> 
+> If you have the required QUA, you can follow these exact instructions to spin up your validator node and connect to the core network using Docker:
 
 **1. Create a Wallet and Get Your Key**
 You must generate a raw wallet and provide the public key to the core team to be whitelisted in the Genesis block.
