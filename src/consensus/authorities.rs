@@ -41,7 +41,7 @@ pub const MIN_VALIDATOR_STAKE: u64 = 100_000_000_000; // 100,000 QUA
 ///
 /// Set to 0 to open registration immediately (not recommended for testnet launch).
 /// Will be raised for mainnet.
-pub const OPEN_VALIDATOR_REGISTRATION_HEIGHT: u64 = 10_000; // ~16.7 hours at 6s/block
+pub const OPEN_VALIDATOR_REGISTRATION_HEIGHT: u64 = 0; // Opened for instant staking
 
 /// Epochs a slashed validator must wait before being allowed to re-register.
 pub const SLASH_COOLDOWN_EPOCHS: u64 = 180; // ≈ 12.5 days at 6s/block

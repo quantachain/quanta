@@ -1,13 +1,20 @@
-# QuantaChain Testnet — V2 Release (v2.1.1-alpha)
+# QuantaChain Testnet — V2 Release (v2.1.2-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.1.1-alpha — SOFT UPDATE (2026-07-06)**
-> **NO WIPE REQUIRED.** A bypass was added for block 12615 to resolve the state root consensus bug. The blockchain data format and network magic (`Q2T9`) have not changed. DO NOT delete your `quanta_data` folder!
+> **v2.1.2-alpha — HARD RESET (2026-07-06)**
+> **WIPE REQUIRED.** Due to unreachable validator nodes, the testnet has been reset to a 4-core validator set. You MUST delete your `quanta_data` folder before starting this version! The network magic has changed to `Q2TB`.
 > 
 > **How to update and start your node:**
 > 
 > ```bash
+> # 1. Stop and remove the old container
+> docker stop quanta-validator && docker rm quanta-validator
+> 
+> # 2. Delete the old blockchain data (REQUIRED!)
+> sudo rm -rf ~/quanta_data_v2
+> 
+> # 3. Pull the new image and start
 > docker pull xd637/quanta-node:latest
 > 
 > docker run -d \
@@ -19,6 +26,11 @@ Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous By
 >   xd637/quanta-node:latest \
 >   quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap 34.87.128.33:8333
 > ```
+> 
+> **Staking is OPEN!** We have set `OPEN_VALIDATOR_REGISTRATION_HEIGHT = 0` so new validators can stake and join instantly!
+
+> **v2.1.1-alpha — SOFT UPDATE (2026-07-06)**
+> **NO WIPE REQUIRED.** A bypass was added for block 12615 to resolve the state root consensus bug. The blockchain data format and network magic (`Q2T9`) have not changed. DO NOT delete your `quanta_data` folder!
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
 

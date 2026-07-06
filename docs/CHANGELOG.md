@@ -9,6 +9,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.1.2-alpha] — 2026-07-06
+
+### Changed
+- **Hard Reset**: Transitioned network to a 4-core validator set due to unresponsive nodes.
+- **Validator Registration**: Set `OPEN_VALIDATOR_REGISTRATION_HEIGHT` to `0` to allow standby validators to join instantly.
+- **Network Magic**: Updated `TESTNET_MAGIC` to `Q2TB` to enforce the network wipe and prevent old nodes from connecting.
+
 ## [2.1.1-alpha] — 2026-07-06
 
 ### Fixed
