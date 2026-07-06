@@ -735,6 +735,11 @@ impl AccountState {
             // The caller also passes coinbase_maturity=0 for these, but we guard
             // here explicitly so a future refactor cannot accidentally re-lock them.
             account.balance = account.balance.saturating_add(tx.amount);
+        } else if tx.is_stake() {
+            // FIX: Stake transactions lock the amount in the validator registry
+            // (AccountState::validators), NOT in the regular account balance.
+            // We explicitly do NOT credit the spendable balance here, which prevents
+            // the infinite money exploit where staked amounts were instantly returned.
         } else if let TransactionType::TimeLockTransfer { unlock_height } = tx.tx_type {
             account.locked_balances.push(LockedBalance {
                 amount: tx.amount,
