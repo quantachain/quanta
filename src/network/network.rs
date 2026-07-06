@@ -536,8 +536,8 @@ impl Network {
                 // AlephBFT relies on retries (identical messages) for reliability.
                 // If we deduplicate before sending to AlephBFT, retries are dropped!
                 if let Some(tx) = &*tx_opt {
-                    if let Err(e) = tx.send(data.clone()) {
-                        tracing::error!("Failed to send AlephBFT message to channel: {:?}", e);
+                    if let Err(_e) = tx.send(data.clone()) {
+                        tracing::debug!("BFT channel closed/unregistered, dropping message during sync");
                     }
                 }
 
