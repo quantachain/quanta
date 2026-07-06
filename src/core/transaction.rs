@@ -686,7 +686,7 @@ impl AccountState {
                 hasher.update(key.as_bytes());
                 hasher.update(&v.stake.to_le_bytes());
                 hasher.update(&[v.active as u8]);
-                hasher.update(&v.registered_epoch.to_le_bytes());
+                hasher.update(&v.registered_height.to_le_bytes());
                 hasher.update(&v.unbonding_epoch.to_le_bytes());
                 hasher.update(&v.slash_cooldown_until_epoch.to_le_bytes());
                 hasher.update(&v.last_proposed_height.to_le_bytes());

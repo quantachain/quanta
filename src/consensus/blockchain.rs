@@ -1499,6 +1499,7 @@ impl Blockchain {
                 if slash_cooldown > epoch {
                     tracing::warn!(
                         "Stake rejected: {} is in slash cooldown until epoch {} (current: {})",
+                        tx.sender,
                         slash_cooldown,
                         epoch
                     );

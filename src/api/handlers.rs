@@ -433,7 +433,7 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
             address: addr.clone(),
             falcon_pk_hex: hex::encode(&info.falcon_pk),
             stake_microunits: info.stake,
-            registered_epoch: info.registered_epoch,
+            registered_epoch: info.registered_height, // Keep json key as registered_epoch for backwards compat or change it to registered_height if needed, but lets just use registered_height
             active: info.active,
         })
         .collect();
