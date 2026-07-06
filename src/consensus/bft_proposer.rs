@@ -245,6 +245,7 @@ pub async fn run_bft_proposer(
             blockchain.clone(),
             my_address.clone(),
             last_finalized_ts.clone(),
+            wallet.clone(),
         );
 
         let (session_tx, session_rx) = tokio::sync::mpsc::unbounded_channel::<Block>();

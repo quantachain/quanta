@@ -82,28 +82,21 @@ pub fn verify_bft_certificate(block: &Block, committee: &[String], state: &Accou
         return false;
     }
 
-    // Threshold: strictly more than 2/3.
-    let threshold = bft_threshold(committee_size);
+    // Threshold: AlephBFT finalizes blocks without attaching Tendermint-style BFT certificates.
+    // However, to prevent Sybil nodes from forging P2P chains, we require that the block is AT LEAST
+    // signed by its proposer. The proposer MUST be in the committee.
+    // We set threshold = 1 since AlephBFT does not collect 2/3 signatures on the block itself.
+    let threshold = 1;
 
     // Reject if not enough signatures are present without doing crypto.
-    if block.bft_signatures.len() < threshold {
-        // FIX: AlephBFT finalizes blocks without attaching Tendermint-style BFT signatures.
-        // We gracefully accept blocks with 0 signatures to allow AlephBFT to function.
-        if block.bft_signatures.is_empty() {
-            tracing::debug!(
-                "BFT verify block {}: accepting with 0 signatures (AlephBFT finality)",
-                block.index
-            );
-            return true;
-        }
+    if block.bft_signatures.is_empty() {
+        tracing::warn!("BFT verify block {}: 0 signatures (rejected)", block.index);
+        return false;
+    }
 
-        tracing::warn!(
-            "BFT verify block {}: only {} signatures, need {} (committee={})",
-            block.index,
-            block.bft_signatures.len(),
-            threshold,
-            committee_size
-        );
+    // Ensure the proposer actually signed it (must be the first signer by our convention, or at least in the signers)
+    if !block.bft_signers.contains(&block.proposer) {
+        tracing::warn!("BFT verify block {}: proposer {} did not sign the block", block.index, block.proposer);
         return false;
     }
 

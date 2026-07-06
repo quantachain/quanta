@@ -33,6 +33,8 @@ pub struct QuantaDataProvider {
     /// immediately after each block is applied.  `get_data()` reads this
     /// lock-free to implement the SLOT_SECONDS gate.
     last_finalized_ts: Arc<AtomicI64>,
+    /// Wallet used to sign the proposed block
+    wallet: Arc<crate::crypto::wallet::QuantumWallet>,
 }
 
 impl QuantaDataProvider {
@@ -40,11 +42,13 @@ impl QuantaDataProvider {
         blockchain: Arc<RwLock<Blockchain>>,
         my_address: String,
         last_finalized_ts: Arc<AtomicI64>,
+        wallet: Arc<crate::crypto::wallet::QuantumWallet>,
     ) -> Self {
         Self {
             blockchain,
             my_address,
             last_finalized_ts,
+            wallet,
         }
     }
 }
@@ -82,9 +86,22 @@ impl DataProvider for QuantaDataProvider {
             .timestamp()
             .saturating_sub(self.last_finalized_ts.load(Ordering::Acquire));
         match bc.create_block_template(self.my_address.clone()) {
-            Ok(block) => {
+            Ok(mut block) => {
+                // SECURITY FIX: Sign the block so network syncing nodes can cryptographically verify it.
+                // Since AlephBFT does not export standard BFT certificates, the Proposer's signature
+                // acts as a verifiable proof of origin during P2P sync.
+                let payload = block.bft_signing_payload();
+                if let Ok(sig) = self.wallet.sign_hash(&payload) {
+                    block.bft_signatures.push(sig);
+                    block.bft_signers.push(self.my_address.clone());
+                    block.finalize_hash(); // Re-finalize since we mutated it
+                } else {
+                    tracing::error!("Failed to sign proposed block!");
+                    return None;
+                }
+
                 tracing::info!(
-                    "BFT DataProvider: proposing block {} (proposer: {}, elapsed since last finalized: {}s)",
+                    "BFT DataProvider: proposing signed block {} (proposer: {}, elapsed since last finalized: {}s)",
                     block.index, self.my_address, elapsed
                 );
                 Some(block)
