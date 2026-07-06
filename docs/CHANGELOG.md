@@ -9,6 +9,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.1.1-alpha] — 2026-07-06
+
+### Fixed
+- **Consensus Halt**: Fixed a consensus state root mismatch bug where the block proposer would omit validator staking/unstaking operations during the block generation phase but evaluate them during validation. 
+
+### Changed
+- **Soft Update**: Reverted `TESTNET_MAGIC` back to `Q2T9` and added a hardcoded bypass for block 12615 to allow the network to cleanly recover from the state root consensus bug without a data wipe.
+
 ## [2.1.0-alpha] — 2026-07-05
 
 ### Added

@@ -1,9 +1,9 @@
-# QuantaChain Testnet — V2 Release (v2.1.0-alpha)
+# QuantaChain Testnet — V2 Release (v2.1.1-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.1.0-alpha — SOFT UPDATE (2026-07-05)**
-> **NO WIPE REQUIRED.** The blockchain data format and network magic (`Q2T9`) have not changed. DO NOT delete your `quanta_data` folder!
+> **v2.1.1-alpha — SOFT UPDATE (2026-07-06)**
+> **NO WIPE REQUIRED.** A bypass was added for block 12615 to resolve the state root consensus bug. The blockchain data format and network magic (`Q2T9`) have not changed. DO NOT delete your `quanta_data` folder!
 > 
 > **How to update and start your node:**
 > 
