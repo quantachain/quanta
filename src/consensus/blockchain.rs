@@ -194,7 +194,7 @@ const GENESIS_HASH: &str = "1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685
 /// Testnet reset 2026-07-06 — new genesis for 4-core validator hard reset (v2.1.2-alpha).
 /// Confirmed via `cargo run --bin get_testnet_hash`.
 const TESTNET_GENESIS_HASH: &str =
-    "0e4b85c2c77d598deef6a72c1c699742a0352ff135eecb23e74360e281bfd237";
+    "b35800906135aae00e153756bee3ea9609f5afb0f2266d2ea5bb7cdaaa248d0c";
 
 // CHECKPOINT SYSTEM: Hardcoded checkpoints prevent deep reorganizations
 // Format: (block_height, block_hash)
