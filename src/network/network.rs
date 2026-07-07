@@ -425,6 +425,8 @@ impl Network {
     /// Process incoming messages (PARALLELIZED - spawn handler per message)
     async fn process_messages(self: Arc<Self>) {
         let mut rx = self.message_rx.write().await;
+        // Limit concurrent message processing to prevent RAM exhaustion and apply backpressure
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(1000));
 
         while let Some((addr, msg)) = rx.recv().await {
             // Find the peer object to pass to the handler for strike management
@@ -436,8 +438,10 @@ impl Network {
                 }
             }
 
+            let permit = semaphore.clone().acquire_owned().await.unwrap();
             let network = Arc::clone(&self);
             tokio::spawn(async move {
+                let _permit = permit;
                 if let Err(e) = network.handle_message(addr, msg.clone(), peer_opt).await {
                     error!("Error handling message {:?} from {}: {}", msg, addr, e);
                 }
@@ -528,29 +532,35 @@ impl Network {
                 use sha3::{Digest, Sha3_256};
                 let hash = hex::encode(Sha3_256::digest(&data));
 
-                let already_seen = {
+                let (already_seen, skip_local) = {
                     let mut seen = self.seen_bft.lock().unwrap();
                     let now = std::time::Instant::now();
-                    match seen.get(&hash) {
-                        Some(&time) if now.duration_since(time).as_secs() < 2 => {
-                            // Seen within 2 seconds: likely an immediate gossip loop bounce-back
-                            true
+                    match seen.get(&hash).copied() {
+                        Some(time) if now.duration_since(time).as_secs() < 1 => {
+                            // Flood protection: drop completely if seen < 1s ago
+                            (true, true)
                         }
-                        _ => {
+                        Some(_) => {
                             seen.put(hash, now);
-                            false
+                            (true, false) // already seen (no relay), but pass locally
+                        }
+                        None => {
+                            seen.put(hash, now);
+                            (false, false) // new, pass locally and relay
                         }
                     }
                 };
 
                 // Send to our local AlephBFT instance FIRST.
                 // AlephBFT relies on retries (identical messages) for reliability.
-                // If we deduplicate before sending to AlephBFT, retries are dropped!
-                if let Some(tx) = &*tx_opt {
-                    if let Err(_e) = tx.send(data.clone()) {
-                        tracing::debug!(
-                            "BFT channel closed/unregistered, dropping message during sync"
-                        );
+                // If we deduplicate before sending to AlephBFT, retries are dropped locally.
+                if !skip_local {
+                    if let Some(tx) = &*tx_opt {
+                        if let Err(_e) = tx.send(data.clone()) {
+                            tracing::debug!(
+                                "BFT channel closed/unregistered, dropping message during sync"
+                            );
+                        }
                     }
                 }
 
