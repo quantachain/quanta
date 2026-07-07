@@ -416,6 +416,12 @@ pub struct ValidatorInfoResponse {
     pub active: bool,
     pub is_online: bool,
     pub node_version: Option<u32>,
+    // Consensus participation stats (computed from last UPTIME_WINDOW blocks)
+    pub blocks_proposed: u64,
+    pub blocks_signed: u64,
+    pub blocks_missed: u64,
+    pub sign_rate_pct: f64,
+    pub uptime_window: u64,
 }
 
 #[derive(Serialize)]
@@ -424,14 +430,28 @@ pub struct ValidatorsResponse {
     pub validators: Vec<ValidatorInfoResponse>,
 }
 
+/// How many recent blocks to scan when computing participation stats.
+/// 200 blocks ≈ 20 minutes at the 6-second block time.
+const UPTIME_WINDOW: u64 = 200;
+
 async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsResponse> {
-    // Collect all validator data into owned types while holding the read lock,
-    // then drop the lock before doing any async peer lookups.
+    // Collect all validator data AND scan recent blocks for participation stats
+    // while holding the read lock, then drop the lock before any async work.
     // This keeps the future Send because no non-Send guard crosses an await.
-    let raw_validators: Vec<(String, Vec<u8>, u64, u64, bool)> = {
+    let (
+        raw_validators,
+        proposed_counts,
+        signed_counts,
+        actual_window,
+    ): (
+        Vec<(String, Vec<u8>, u64, u64, bool)>,
+        std::collections::HashMap<String, u64>,
+        std::collections::HashMap<String, u64>,
+        u64,
+    ) = {
         let blockchain = state.blockchain.read().await;
         let account_state = blockchain.get_account_state_read();
-        account_state
+        let validators_raw = account_state
             .get_validators()
             .iter()
             .map(|(addr, info)| {
@@ -443,7 +463,23 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
                     info.active,
                 )
             })
-            .collect()
+            .collect::<Vec<_>>();
+
+        // Tally bft_signers + proposer across the last UPTIME_WINDOW blocks
+        let height = blockchain.get_height();
+        let start = height.saturating_sub(UPTIME_WINDOW);
+        let mut proposed: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        let mut signed: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        for h in start..height {
+            if let Some(block) = blockchain.get_block_by_height(h) {
+                *proposed.entry(block.proposer.clone()).or_insert(0) += 1;
+                for signer in &block.bft_signers {
+                    *signed.entry(signer.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+        let window = height.saturating_sub(start);
+        (validators_raw, proposed, signed, window)
     }; // blockchain lock released here
 
     let mut online_nodes = std::collections::HashSet::new();
@@ -460,14 +496,29 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
 
     let mut validators: Vec<ValidatorInfoResponse> = raw_validators
         .into_iter()
-        .map(|(address, falcon_pk, stake, registered_height, active)| ValidatorInfoResponse {
-            is_online: online_nodes.contains(&address),
-            node_version: node_versions.get(&address).copied(),
-            address,
-            falcon_pk_hex: hex::encode(&falcon_pk),
-            stake_microunits: stake,
-            registered_epoch: registered_height,
-            active,
+        .map(|(address, falcon_pk, stake, registered_height, active)| {
+            let b_signed   = *signed_counts.get(&address).unwrap_or(&0);
+            let b_proposed = *proposed_counts.get(&address).unwrap_or(&0);
+            let b_missed   = actual_window.saturating_sub(b_signed);
+            let sign_rate  = if actual_window > 0 {
+                (b_signed as f64 / actual_window as f64) * 100.0
+            } else {
+                100.0
+            };
+            ValidatorInfoResponse {
+                is_online: online_nodes.contains(&address),
+                node_version: node_versions.get(&address).copied(),
+                blocks_proposed: b_proposed,
+                blocks_signed: b_signed,
+                blocks_missed: b_missed,
+                sign_rate_pct: (sign_rate * 10.0).round() / 10.0, // 1 decimal place
+                uptime_window: actual_window,
+                address,
+                falcon_pk_hex: hex::encode(&falcon_pk),
+                stake_microunits: stake,
+                registered_epoch: registered_height,
+                active,
+            }
         })
         .collect();
 
