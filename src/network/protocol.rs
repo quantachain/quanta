@@ -101,7 +101,7 @@ impl From<&Block> for BlockHeader {
 }
 
 /// Protocol constants
-pub const PROTOCOL_VERSION: u32 = 4; // v2.2.4-alpha: BFT delay override
+pub const PROTOCOL_VERSION: u32 = 5; // v2.2.5-alpha: network memory leak & flap fix
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
