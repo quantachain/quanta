@@ -31,6 +31,7 @@ pub struct PeerInfo {
     pub misbehavior_score: u32,
     /// Legacy field kept so PeerManager cleanup can still gate on it
     pub strikes: u8,
+    pub is_outbound: bool,
 }
 
 /// Represents a connection to a peer in the network
@@ -56,6 +57,7 @@ impl Peer {
             last_seen: chrono::Utc::now().timestamp(),
             misbehavior_score: 0,
             strikes: 0,
+            is_outbound: false,
         };
 
         // CRITICAL: Split stream to avoid read/write lock contention
@@ -288,19 +290,21 @@ pub struct PeerManager {
     /// HIGH-4: Persistent IP ban list — IpAddr -> ban expiry Instant
     /// SECURITY FIX: Bounded by LruCache (max 5000) to prevent OOM via IP spoofing
     banned_ips: Arc<RwLock<lru::LruCache<IpAddr, Instant>>>,
+    our_node_id: String,
 }
 
 /// Duration of a peer ban triggered by 3+ strikes.
 pub const BAN_DURATION: Duration = Duration::from_secs(60 * 60); // 1 hour
 
 impl PeerManager {
-    pub fn new(max_peers: usize) -> Self {
+    pub fn new(max_peers: usize, our_node_id: String) -> Self {
         Self {
             peers: Arc::new(RwLock::new(Vec::new())),
             max_peers,
             banned_ips: Arc::new(RwLock::new(lru::LruCache::new(
                 std::num::NonZeroUsize::new(5000).unwrap(),
             ))),
+            our_node_id,
         }
     }
 
@@ -368,7 +372,35 @@ impl PeerManager {
                         stale_idx = Some(i);
                         break;
                     }
-                    return Err(format!("Already connected to this peer IP: {}", peer_ip));
+                    
+                    let remote_node_id = &info.node_id;
+                    let new_peer_info = peer.info.read().await;
+                    let new_is_outbound = new_peer_info.is_outbound;
+                    
+                    if self.our_node_id == *remote_node_id {
+                        return Err("Connected to self".to_string());
+                    }
+                    
+                    // Deterministic tie-breaking for simultaneous connections
+                    let we_are_larger = self.our_node_id > *remote_node_id;
+                    
+                    if we_are_larger {
+                        // We are the larger node, so we prefer OUR OUTBOUND connection.
+                        if new_is_outbound {
+                            stale_idx = Some(i);
+                            break;
+                        } else {
+                            return Err(format!("Tie-break: rejecting inbound connection from IP {} in favor of our outbound", peer_ip));
+                        }
+                    } else {
+                        // We are the smaller node, so we prefer THEIR OUTBOUND (our INBOUND) connection.
+                        if !new_is_outbound {
+                            stale_idx = Some(i);
+                            break;
+                        } else {
+                            return Err(format!("Tie-break: rejecting our outbound connection to IP {} in favor of their outbound", peer_ip));
+                        }
+                    }
                 }
 
                 match (info.address.ip(), peer_ip) {

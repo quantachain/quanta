@@ -86,9 +86,9 @@ impl Network {
             config.dns_seeds.clone(),
         ));
         Self {
-            config,
+            config: config.clone(),
             blockchain,
-            peer_manager: Arc::new(PeerManager::new(125)),
+            peer_manager: Arc::new(PeerManager::new(125, config.node_id.clone())),
             message_tx,
             message_rx: Arc::new(RwLock::new(message_rx)),
             // 1024 entries ≈ 30+ minutes of blocks at 30s block time
@@ -370,6 +370,7 @@ impl Network {
             .map_err(|e| format!("Failed to connect: {}", e))?;
 
         let peer = Arc::new(Peer::new(stream, addr).await?);
+        peer.info.write().await.is_outbound = true;
 
         // Perform handshake
         let blockchain = self.blockchain.read().await;
