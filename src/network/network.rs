@@ -538,8 +538,9 @@ impl Network {
                     let now = std::time::Instant::now();
                     match seen.get(&hash).copied() {
                         Some(time) if now.duration_since(time).as_secs() < 1 => {
-                            // Flood protection: drop completely if seen < 1s ago
-                            (true, true)
+                            // Flood protection: drop completely from gossip if seen < 1s ago
+                            // CRITICAL FIX: skip_local MUST be false so AlephBFT receives its retries!
+                            (true, false)
                         }
                         Some(_) => {
                             seen.put(hash, now);

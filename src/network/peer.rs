@@ -76,9 +76,9 @@ impl Peer {
         let data = serialize_message(&msg)?;
         let len = data.len() as u32;
 
-        let send_future = async {
-            let mut write = self.write_half.write().await;
+        let mut write = self.write_half.write().await;
 
+        let send_future = async {
             // Write length prefix (4 bytes) then message data
             write
                 .write_all(&len.to_be_bytes())
@@ -98,7 +98,7 @@ impl Peer {
             Ok::<(), String>(())
         };
 
-        match tokio::time::timeout(std::time::Duration::from_secs(5), send_future).await {
+        match tokio::time::timeout(std::time::Duration::from_secs(60), send_future).await {
             Ok(result) => result,
             Err(_) => {
                 let _ = self.shutdown_tx.send(()).await;
