@@ -98,10 +98,10 @@ impl Peer {
             Ok::<(), String>(())
         };
 
-        match tokio::time::timeout(Duration::from_secs(5), send_future).await {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), send_future).await {
             Ok(result) => result,
             Err(_) => {
-                self.disconnect().await;
+                let _ = self.shutdown_tx.send(()).await;
                 Err("Send message timeout, disconnected peer".to_string())
             }
         }
