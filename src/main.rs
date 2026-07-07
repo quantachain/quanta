@@ -309,7 +309,7 @@ async fn main() {
             tracing_subscriber::fmt()
                 .with_env_filter(
                     EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| EnvFilter::new("info,aleph_bft=error")),
+                        .unwrap_or_else(|_| EnvFilter::new("info,aleph_bft=error,aleph-bft=error,aleph_bft_api=error,aleph_bft_rmc=error,aleph_bft_types=error,aleph_bft_mock=error")),
                 )
                 .with_target(false)
                 .with_level(true)
@@ -785,7 +785,7 @@ async fn main() {
             tracing_subscriber::fmt()
                 .with_env_filter(
                     EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| EnvFilter::new("info,aleph_bft=error")),
+                        .unwrap_or_else(|_| EnvFilter::new("info,aleph_bft=error,aleph-bft=error,aleph_bft_api=error,aleph_bft_rmc=error,aleph_bft_types=error,aleph_bft_mock=error")),
                 )
                 .with_target(false)
                 .with_level(true)
