@@ -1,6 +1,12 @@
-# QuantaChain Testnet — V2 Release (v2.2.0)
+# QuantaChain Testnet — V2 Release (v2.2.5-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.2.5-alpha — NETWORK STABILITY & API UPGRADE (2026-07-07)**
+> **WIPE REQUIRED (from v2.2.0).** Fixed massive network memory leak (OOM) and connection flapping ("early eof" / "Peer not found"). Network Magic bumped to `Q4TE`.
+> * **Validator API**: `/api/validators` now exposes real-time BFT connectivity (Online/Offline) and Protocol Version (e.g., `v5`).
+> * **UI Integration**: The Quascan explorer dynamically pulls the new API fields to visualize validator participation in real-time.
+> * **Staking Stats**: Fixed mismatch between reward epochs (1,000 blocks) and BFT sessions (60 blocks) in both wallet staking output and `/api/stats`.
 
 > **v2.2.0 — MAJOR CONSENSUS & STAKING UPGRADE (2026-07-06)**
 > **WIPE REQUIRED.** A critical bug with deterministic BFT payload hashing (`invalid Falcon-512 sig`) has been fully resolved! External nodes can now successfully propose and verify blocks on the AlephBFT network.

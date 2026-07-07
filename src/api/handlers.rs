@@ -414,6 +414,8 @@ pub struct ValidatorInfoResponse {
     pub stake_microunits: u64,
     pub registered_epoch: u64,
     pub active: bool,
+    pub is_online: bool,
+    pub node_version: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -427,6 +429,18 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
     let account_state = blockchain.get_account_state_read();
     let validators_map = account_state.get_validators();
 
+    let mut online_nodes = std::collections::HashSet::new();
+    let mut node_versions = std::collections::HashMap::new();
+
+    if let Some(network) = &state.network {
+        let peers = network.peer_manager.get_peers().await;
+        for peer in peers {
+            let info = peer.info.read().await;
+            online_nodes.insert(info.node_id.clone());
+            node_versions.insert(info.node_id.clone(), info.version);
+        }
+    }
+
     let mut validators: Vec<ValidatorInfoResponse> = validators_map
         .iter()
         .map(|(addr, info)| ValidatorInfoResponse {
@@ -435,6 +449,8 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
             stake_microunits: info.stake,
             registered_epoch: info.registered_height, // Keep json key as registered_epoch for backwards compat or change it to registered_height if needed, but lets just use registered_height
             active: info.active,
+            is_online: online_nodes.contains(addr),
+            node_version: node_versions.get(addr).copied(),
         })
         .collect();
 

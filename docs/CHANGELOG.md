@@ -9,6 +9,23 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.2.5] — 2026-07-07
+
+### Added
+- **Validator Connectivity API**: Added `/api/validators` to expose live BFT connectivity (`is_online`) and peer protocol version (`node_version`).
+- **Stats API Upgrade**: Added `current_session` and `blocks_until_next_session` to `/api/stats` to accurately reflect the 60-block BFT activation boundaries.
+
+### Fixed
+- **Network Flapping (early eof)**: Implemented deterministic tie-breaker (via `node_id` comparison) to resolve outbound/inbound TCP loop collisions.
+- **Peer Memory Leak (OOM)**: Bounded concurrent Tokio tasks using `tokio::sync::Semaphore` and implemented strict AlephBFT broadcast deduplication to halt storm loops.
+- **Discovery Deadlock**: Added `dedup()` to the peer discovery loop to prevent aggressive self-connection attempts.
+- **Wallet Message**: Corrected staking confirmation message to explicitly mention 60-block "session boundaries" rather than 1000-block "epoch boundaries".
+
+### Security
+- **Network Isolation**: Bumped `PROTOCOL_VERSION` from 4 to 5 and `TESTNET_MAGIC` from `Q3TE` to `Q4TE` to evict legacy v2.2.0 nodes from polluting the consensus layer.
+
+---
+
 ## [2.2.0] — 2026-07-06
 
 ### Security
