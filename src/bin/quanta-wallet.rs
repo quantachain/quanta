@@ -735,7 +735,9 @@ async fn main() {
                     println!("  TX Hash  : {}", hash);
                     println!("  Staked   : {:.6} QUA", amount);
                     println!("  Validator: {}", kp.address);
-                    println!("\n  You will join the BFT committee at the next epoch boundary.");
+                    println!("\n  You will join the BFT committee at the next session boundary.");
+                    println!("  Sessions rotate every 60 blocks (~6 minutes at 6s/block).");
+                    println!("  Check /api/stats for 'blocks_until_next_session' to see when you activate.");
                 }
                 Err(e) => die(&format!("Stake failed: {}", e)),
             }

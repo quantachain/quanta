@@ -1947,6 +1947,9 @@ impl Blockchain {
     pub fn get_stats(&self) -> BlockchainStats {
         let height = self.get_height();
         let current_epoch = crate::consensus::authorities::epoch_for_height(height);
+        let session_len = crate::consensus::authorities::SESSION_LENGTH;
+        let current_session = height / session_len;
+        let blocks_until_next_session = session_len - (height % session_len);
         let total_transactions = 0;
         let pending = self.pending_transactions.read();
 
@@ -1954,6 +1957,8 @@ impl Blockchain {
             chain_length: height as usize,
             total_transactions,
             current_epoch,
+            current_session,
+            blocks_until_next_session,
             mining_reward: self.get_block_reward(),
             total_supply: self.calculate_total_supply(),
             pending_transactions: pending.len(),
@@ -3086,7 +3091,12 @@ pub struct AddressTransaction {
 pub struct BlockchainStats {
     pub chain_length: usize,
     pub total_transactions: usize,
+    /// Reward-halving epoch (every 1,000 blocks). Used for emission schedule.
     pub current_epoch: u64,
+    /// BFT consensus session (every 60 blocks). Validators activate at session boundaries.
+    pub current_session: u64,
+    /// How many blocks until the next session boundary (validator activation point).
+    pub blocks_until_next_session: u64,
     pub mining_reward: u64, // microunits
     pub total_supply: u64,  // microunits
     pub pending_transactions: usize,
