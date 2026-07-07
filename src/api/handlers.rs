@@ -425,9 +425,26 @@ pub struct ValidatorsResponse {
 }
 
 async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsResponse> {
-    let blockchain = state.blockchain.read().await;
-    let account_state = blockchain.get_account_state_read();
-    let validators_map = account_state.get_validators();
+    // Collect all validator data into owned types while holding the read lock,
+    // then drop the lock before doing any async peer lookups.
+    // This keeps the future Send because no non-Send guard crosses an await.
+    let raw_validators: Vec<(String, Vec<u8>, u64, u64, bool)> = {
+        let blockchain = state.blockchain.read().await;
+        let account_state = blockchain.get_account_state_read();
+        account_state
+            .get_validators()
+            .iter()
+            .map(|(addr, info)| {
+                (
+                    addr.clone(),
+                    info.falcon_pk.clone(),
+                    info.stake,
+                    info.registered_height,
+                    info.active,
+                )
+            })
+            .collect()
+    }; // blockchain lock released here
 
     let mut online_nodes = std::collections::HashSet::new();
     let mut node_versions = std::collections::HashMap::new();
@@ -435,22 +452,22 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
     if let Some(network) = &state.network {
         let peers = network.peer_manager.get_peers().await;
         for peer in peers {
-            let info = peer.info.read().await;
+            let info = peer.get_info().await;
             online_nodes.insert(info.node_id.clone());
             node_versions.insert(info.node_id.clone(), info.version);
         }
     }
 
-    let mut validators: Vec<ValidatorInfoResponse> = validators_map
-        .iter()
-        .map(|(addr, info)| ValidatorInfoResponse {
-            address: addr.clone(),
-            falcon_pk_hex: hex::encode(&info.falcon_pk),
-            stake_microunits: info.stake,
-            registered_epoch: info.registered_height, // Keep json key as registered_epoch for backwards compat or change it to registered_height if needed, but lets just use registered_height
-            active: info.active,
-            is_online: online_nodes.contains(addr),
-            node_version: node_versions.get(addr).copied(),
+    let mut validators: Vec<ValidatorInfoResponse> = raw_validators
+        .into_iter()
+        .map(|(address, falcon_pk, stake, registered_height, active)| ValidatorInfoResponse {
+            is_online: online_nodes.contains(&address),
+            node_version: node_versions.get(&address).copied(),
+            address,
+            falcon_pk_hex: hex::encode(&falcon_pk),
+            stake_microunits: stake,
+            registered_epoch: registered_height,
+            active,
         })
         .collect();
 

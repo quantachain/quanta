@@ -49,7 +49,7 @@ impl Default for NetworkConfig {
 pub struct Network {
     config: NetworkConfig,
     blockchain: Arc<RwLock<Blockchain>>,
-    peer_manager: Arc<PeerManager>,
+    pub peer_manager: Arc<PeerManager>,
     message_tx: mpsc::Sender<(SocketAddr, P2PMessage)>,
     message_rx: Arc<RwLock<mpsc::Receiver<(SocketAddr, P2PMessage)>>>,
     // BETA FIX: Deduplication caches — prevent broadcast storms.
