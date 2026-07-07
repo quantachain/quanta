@@ -76,25 +76,35 @@ impl Peer {
         let data = serialize_message(&msg)?;
         let len = data.len() as u32;
 
-        let mut write = self.write_half.write().await;
+        let send_future = async {
+            let mut write = self.write_half.write().await;
 
-        // Write length prefix (4 bytes) then message data
-        write
-            .write_all(&len.to_be_bytes())
-            .await
-            .map_err(|e| format!("Failed to write message length: {}", e))?;
+            // Write length prefix (4 bytes) then message data
+            write
+                .write_all(&len.to_be_bytes())
+                .await
+                .map_err(|e| format!("Failed to write message length: {}", e))?;
 
-        write
-            .write_all(&data)
-            .await
-            .map_err(|e| format!("Failed to write message data: {}", e))?;
+            write
+                .write_all(&data)
+                .await
+                .map_err(|e| format!("Failed to write message data: {}", e))?;
 
-        write
-            .flush()
-            .await
-            .map_err(|e| format!("Failed to flush stream: {}", e))?;
+            write
+                .flush()
+                .await
+                .map_err(|e| format!("Failed to flush stream: {}", e))?;
 
-        Ok(())
+            Ok::<(), String>(())
+        };
+
+        match tokio::time::timeout(Duration::from_secs(5), send_future).await {
+            Ok(result) => result,
+            Err(_) => {
+                self.disconnect().await;
+                Err("Send message timeout, disconnected peer".to_string())
+            }
+        }
     }
 
     /// Receive a message from this peer with timeout

@@ -9,6 +9,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.2.6] — 2026-07-07
+
+### Fixed
+- **Peer Memory Leak (OOM)**: Added a 5-second timeout to `Peer::send_message` to prevent the `broadcast` tokio tasks from hanging indefinitely when a peer's TCP buffer is full and they stop reading. Stalled connections are now immediately closed.
+
+### Security
+- **Network Isolation**: Bumped `PROTOCOL_VERSION` from 5 to 6 and `TESTNET_MAGIC` from `Q4TE` to `Q5TE` to evict nodes running the unpatched v2.2.5 software that were causing network instability and RAM leaks.
+
+---
+
 ## [2.2.5] — 2026-07-07
 
 ### Added
