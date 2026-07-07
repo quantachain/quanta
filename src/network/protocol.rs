@@ -107,7 +107,7 @@ pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
 // Changed to Q3TE to isolate the new testnet from the un-upgraded spamming nodes.
-pub const TESTNET_MAGIC: [u8; 4] = *b"Q3TE"; // Quanta V2 Testnet (v2.2.4-alpha)
+pub const TESTNET_MAGIC: [u8; 4] = *b"Q4TE"; // Quanta V2 Testnet (v2.2.5-alpha)
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;
