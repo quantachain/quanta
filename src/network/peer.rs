@@ -165,6 +165,11 @@ impl Peer {
         self.info.read().await.clone()
     }
 
+    /// Mark connection as outbound
+    pub async fn set_outbound(&self) {
+        self.info.write().await.is_outbound = true;
+    }
+
     /// Add weighted misbehavior score for bad behavior.
     ///
     /// Recommended weights:

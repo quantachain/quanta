@@ -370,7 +370,7 @@ impl Network {
             .map_err(|e| format!("Failed to connect: {}", e))?;
 
         let peer = Arc::new(Peer::new(stream, addr).await?);
-        peer.info.write().await.is_outbound = true;
+        peer.set_outbound().await;
 
         // Perform handshake
         let blockchain = self.blockchain.read().await;
