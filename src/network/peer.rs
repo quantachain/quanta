@@ -358,18 +358,7 @@ impl PeerManager {
 
         for (i, p) in peers.iter().enumerate() {
             if let Ok(info) = p.info.try_read() {
-                // Exact address match
-                if info.address == peer_addr {
-                    // Prefer the newer connection: check liveness
-                    let now = chrono::Utc::now().timestamp();
-                    if now - info.last_seen > 30 {
-                        stale_idx = Some(i);
-                        break; // evict and accept below
-                    }
-                    return Err("Already connected to this peer".to_string());
-                }
-
-                // Same IP, different port — check liveness before rejecting
+                // Same IP — check liveness before rejecting or tie-breaking
                 if info.address.ip() == peer_ip {
                     let now = chrono::Utc::now().timestamp();
                     if now - info.last_seen > 30 {
@@ -381,12 +370,23 @@ impl PeerManager {
                     let remote_node_id = &info.node_id;
                     let new_peer_info = peer.info.read().await;
                     let new_is_outbound = new_peer_info.is_outbound;
+                    let existing_is_outbound = info.is_outbound;
                     
                     if self.our_node_id == *remote_node_id {
                         return Err("Connected to self".to_string());
                     }
                     
-                    // Deterministic tie-breaking for simultaneous connections
+                    // Duplicate connection from the same side (both inbound or both outbound)
+                    // We already have a live connection, so just reject the duplicate attempt.
+                    if existing_is_outbound == new_is_outbound {
+                        return Err(format!(
+                            "Already connected: rejecting duplicate {} connection for IP {}",
+                            if new_is_outbound { "outbound" } else { "inbound" },
+                            peer_ip
+                        ));
+                    }
+                    
+                    // Deterministic tie-breaking for cross-connections (simultaneous dial)
                     let we_are_larger = self.our_node_id > *remote_node_id;
                     
                     if we_are_larger {

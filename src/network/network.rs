@@ -1376,6 +1376,9 @@ impl Network {
                     target_peers.extend(self.config.bootstrap_nodes.iter().copied());
                 }
 
+                target_peers.sort_unstable();
+                target_peers.dedup();
+
                 for addr in target_peers {
                     // FLAP-FIX: Check if already connected AND LIVE before skipping.
                     // The old check only tested by IP, not liveness — a dead peer with
