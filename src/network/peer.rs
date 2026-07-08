@@ -380,36 +380,38 @@ impl PeerManager {
 
         for (i, p) in peers.iter().enumerate() {
             if let Ok(info) = p.info.try_read() {
-                // Same IP — check liveness before rejecting or tie-breaking
-                if info.address.ip() == peer_ip {
+                let new_peer_info = peer.info.read().await;
+                let new_peer_node_id = &new_peer_info.node_id;
+                let new_is_outbound = new_peer_info.is_outbound;
+
+                if self.our_node_id == *new_peer_node_id {
+                    return Err("Connected to self".to_string());
+                }
+
+                // Same NODE ID — this is a duplicate connection to the same node
+                if info.node_id == *new_peer_node_id {
                     let now = chrono::Utc::now().timestamp();
                     if now - info.last_seen > 30 {
-                        // Stale connection holding the IP slot — evict it
+                        // Stale connection holding the slot — evict it
                         stale_idx = Some(i);
                         break;
                     }
                     
-                    let remote_node_id = &info.node_id;
-                    let new_peer_info = peer.info.read().await;
-                    let new_is_outbound = new_peer_info.is_outbound;
                     let existing_is_outbound = info.is_outbound;
-                    
-                    if self.our_node_id == *remote_node_id {
-                        return Err("Connected to self".to_string());
-                    }
                     
                     // Duplicate connection from the same side (both inbound or both outbound)
                     // We already have a live connection, so just reject the duplicate attempt.
                     if existing_is_outbound == new_is_outbound {
                         return Err(format!(
-                            "Already connected: rejecting duplicate {} connection for IP {}",
+                            "Already connected: rejecting duplicate {} connection for Node ID {} (IP: {})",
                             if new_is_outbound { "outbound" } else { "inbound" },
+                            new_peer_node_id,
                             peer_ip
                         ));
                     }
                     
                     // Deterministic tie-breaking for cross-connections (simultaneous dial)
-                    let we_are_larger = self.our_node_id > *remote_node_id;
+                    let we_are_larger = self.our_node_id > *new_peer_node_id;
                     
                     if we_are_larger {
                         // We are the larger node, so we prefer OUR OUTBOUND connection.
@@ -417,7 +419,7 @@ impl PeerManager {
                             stale_idx = Some(i);
                             break;
                         } else {
-                            return Err(format!("Tie-break: rejecting inbound connection from IP {} in favor of our outbound", peer_ip));
+                            return Err(format!("Tie-break: rejecting inbound connection from Node ID {} in favor of our outbound", new_peer_node_id));
                         }
                     } else {
                         // We are the smaller node, so we prefer THEIR OUTBOUND (our INBOUND) connection.
@@ -425,7 +427,7 @@ impl PeerManager {
                             stale_idx = Some(i);
                             break;
                         } else {
-                            return Err(format!("Tie-break: rejecting our outbound connection to IP {} in favor of their outbound", peer_ip));
+                            return Err(format!("Tie-break: rejecting our outbound connection to Node ID {} in favor of their outbound", new_peer_node_id));
                         }
                     }
                 }

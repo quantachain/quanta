@@ -1,8 +1,8 @@
-# QuantaChain Testnet — V2 Release (v2.2.7-alpha)
+# QuantaChain Testnet — V2 Release (v2.2.8-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.2.7-alpha — BFT CONSENSUS FIX & LOG CLEANUP (2026-07-08)**
+> **v2.2.8-alpha — BFT CONSENSUS FIX & LOG CLEANUP (2026-07-08)**
 > **NO WIPE REQUIRED.** Hot-fix release targeting two regressions introduced in v2.2.6:
 > * **Block production freeze**: Fixed a write-lock deadlock in `Peer::send_message` that caused AlephBFT to starve while all nodes appeared Online. Blocks were not produced despite a fully-connected validator set.
 > * **Log spam eliminated**: Raw AlephBFT byte-arrays were being printed with `{:?}`, flooding operator logs with unreadable binary blobs. Logs now show compact labels like `AlephBFT(342 bytes)`, `Block(#1234)`, etc.

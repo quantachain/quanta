@@ -284,11 +284,9 @@ impl Network {
                                     info!("Successful handshake with {}", addr);
                                     match peer_manager.add_peer(Arc::clone(&peer)).await {
                                         Ok(_) => {
-                                            // BETA FIX: Add the peer's IP to discovery with the default port
-                                            // so that other nodes can discover it and form a full mesh network.
-                                            let mut discovery_addr = addr;
-                                            discovery_addr.set_port(8333); // Assume default Quanta port
-                                            discovery.add_peer(discovery_addr).await;
+                                            // We no longer blindly add inbound connections to discovery with port 8333.
+                                            // Nodes will naturally discover each other via GetAddr/Addr messages,
+                                            // which prevents the "Connection to self" loops and NAT port overriding.
 
                                             // Request known peers from this new connection to discover the rest of the network
                                             let _ = peer.send_message(P2PMessage::GetAddr).await;
