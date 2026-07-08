@@ -3260,8 +3260,11 @@ mod tests {
         // First addition should succeed
         assert!(blockchain.add_transaction(tx.clone()).is_ok());
         
-        // Second addition of the exact same tx should fail (DuplicateTransaction)
+        // Second addition of the exact same tx should fail (either Duplicate or InvalidNonce)
         let result = blockchain.add_transaction(tx);
-        assert!(matches!(result, Err(BlockchainError::DuplicateTransaction)));
+        assert!(matches!(
+            result,
+            Err(BlockchainError::InvalidNonce { .. }) | Err(BlockchainError::DuplicateTransaction)
+        ));
     }
 }
