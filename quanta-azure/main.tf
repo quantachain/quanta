@@ -26,7 +26,7 @@ variable "ssh_public_key" {
 }
 
 resource "azurerm_resource_group" "testnet" {
-  name     = "quanta-flood-testnet-rg"
+  name     = "quanta-shadow-testnet-rg"
   location = var.location
 }
 

@@ -1,0 +1,96 @@
+name: Automated Shadow Testnet Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      node_count:
+        description: 'Number of nodes to deploy'
+        required: true
+        default: '5'
+        type: string
+      tx_count:
+        description: 'Number of transactions to spam per node'
+        required: true
+        default: '1000'
+        type: string
+
+jobs:
+  run-shadow-testnet:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install Python Dependencies
+      run: pip install requests
+
+    - name: Setup SSH Key
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+
+    - name: Terraform Init
+      run: terraform init
+      working-directory: ./quanta-azure
+
+    - name: Provision Infrastructure (Terraform Apply)
+      run: terraform apply -auto-approve -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" -var="node_count=${{ github.event.inputs.node_count }}"
+      working-directory: ./quanta-azure
+      env:
+        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+    - name: Extract Node IPs
+      id: extract_ips
+      run: |
+        IPS=$(terraform output -json node_ips | jq -r 'join(",")')
+        echo "NODE_IPS=$IPS" >> $GITHUB_ENV
+      working-directory: ./quanta-azure
+
+    - name: Install and Start Nodes (Ansible)
+      run: |
+        # Wait a moment for SSH to become fully available on the new VMs
+        sleep 30
+        
+        # Install Ansible
+        sudo apt update && sudo apt install -y ansible
+        
+        # Run playbook
+        ansible-playbook -i inventory.ini playbook.yml
+      working-directory: ./quanta-azure
+      env:
+        ANSIBLE_HOST_KEY_CHECKING: "False"
+
+    - name: Wait for Network Boot
+      run: |
+        echo "Waiting 60 seconds for the nodes to synchronize..."
+        sleep 60
+
+    - name: Run Spammer Stress Test
+      run: |
+        python spammer.py ${{ github.event.inputs.tx_count }}
+      working-directory: ./quanta-azure
+      env:
+        TARGET_IPS: ${{ env.NODE_IPS }}
+
+    - name: Teardown Infrastructure (Terraform Destroy)
+      if: always()
+      run: terraform destroy -auto-approve -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" -var="node_count=${{ github.event.inputs.node_count }}"
+      working-directory: ./quanta-azure
+      env:
+        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
