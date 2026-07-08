@@ -3245,6 +3245,7 @@ mod tests {
         let mut blockchain = Blockchain::new(storage, crate::core::ChainNetwork::Mainnet).unwrap();
         
         let wallet = QuantumWallet::new();
+        blockchain.account_state.write().credit_account_direct(&wallet.address, 200_000);
         let mut tx = Transaction::new(
             wallet.address.clone(),
             "0xreceiver".to_string(),
