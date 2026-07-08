@@ -71,15 +71,24 @@ impl Peer {
         })
     }
 
-    /// Send a message to this peer
+    /// Send a message to this peer.
+    ///
+    /// CRITICAL FIX: The write lock and all I/O must be acquired INSIDE the
+    /// timeout future. Previously the lock was taken before the timeout started,
+    /// meaning a slow peer held `write_half` for up to 60 s and blocked every
+    /// other concurrent send (AlephBFT votes, pings, block gossip) behind it.
+    /// That lock starvation was the direct cause of BFT consensus freezing while
+    /// nodes showed as "Online".
     pub async fn send_message(&self, msg: P2PMessage) -> Result<(), String> {
         let data = serialize_message(&msg)?;
         let len = data.len() as u32;
 
-        let mut write = self.write_half.write().await;
+        // Clone the Arc so the async block is self-contained and Send.
+        let write_half = Arc::clone(&self.write_half);
 
-        let send_future = async {
-            // Write length prefix (4 bytes) then message data
+        let send_future = async move {
+            let mut write = write_half.write().await;
+
             write
                 .write_all(&len.to_be_bytes())
                 .await
@@ -98,11 +107,14 @@ impl Peer {
             Ok::<(), String>(())
         };
 
-        match tokio::time::timeout(std::time::Duration::from_secs(60), send_future).await {
+        // 10-second timeout: enough for a saturated 100 Mbps link to flush an
+        // 8 MB block (≈640 ms), with headroom for congestion.  The previous
+        // 60-second value allowed one hung peer to starve BFT for a full minute.
+        match tokio::time::timeout(std::time::Duration::from_secs(10), send_future).await {
             Ok(result) => result,
             Err(_) => {
                 let _ = self.shutdown_tx.send(()).await;
-                Err("Send message timeout, disconnected peer".to_string())
+                Err(format!("Send timeout after 10s — peer disconnected"))
             }
         }
     }

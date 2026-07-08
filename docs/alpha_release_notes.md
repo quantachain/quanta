@@ -1,12 +1,11 @@
-# QuantaChain Testnet — V2 Release (v2.2.6-alpha)
+# QuantaChain Testnet — V2 Release (v2.2.7-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.2.6-alpha — NETWORK STABILITY & API UPGRADE (2026-07-07)**
-> **WIPE REQUIRED (from v2.2.0).** Fixed massive network memory leak (OOM) and connection flapping ("early eof" / "Peer not found"). Network Magic bumped to `Q5TE`.
-> * **Validator API**: `/api/validators` now exposes real-time BFT connectivity (Online/Offline) and Protocol Version (e.g., `v5`).
-> * **UI Integration**: The Quascan explorer dynamically pulls the new API fields to visualize validator participation in real-time.
-> * **Staking Stats**: Fixed mismatch between reward epochs (1,000 blocks) and BFT sessions (60 blocks) in both wallet staking output and `/api/stats`.
+> **v2.2.7-alpha — BFT CONSENSUS FIX & LOG CLEANUP (2026-07-08)**
+> **NO WIPE REQUIRED.** Hot-fix release targeting two regressions introduced in v2.2.6:
+> * **Block production freeze**: Fixed a write-lock deadlock in `Peer::send_message` that caused AlephBFT to starve while all nodes appeared Online. Blocks were not produced despite a fully-connected validator set.
+> * **Log spam eliminated**: Raw AlephBFT byte-arrays were being printed with `{:?}`, flooding operator logs with unreadable binary blobs. Logs now show compact labels like `AlephBFT(342 bytes)`, `Block(#1234)`, etc.
 
 > **v2.2.0 — MAJOR CONSENSUS & STAKING UPGRADE (2026-07-06)**
 > **WIPE REQUIRED.** A critical bug with deterministic BFT payload hashing (`invalid Falcon-512 sig`) has been fully resolved! External nodes can now successfully propose and verify blocks on the AlephBFT network.

@@ -305,12 +305,26 @@ async fn main() {
             // To run in background on Linux/Mac: nohup ./quanta start &
             // Or use a process manager like systemd / tmux / screen
 
+            // Read the RUST_LOG env var if it exists, otherwise default to "info"
+            let user_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+            
+            // aleph-bft 0.45 logs with CUSTOM TARGET STRINGS (not crate names):
+            // "AlephBFT-consensus", "AlephBFT-collection", "AlephBFT-dag", etc.
+            // We must explicitly append these to the user's filter so they are always
+            // applied, otherwise RUST_LOG=info will override and spam operator logs.
+            let required_bft_filters = "aleph_bft=error,aleph-bft=error,\
+                aleph_bft_rmc=error,aleph_bft_api=error,\
+                aleph_bft_types=error,aleph_bft_mock=error,\
+                AlephBFT-consensus=error,AlephBFT-collection=error,\
+                AlephBFT-dissemination=error,AlephBFT-alerter=error,\
+                AlephBFT-dag=error,AlephBFT-creator=error,\
+                AlephBFT-backup-saver=error,AlephBFT-network-hub=error";
+                
+            let combined_filter = format!("{},{}", user_filter, required_bft_filters);
+
             // Initialize console logging
             tracing_subscriber::fmt()
-                .with_env_filter(
-                    EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| EnvFilter::new("info,aleph_bft=error,aleph-bft=error,aleph_bft_api=error,aleph_bft_rmc=error,aleph_bft_types=error,aleph_bft_mock=error")),
-                )
+                .with_env_filter(EnvFilter::new(combined_filter))
                 .with_target(false)
                 .with_level(true)
                 .init();
@@ -781,12 +795,19 @@ async fn main() {
         }
 
         Commands::NewWallet { file } => {
+            let user_filter = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+            let required_bft_filters = "aleph_bft=error,aleph-bft=error,\
+                aleph_bft_rmc=error,aleph_bft_api=error,\
+                aleph_bft_types=error,aleph_bft_mock=error,\
+                AlephBFT-consensus=error,AlephBFT-collection=error,\
+                AlephBFT-dissemination=error,AlephBFT-alerter=error,\
+                AlephBFT-dag=error,AlephBFT-creator=error,\
+                AlephBFT-backup-saver=error,AlephBFT-network-hub=error";
+            let combined_filter = format!("{},{}", user_filter, required_bft_filters);
+
             // Initialize console logging for non-start commands
             tracing_subscriber::fmt()
-                .with_env_filter(
-                    EnvFilter::try_from_default_env()
-                        .unwrap_or_else(|_| EnvFilter::new("info,aleph_bft=error,aleph-bft=error,aleph_bft_api=error,aleph_bft_rmc=error,aleph_bft_types=error,aleph_bft_mock=error")),
-                )
+                .with_env_filter(EnvFilter::new(combined_filter))
                 .with_target(false)
                 .with_level(true)
                 .try_init()

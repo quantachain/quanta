@@ -340,7 +340,19 @@ impl Network {
             loop {
                 match peer.receive_message().await {
                     Ok(msg) => {
-                        debug!("Received message from {}: {:?}", addr, msg);
+                        // Use a compact label instead of {:?} — the debug format of
+                        // AlephBFTMessage dumps the entire raw byte vector which spams
+                        // operator logs with hundreds of lines of unreadable binary data.
+                        let label = match &msg {
+                            crate::network::protocol::P2PMessage::AlephBFTMessage(d) =>
+                                format!("AlephBFT({} bytes)", d.len()),
+                            crate::network::protocol::P2PMessage::Block(b) =>
+                                format!("Block(#{})", b.index),
+                            crate::network::protocol::P2PMessage::NewTx(tx) =>
+                                format!("NewTx({})", &tx.hash()[..8]),
+                            other => format!("{:?}", other),
+                        };
+                        debug!("<- {} from {}", label, addr);
                         // FIX: Use .send().await instead of try_send.
                         // If the shared channel is full due to heavy network load,
                         // backpressure is applied naturally. We should NOT drop the peer.
@@ -444,7 +456,13 @@ impl Network {
             tokio::spawn(async move {
                 let _permit = permit;
                 if let Err(e) = network.handle_message(addr, msg.clone(), peer_opt).await {
-                    error!("Error handling message {:?} from {}: {}", msg, addr, e);
+                    let label = match &msg {
+                        P2PMessage::AlephBFTMessage(d) => format!("AlephBFT({} bytes)", d.len()),
+                        P2PMessage::Block(b) => format!("Block(#{})", b.index),
+                        P2PMessage::NewTx(tx) => format!("NewTx({})", &tx.hash()[..8]),
+                        other => format!("{:?}", other),
+                    };
+                    error!("Error handling {} from {}: {}", label, addr, e);
                 }
             });
         }

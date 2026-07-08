@@ -9,6 +9,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.2.7] — 2026-07-08
+
+### Fixed
+- **BFT Consensus Freeze (block production stopped)**: Fixed a critical write-lock deadlock in `Peer::send_message` introduced in v2.2.6. The `write_half` RwLock was acquired *before* the timeout started, meaning one slow/congested peer held the lock for up to 60 s and starved all AlephBFT message delivery to *every other* peer. Consensus round-trips timed out, nodes showed Online but produced zero blocks. Lock acquisition is now inside the timeout future so it is correctly cancelled on expiry. Timeout also reduced from 60 s → 10 s.
+- **Log Spam (binary blob output)**: `P2PMessage::AlephBFTMessage` was debug-printed with `{:?}` in two hot paths (receive loop and error handler), dumping hundreds of raw byte integers per message into operator logs. Replaced with compact human-readable labels: `AlephBFT(342 bytes)`, `Block(#1234)`, `NewTx(abcd1234)`.
+
+---
+
 ## [2.2.6] — 2026-07-07
 
 ### Fixed
