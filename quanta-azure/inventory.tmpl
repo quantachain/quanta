@@ -1,0 +1,4 @@
+[nodes]
+%{ for ip in ips ~}
+${ip} ansible_user=quantaadmin ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+%{ endfor ~}

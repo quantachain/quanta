@@ -1,0 +1,68 @@
+---
+- name: Deploy Quanta Testnet Nodes
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install required packages
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - jq
+        state: present
+        update_cache: yes
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: deb [arch=amd64] https://download.docker.com/linux/ubuntu focal stable
+        state: present
+
+    - name: Install Docker CE
+      apt:
+        name: docker-ce
+        state: present
+        update_cache: yes
+
+    - name: Start and enable Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Create Quanta directory
+      file:
+        path: /opt/quanta
+        state: directory
+        mode: '0755'
+
+    - name: Write Docker Compose file
+      copy:
+        dest: /opt/quanta/docker-compose.yml
+        content: |
+          version: '3.8'
+          services:
+            quanta_node:
+              image: xd637/quanta-node:v2.2.8-alpha
+              restart: always
+              network_mode: "host"
+              environment:
+                - RUST_LOG=info,AlephBFT-consensus=error,AlephBFT-collection=error,AlephBFT-dissemination=error,AlephBFT-alerter=error,AlephBFT-dag=error,AlephBFT-creator=error,AlephBFT-backup-saver=error,AlephBFT-network-hub=error
+                - QUANTA_NETWORK_PORT=8333
+                - QUANTA_RPC_PORT=8332
+              volumes:
+                - ./data:/data
+
+    - name: Pull Quanta Node Image
+      command: docker pull xd637/quanta-node:v2.2.8-alpha
+
+    - name: Start Quanta Node
+      command: docker compose -f /opt/quanta/docker-compose.yml up -d
+      args:
+        chdir: /opt/quanta
