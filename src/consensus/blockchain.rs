@@ -195,7 +195,7 @@ const WHISTLEBLOWER_REWARD_PCT: u64 = 10;
 
 /// CONSENSUS-CRITICAL: Genesis block hashes (prevent chain-split attacks)
 /// Mainnet genesis — pending final mining before mainnet launch.
-const GENESIS_HASH: &str = "1cdbccdff3db462378f4acbe4553b49040ffcdebf74b5c77e685ba05ccfa8cb0";
+const GENESIS_HASH: &str = "b35800906135aae00e153756bee3ea9609f5afb0f2266d2ea5bb7cdaaa248d0c";
 /// Testnet Alpha genesis — difficulty 8_304_130 (~30s/block).
 /// Old nodes on the previous testnet genesis will be rejected by this hash check.
 /// Testnet reset 2026-07-06 — new genesis for 4-core validator hard reset (v2.1.2-alpha).
