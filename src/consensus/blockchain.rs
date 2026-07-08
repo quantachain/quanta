@@ -3250,8 +3250,9 @@ mod tests {
             wallet.address.clone(),
             "0xreceiver".to_string(),
             100_000,
-            1,
+            chrono::Utc::now().timestamp(),
         );
+        tx.nonce = 1;
         tx.public_key = wallet.keypair.public_key.clone();
         tx.network_id = 1; // Mainnet
         tx.signature = wallet.keypair.sign_transaction_canonical(&tx.get_signing_bytes());
