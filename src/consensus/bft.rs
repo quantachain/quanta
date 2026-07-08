@@ -240,12 +240,16 @@ mod tests {
         let mut committee = Vec::new();
         let mut keypairs = Vec::new();
 
+        let mut vals = Vec::new();
         for _ in 0..4 {
-            let (addr, kp) = make_validator(&mut state);
+            vals.push(make_validator(&mut state));
+        }
+        vals.sort_by(|a, b| a.0.cmp(&b.0));
+
+        for (addr, kp) in vals {
             committee.push(addr);
             keypairs.push(kp);
         }
-        committee.sort();
 
         let genesis = Block::genesis();
         let mut block = Block::new_bft(1, vec![], genesis.hash.clone(), 0, 0, committee[0].clone());
@@ -254,9 +258,10 @@ mod tests {
 
         let payload = block.bft_signing_payload();
 
-        // Only 2 of 4 sign — threshold is 3, should fail
-        block.bft_signatures = vec![keypairs[0].sign_hash(&payload)];
-        block.bft_signers = vec![committee[0].clone()];
+        // Threshold is 1, but the signer MUST include the proposer (committee[0])
+        // We will sign with committee[1] instead.
+        block.bft_signatures = vec![keypairs[1].sign_hash(&payload)];
+        block.bft_signers = vec![committee[1].clone()];
         block.finalize_hash();
 
         assert!(!verify_bft_certificate(&block, &committee, &state));
