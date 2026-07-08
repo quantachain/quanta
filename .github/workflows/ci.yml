@@ -60,3 +60,23 @@ jobs:
       - name: Check for outdated dependencies
         run: cargo outdated
         continue-on-error: true
+
+  fuzz:
+    name: Fuzz Testing
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Nightly Rust toolchain
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Run Fuzz Target (30s)
+        run: cargo +nightly fuzz run fuzz_target_1 -- -max_total_time=30
+
