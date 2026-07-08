@@ -546,3 +546,79 @@ impl PeerManager {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+    use std::net::{Ipv4Addr, SocketAddrV4};
+
+    async fn create_dummy_peer(ip: Ipv4Addr) -> Arc<Peer> {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let port = addr.port();
+
+        // Spawn a client to connect so we get a real stream
+        tokio::spawn(async move {
+            let _ = TcpStream::connect(format!("127.0.0.1:{}", port)).await;
+        });
+
+        let (stream, _) = listener.accept().await.unwrap();
+        
+        // We lie about the address to test IP logic
+        let spoofed_addr = SocketAddr::V4(SocketAddrV4::new(ip, 8080));
+        let peer = Peer::new(stream, spoofed_addr).await.unwrap();
+        // Give it a dummy node id
+        peer.info.write().await.node_id = format!("node_{}", ip);
+        Arc::new(peer)
+    }
+
+    #[tokio::test]
+    async fn test_peer_manager_ban_ip() {
+        let pm = PeerManager::new(10, "my_node".to_string());
+        
+        let ip = Ipv4Addr::new(192, 168, 1, 100);
+        let peer = create_dummy_peer(ip).await;
+        
+        // Ban the IP BEFORE adding
+        pm.ban_ip(IpAddr::V4(ip)).await;
+        
+        let result = pm.add_peer(peer).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("is banned"));
+    }
+
+    #[tokio::test]
+    async fn test_sybil_protection_ipv4_subnet() {
+        let pm = PeerManager::new(10, "my_node".to_string());
+        
+        // Add two peers from the same /24 subnet (allowed, limit is 2)
+        let p1 = create_dummy_peer(Ipv4Addr::new(200, 10, 20, 1)).await;
+        let p2 = create_dummy_peer(Ipv4Addr::new(200, 10, 20, 2)).await;
+        
+        assert!(pm.add_peer(p1).await.is_ok());
+        assert!(pm.add_peer(p2).await.is_ok());
+        
+        // The third peer from the SAME /24 subnet should be REJECTED
+        let p3 = create_dummy_peer(Ipv4Addr::new(200, 10, 20, 3)).await;
+        let result = pm.add_peer(p3).await;
+        
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Sybil Protection"));
+    }
+
+    #[tokio::test]
+    async fn test_peer_misbehavior_score() {
+        let ip = Ipv4Addr::new(10, 0, 0, 1);
+        let peer = create_dummy_peer(ip).await;
+        
+        // Score starts at 0
+        assert!(!peer.add_misbehavior(50).await); // 50/100, not banned
+        assert!(!peer.add_misbehavior(20).await); // 70/100, not banned
+        assert!(peer.add_misbehavior(30).await);  // 100/100 -> Banned!
+        
+        let info = peer.get_info().await;
+        assert!(info.misbehavior_score >= 100);
+        assert_eq!(info.strikes, 3, "Legacy strikes field must sync");
+    }
+}

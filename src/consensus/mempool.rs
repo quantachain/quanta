@@ -78,3 +78,26 @@ impl MetricsCollector {
             .update_from_blockchain(height, mempool_size, last_block_time);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_node_metrics_defaults() {
+        let metrics = NodeMetrics::new();
+        assert_eq!(metrics.chain_height, 0);
+        assert_eq!(metrics.mempool_size, 0);
+    }
+
+    #[tokio::test]
+    async fn test_metrics_collector_update() {
+        let collector = MetricsCollector::new();
+        collector.update_blockchain_stats(100, 5, None).await;
+        
+        let stats = collector.get_metrics().await;
+        assert_eq!(stats.chain_height, 100);
+        assert_eq!(stats.mempool_size, 5);
+    }
+}
+

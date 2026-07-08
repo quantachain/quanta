@@ -374,3 +374,82 @@ impl Default for HDWallet {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hd_wallet_creation_and_account_generation() {
+        let mut wallet = HDWallet::new();
+        assert_eq!(wallet.accounts.len(), 0);
+
+        let account = wallet.generate_account(Some("Test Account".to_string()));
+        assert_eq!(account.index, 0);
+        assert_eq!(account.label.as_deref(), Some("Test Account"));
+        assert!(!account.encrypted_secret_key.is_empty());
+        assert_eq!(account.sk_nonce.len(), 12);
+        
+        let keypair = wallet.get_keypair(0).expect("Should decrypt correctly");
+        assert_eq!(keypair.public_key, account.public_key);
+    }
+
+    #[test]
+    fn test_hd_wallet_deterministic_recovery() {
+        // Create a wallet and generate an account
+        let mut original_wallet = HDWallet::new();
+        let original_account = original_wallet.generate_account(None);
+        let mnemonic = original_wallet.mnemonic.clone();
+
+        // Restore the wallet from the mnemonic phrase
+        let mut restored_wallet = HDWallet::from_mnemonic(mnemonic, "");
+        assert_eq!(restored_wallet.accounts.len(), 0);
+
+        // Generate the first account on the restored wallet
+        let restored_account = restored_wallet.generate_account(None);
+
+        // They must produce the exact same public key and address
+        assert_eq!(original_account.public_key, restored_account.public_key);
+        assert_eq!(original_account.address, restored_account.address);
+
+        // Decrypted keypairs must match
+        let orig_kp = original_wallet.get_keypair(0).unwrap();
+        let rest_kp = restored_wallet.get_keypair(0).unwrap();
+        assert_eq!(orig_kp.secret_key_bytes(), rest_kp.secret_key_bytes());
+    }
+
+    #[test]
+    fn test_hd_wallet_export_and_import() {
+        let mut wallet = HDWallet::new();
+        wallet.generate_account(Some("Acc 1".to_string()));
+        wallet.generate_account(Some("Acc 2".to_string()));
+
+        let password = "super_secure_password_123!";
+        let encrypted_data = wallet.export_encrypted(password).expect("Export should succeed");
+
+        // Import back
+        let imported_wallet = HDWallet::import_encrypted(&encrypted_data, password)
+            .expect("Import should succeed with correct password");
+
+        assert_eq!(wallet.mnemonic, imported_wallet.mnemonic);
+        assert_eq!(wallet.accounts.len(), imported_wallet.accounts.len());
+        assert_eq!(wallet.accounts[1].public_key, imported_wallet.accounts[1].public_key);
+
+        // Import should fail with wrong password
+        assert!(HDWallet::import_encrypted(&encrypted_data, "wrong_password").is_err());
+    }
+
+    #[test]
+    fn test_legacy_account_fails_gracefully() {
+        let mut wallet = HDWallet::new();
+        let account = wallet.generate_account(None);
+        
+        // Corrupt the account to simulate a legacy placeholder without encrypted SK
+        wallet.accounts[0].encrypted_secret_key.clear();
+
+        let result = wallet.get_keypair(0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("legacy placeholder"));
+    }
+}
+

@@ -437,3 +437,32 @@ pub async fn run_bft_proposer(
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::consensus::authorities::SESSION_LENGTH as AUTHORITIES_SESSION_LENGTH;
+
+    #[test]
+    fn test_session_length_constant_match() {
+        // bft_proposer should use the exact same constant from authorities
+        assert_eq!(
+            SESSION_LENGTH, AUTHORITIES_SESSION_LENGTH,
+            "Session lengths must match across modules"
+        );
+    }
+
+    #[test]
+    fn test_session_rotation_math() {
+        let current_height = 299;
+        let current_session = current_height / SESSION_LENGTH;
+        assert_eq!(current_session, 4); // 299 / 60 = 4 (integer math)
+
+        let next_height = 300;
+        let next_session = next_height / SESSION_LENGTH;
+        assert_eq!(next_session, 5); // 300 / 60 = 5
+
+        assert!(next_session > current_session, "Session should rotate at boundaries");
+    }
+}
+

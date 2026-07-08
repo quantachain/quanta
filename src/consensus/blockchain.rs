@@ -3168,6 +3168,22 @@ mod tests {
         assert_eq!(reward, YEAR_1_REWARD);
     }
 
+    /// After 10 years, reward should be reduced roughly down to ~10M
+    #[test]
+    fn test_reward_decade_reduction() {
+        let reward = apply_annual_reduction(YEAR_1_REWARD, 10);
+        assert!(reward < YEAR_1_REWARD, "Decade reward must be lower");
+        assert!(reward > MIN_REWARD, "Decade reward must be higher than floor");
+    }
+
+    /// After 10 years, reward should be reduced roughly down to ~10M
+    #[test]
+    fn test_reward_decade_reduction() {
+        let reward = apply_annual_reduction(YEAR_1_REWARD, 10);
+        assert!(reward < YEAR_1_REWARD, "Decade reward must be lower");
+        assert!(reward > MIN_REWARD, "Decade reward must be higher than floor");
+    }
+
     /// After 20+ years reward must not drop below MIN_REWARD floor
     #[test]
     fn test_reward_floor_after_many_years() {
@@ -3220,5 +3236,34 @@ mod tests {
             TREASURY_ADDRESS, "ms69216b1d10425689704d5ae3b2a4aa17049f59b1",
             "TREASURY_ADDRESS changed! Update this test AND generate a new genesis block."
         );
+    }
+
+    // ─── Mempool Tests ────────────────────────────────────────────────────────
+    
+    use tempfile::tempdir;
+    use crate::core::transaction::Transaction;
+    use crate::crypto::wallet::QuantumWallet;
+
+    #[tokio::test]
+    async fn test_mempool_rejects_duplicates() {
+        let dir = tempdir().unwrap();
+        let mut blockchain = Blockchain::new(dir.path().to_str().unwrap()).unwrap();
+        
+        let wallet = QuantumWallet::new();
+        let mut tx = Transaction::new(
+            wallet.address.clone(),
+            "0xreceiver".to_string(),
+            100_000,
+            1,
+            None,
+        );
+        tx.sign(&wallet).unwrap();
+        
+        // First addition should succeed
+        assert!(blockchain.add_transaction_to_mempool(tx.clone()).is_ok());
+        
+        // Second addition of the exact same tx should fail (DuplicateTransaction)
+        let result = blockchain.add_transaction_to_mempool(tx);
+        assert!(matches!(result, Err(BlockchainError::DuplicateTransaction)));
     }
 }

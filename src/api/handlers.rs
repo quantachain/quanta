@@ -935,3 +935,36 @@ async fn list_agents(
         Json(serde_json::json!({ "agents": agents, "count": count })),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_uptime_window_constant() {
+        // UPTIME_WINDOW = 200 blocks. At 6s per block, this is 1200s (20 mins).
+        assert_eq!(UPTIME_WINDOW, 200, "Uptime window must remain 200 blocks");
+    }
+
+    #[test]
+    fn test_address_txs_query_defaults() {
+        let q_none = AddressTxsQuery { max_blocks: None };
+        assert_eq!(q_none.max_blocks.unwrap_or(100).min(1000), 100);
+
+        let q_some = AddressTxsQuery { max_blocks: Some(500) };
+        assert_eq!(q_some.max_blocks.unwrap_or(100).min(1000), 500);
+
+        let q_cap = AddressTxsQuery { max_blocks: Some(5000) };
+        assert_eq!(q_cap.max_blocks.unwrap_or(100).min(1000), 1000, "Must be capped at 1000");
+    }
+
+    #[test]
+    fn test_latest_blocks_query_defaults() {
+        let q_none = LatestBlocksQuery { count: None };
+        assert_eq!(q_none.count.unwrap_or(10).min(100), 10);
+
+        let q_cap = LatestBlocksQuery { count: Some(500) };
+        assert_eq!(q_cap.count.unwrap_or(10).min(100), 100, "Must be capped at 100");
+    }
+}
+

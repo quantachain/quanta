@@ -127,3 +127,31 @@ impl aleph_bft::FinalizationHandler<Block> for QuantaFinalizationHandler {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aleph_bft::FinalizationHandler;
+    
+    #[test]
+    fn test_finalization_handler_sends_block() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut handler = QuantaFinalizationHandler::new(tx);
+        
+        let block = Block::genesis();
+        let hash = block.hash.clone();
+        
+        // Finalize
+        handler.data_finalized(block);
+        
+        // Receive
+        let received = rx.try_recv().expect("Block should be sent across channel");
+        assert_eq!(received.hash, hash);
+    }
+    
+    #[test]
+    fn test_slot_seconds_constant() {
+        assert_eq!(SLOT_SECONDS, 6, "Slot time must be 6 seconds per protocol spec");
+    }
+}
+

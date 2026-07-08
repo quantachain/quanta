@@ -105,3 +105,51 @@ pub fn resolve_committee_keys(
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_epoch_math() {
+        assert_eq!(epoch_for_height(0), 0);
+        assert_eq!(epoch_for_height(999), 0);
+        assert_eq!(epoch_for_height(1000), 1);
+        assert_eq!(epoch_for_height(2500), 2);
+
+        assert_eq!(epoch_start(0), 0);
+        assert_eq!(epoch_start(1), 1000);
+        assert_eq!(epoch_start(5), 5000);
+    }
+
+    #[test]
+    fn test_proposer_rotation() {
+        let committee = vec![
+            "addrA".to_string(),
+            "addrB".to_string(),
+            "addrC".to_string(),
+        ];
+
+        // height = 0, round = 0 -> slot 0 -> addrA
+        assert_eq!(get_proposer(0, 0, 0, &committee).unwrap(), "addrA");
+        
+        // height = 1, round = 0 -> slot 1 -> addrB
+        assert_eq!(get_proposer(0, 1, 0, &committee).unwrap(), "addrB");
+
+        // height = 2, round = 0 -> slot 2 -> addrC
+        assert_eq!(get_proposer(0, 2, 0, &committee).unwrap(), "addrC");
+
+        // height = 3, round = 0 -> slot 3 -> loops back to addrA
+        assert_eq!(get_proposer(0, 3, 0, &committee).unwrap(), "addrA");
+
+        // Round logic: height = 1, round = 1 -> slot 2 -> addrC
+        assert_eq!(get_proposer(0, 1, 1, &committee).unwrap(), "addrC");
+    }
+
+    #[test]
+    fn test_empty_committee_proposer() {
+        let committee: Vec<String> = vec![];
+        assert_eq!(get_proposer(0, 0, 0, &committee), None);
+    }
+}
+

@@ -152,3 +152,80 @@ impl aleph_bft::Hasher for QuantaHasher {
         hash_arr
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aleph_bft::Hasher;
+    
+    #[test]
+    fn test_hasher() {
+        let msg = b"test message";
+        let hash1 = QuantaHasher::hash(msg);
+        let hash2 = QuantaHasher::hash(msg);
+        assert_eq!(hash1, hash2, "Hasher must be deterministic");
+        
+        let hash3 = QuantaHasher::hash(b"different message");
+        assert_ne!(hash1, hash3, "Different messages must have different hashes");
+    }
+
+    #[test]
+    fn test_keychain_signature_and_verify() {
+        let wallet = Arc::new(QuantumWallet::new());
+        let pubkey = wallet.keypair.public_key_bytes();
+        
+        let keychain = QuantaKeychain::new(
+            wallet,
+            NodeIndex(0),
+            NodeCount(1),
+            vec![pubkey.to_vec()],
+        );
+        
+        let msg = b"consensus message";
+        let signature = keychain.sign(msg);
+        
+        // Should verify our own signature
+        assert!(keychain.verify(msg, &signature, NodeIndex(0)));
+        
+        // Should fail on wrong node index
+        assert!(!keychain.verify(msg, &signature, NodeIndex(1)));
+        
+        // Should fail on tampered message
+        assert!(!keychain.verify(b"tampered", &signature, NodeIndex(0)));
+    }
+
+    #[test]
+    fn test_multisignature_is_complete() {
+        let w1 = Arc::new(QuantumWallet::new());
+        let w2 = Arc::new(QuantumWallet::new());
+        let w3 = Arc::new(QuantumWallet::new());
+        let w4 = Arc::new(QuantumWallet::new()); // 4 nodes -> required 3 sigs
+        
+        let pubkeys = vec![
+            w1.keypair.public_key_bytes().to_vec(),
+            w2.keypair.public_key_bytes().to_vec(),
+            w3.keypair.public_key_bytes().to_vec(),
+            w4.keypair.public_key_bytes().to_vec(),
+        ];
+        
+        let keychain1 = QuantaKeychain::new(w1, NodeIndex(0), NodeCount(4), pubkeys.clone());
+        let keychain2 = QuantaKeychain::new(w2, NodeIndex(1), NodeCount(4), pubkeys.clone());
+        let keychain3 = QuantaKeychain::new(w3, NodeIndex(2), NodeCount(4), pubkeys.clone());
+        
+        let msg = b"block hash";
+        
+        let sig1 = keychain1.sign(msg);
+        let sig2 = keychain2.sign(msg);
+        let sig3 = keychain3.sign(msg);
+        
+        let mut multisig = keychain1.bootstrap_multi(&sig1, NodeIndex(0));
+        assert!(!keychain1.is_complete(msg, &multisig), "1 sig not enough");
+        
+        multisig = SignatureSet::add_signature(multisig, &sig2, NodeIndex(1));
+        assert!(!keychain1.is_complete(msg, &multisig), "2 sigs not enough for 4 nodes (needs 3)");
+        
+        multisig = SignatureSet::add_signature(multisig, &sig3, NodeIndex(2));
+        assert!(keychain1.is_complete(msg, &multisig), "3 sigs should be complete");
+    }
+}
+

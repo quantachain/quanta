@@ -293,3 +293,19 @@ impl QuantumWallet {
         println!("\n");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_quantum_wallet_creation() {
+        let wallet = QuantumWallet::new();
+        assert!(!wallet.address.is_empty(), "Wallet address must not be empty");
+        assert!(wallet.address.starts_with("0x"), "Wallet address must start with 0x");
+        
+        let wallet2 = QuantumWallet::new();
+        assert_ne!(wallet.address, wallet2.address, "Wallets must generate unique addresses");
+    }
+}
+

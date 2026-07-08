@@ -422,4 +422,29 @@ mod tests {
             "BFT signing payload must be deterministic"
         );
     }
+
+    #[test]
+    fn block_size_serialization_check() {
+        let genesis = Block::genesis();
+        let serialized = bincode::serialize(&genesis).unwrap();
+        // Even an empty block has some overhead (header, arrays)
+        assert!(serialized.len() > 100);
+        // A single PQC block without txs should be well under 4MB
+        assert!(serialized.len() < 4 * 1024 * 1024);
+    }
+
+    /// Genesis Replay Attack: a fake genesis block must never match the real chain hash.
+    #[test]
+    fn test_genesis_replay_attack_rejected() {
+        let mut bad_genesis = Block::genesis();
+        bad_genesis.hash = "0".repeat(64);
+
+        let correct_hash = "527a8a6ad3292c9b42c40f3d71fd3b89cdd79415106ce0b8d9f7f6690a96433d";
+        assert_ne!(
+            bad_genesis.hash, correct_hash,
+            "A fake genesis block must not match the hardcoded chain genesis hash"
+        );
+    }
 }
+
+

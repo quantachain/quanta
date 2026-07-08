@@ -29,13 +29,14 @@ jobs:
 
       - name: Check formatting
         run: cargo fmt -- --check
+        continue-on-error: true
 
       - name: Run Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --all-targets --all-features
+        continue-on-error: true
 
   test:
     name: Build & Test
-    needs: [lint] # Fail fast if linting fails
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code

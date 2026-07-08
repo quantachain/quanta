@@ -197,3 +197,44 @@ pub fn deserialize_message(data: &[u8]) -> Result<P2PMessage, String> {
 
     Ok(wrapped.message)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_message_size_limit() {
+        let large_data = vec![0u8; MAX_MESSAGE_SIZE + 1];
+        let result = deserialize_message(&large_data);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Message too large");
+    }
+
+    #[test]
+    fn test_invalid_network_magic() {
+        let msg = P2PMessage::Ping;
+        // Create a wrapper with BAD magic bytes
+        let bad_wrapper = NetworkMessage {
+            magic: [0x00, 0x00, 0x00, 0x00],
+            message: msg,
+        };
+        let data = bincode::serialize(&bad_wrapper).unwrap();
+        
+        let result = deserialize_message(&data);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Network magic mismatch"));
+    }
+
+    #[test]
+    fn test_valid_network_magic() {
+        let msg = P2PMessage::Ping;
+        let good_wrapper = NetworkMessage {
+            magic: NETWORK_MAGIC,
+            message: msg,
+        };
+        let data = bincode::serialize(&good_wrapper).unwrap();
+        
+        let result = deserialize_message(&data);
+        assert!(result.is_ok());
+    }
+}

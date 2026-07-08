@@ -1476,3 +1476,25 @@ impl Network {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_network_config_default_generates_unique_node_ids() {
+        let cfg1 = NetworkConfig::default();
+        let cfg2 = NetworkConfig::default();
+        
+        assert_ne!(cfg1.node_id, cfg2.node_id, "Default configs must generate unique UUID node IDs");
+        assert_eq!(cfg1.max_peers, 125, "Default max_peers should be 125");
+        assert_eq!(cfg1.listen_addr.to_string(), "0.0.0.0:8333");
+    }
+
+    #[test]
+    fn test_sync_batch_constants() {
+        assert!(MAX_SYNC_BATCH <= 1000, "MAX_SYNC_BATCH must be reasonable to prevent memory exhaustion");
+        assert!(MAX_HEADERS_PER_RESPONSE <= 5000, "MAX_HEADERS_PER_RESPONSE must prevent oversized packets");
+    }
+}
+

@@ -233,3 +233,75 @@ impl MerkleProof {
         self.verify(&root_hash)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_hash(val: u8) -> Hash {
+        let mut h = [0u8; 32];
+        h[0] = val;
+        h
+    }
+
+    #[test]
+    fn test_empty_tree() {
+        let tree = MerkleTree::from_hashes_bytes(vec![]);
+        assert!(tree.root_hash_bytes().is_none());
+        assert!(tree.verify_tree());
+    }
+
+    #[test]
+    fn test_single_leaf_tree() {
+        let h1 = dummy_hash(1);
+        let tree = MerkleTree::from_hashes_bytes(vec![h1]);
+        
+        // Root of single leaf should be the leaf itself
+        assert_eq!(tree.root_hash_bytes().unwrap(), h1);
+        assert!(tree.verify_tree());
+
+        let proof = tree.generate_proof(&h1).unwrap();
+        assert!(proof.proof.is_empty(), "Single leaf proof has no siblings");
+        assert!(proof.verify(&h1));
+    }
+
+    #[test]
+    fn test_multiple_leaves_and_proofs() {
+        let hashes = vec![dummy_hash(1), dummy_hash(2), dummy_hash(3), dummy_hash(4)];
+        let tree = MerkleTree::from_hashes_bytes(hashes.clone());
+        assert!(tree.verify_tree());
+
+        let root = tree.root_hash_bytes().unwrap();
+
+        // Verify proofs for all leaves
+        for h in hashes {
+            let proof = tree.generate_proof(&h).expect("Proof should generate");
+            assert!(proof.verify(&root), "Proof should verify successfully");
+        }
+    }
+
+    #[test]
+    fn test_invalid_proof() {
+        let hashes = vec![dummy_hash(1), dummy_hash(2)];
+        let tree = MerkleTree::from_hashes_bytes(hashes.clone());
+        let root = tree.root_hash_bytes().unwrap();
+
+        let mut proof = tree.generate_proof(&hashes[0]).unwrap();
+        assert!(proof.verify(&root));
+
+        // Tamper with the sibling hash in the proof
+        proof.proof[0].0 = dummy_hash(99);
+        assert!(!proof.verify(&root), "Tampered proof must fail");
+    }
+
+    #[test]
+    fn test_odd_number_of_leaves() {
+        let hashes = vec![dummy_hash(1), dummy_hash(2), dummy_hash(3)];
+        let tree = MerkleTree::from_hashes_bytes(hashes.clone());
+        let root = tree.root_hash_bytes().unwrap();
+
+        let proof = tree.generate_proof(&hashes[2]).unwrap();
+        assert!(proof.verify(&root));
+    }
+}
+

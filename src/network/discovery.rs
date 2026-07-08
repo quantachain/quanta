@@ -363,4 +363,30 @@ mod tests {
             "Should select peers from the discovery pool"
         );
     }
+
+    /// DDoS Protection: 4 strikes trigger a 24-hour ban.
+    #[tokio::test]
+    async fn test_ddos_protection_bans_rapidly() {
+        let discovery = PeerDiscovery::with_dns_seeds(vec![], vec![]);
+        let malicious_ip: SocketAddr = "10.0.0.99:8333".parse().unwrap();
+
+        discovery
+            .add_peer_with_source(malicious_ip, PeerSource::Discovered)
+            .await;
+
+        assert!(!discovery.is_banned(&malicious_ip).await);
+        let meta = discovery.get_peer_meta(&malicious_ip).await.unwrap();
+        assert_eq!(meta.failures, 0);
+
+        discovery.mark_peer_failed(malicious_ip).await;
+        discovery.mark_peer_failed(malicious_ip).await;
+        discovery.mark_peer_failed(malicious_ip).await;
+        discovery.mark_peer_failed(malicious_ip).await; // triggers ban
+
+        assert!(discovery.is_banned(&malicious_ip).await);
+        let meta_after = discovery.get_peer_meta(&malicious_ip).await.unwrap();
+        assert!(meta_after.failures >= 3);
+        assert!(meta_after.reputation <= -20);
+    }
 }
+

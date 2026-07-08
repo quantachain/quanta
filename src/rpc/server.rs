@@ -226,3 +226,43 @@ async fn handle_shutdown(_state: &AppState) -> JsonRpcResponse {
 
     JsonRpcResponse::success(1, serde_json::json!({ "message": "Shutting down..." }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rpc_server_config() {
+        // Just verify struct fields don't cross boundaries unexpectedly
+        let blockchain = Arc::new(RwLock::new(Blockchain::new()));
+        let server = RpcServer::new(blockchain, None, 8000, 8001, 8002);
+        
+        assert_eq!(server.api_port, 8000);
+        assert_eq!(server.network_port, 8001);
+        assert_eq!(server.rpc_port, 8002);
+    }
+
+    #[tokio::test]
+    async fn test_rpc_missing_params_rejection() {
+        let blockchain = Arc::new(RwLock::new(Blockchain::new()));
+        let state = AppState {
+            blockchain,
+            network: None,
+            start_time: Arc::new(RwLock::new(Instant::now())),
+            api_port: 8000,
+            network_port: 8001,
+            rpc_port: 8002,
+        };
+
+        // get_block missing height
+        let bad_params_block = serde_json::json!({});
+        let res_block = handle_get_block(&state, &bad_params_block).await;
+        assert_eq!(res_block.error.unwrap().code, -32602);
+
+        // get_balance missing address
+        let bad_params_balance = serde_json::json!({});
+        let res_balance = handle_get_balance(&state, &bad_params_balance).await;
+        assert_eq!(res_balance.error.unwrap().code, -32602);
+    }
+}
+
