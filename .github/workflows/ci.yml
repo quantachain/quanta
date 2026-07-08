@@ -77,6 +77,9 @@ jobs:
       - name: Install cargo-fuzz
         run: cargo install cargo-fuzz --version 0.11.0 --locked
 
-      - name: Run Fuzz Target (30s)
+      - name: Run Fuzz Target (Network Deserializer)
         run: cargo +nightly fuzz run fuzz_target_1 -- -max_total_time=30
+        
+      - name: Run Fuzz Target (Transaction Verifier)
+        run: cargo +nightly fuzz run fuzz_transaction -- -max_total_time=30
 
