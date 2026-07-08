@@ -1321,8 +1321,8 @@ mod tests {
         tx.nonce = 1;
         tx.payload = b"{\"ai_agent\":\"alpha\",\"task\":\"fetch_data\"}".to_vec();
 
-        let signing_data = tx.get_signing_data();
-        tx.signature = kp.sign_transaction_canonical(&signing_data);
+        let signing_bytes = tx.get_signing_bytes();
+        tx.signature = kp.sign_transaction_canonical(&signing_bytes);
 
         assert!(
             tx.verify(),

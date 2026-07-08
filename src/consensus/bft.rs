@@ -202,12 +202,16 @@ mod tests {
         let mut committee = Vec::new();
         let mut keypairs = Vec::new();
 
+        let mut vals = Vec::new();
         for _ in 0..3 {
-            let (addr, kp) = make_validator(&mut state);
+            vals.push(make_validator(&mut state));
+        }
+        vals.sort_by(|a, b| a.0.cmp(&b.0)); // sort by address
+
+        for (addr, kp) in vals {
             committee.push(addr);
             keypairs.push(kp);
         }
-        committee.sort(); // match compute_epoch_committee sort order
 
         let genesis = Block::genesis();
         let mut block = Block::new_bft(1, vec![], genesis.hash.clone(), 0, 0, committee[0].clone());

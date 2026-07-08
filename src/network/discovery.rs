@@ -137,8 +137,8 @@ impl PeerDiscovery {
             let reputation = meta.reputation;
             let is_seed = meta.source == PeerSource::Seed;
 
-            // Ban logic: 3 strikes with low reputation
-            if (failures > 3 && reputation < -20) || failures > 10 {
+            // Ban logic: 4 strikes with low reputation
+            if (failures >= 4 && reputation <= -20) || failures > 10 {
                 if !is_seed {
                     // FIX: Reduce ban to 60 seconds (down from 24 hours) to prevent
                     // FIX: Use shared ban duration from PeerManager

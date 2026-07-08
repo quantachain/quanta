@@ -3252,6 +3252,7 @@ mod tests {
             1,
         );
         tx.public_key = wallet.keypair.public_key.clone();
+        tx.network_id = 1; // Mainnet
         tx.signature = wallet.keypair.sign_transaction_canonical(&tx.get_signing_bytes());
         
         // First addition should succeed

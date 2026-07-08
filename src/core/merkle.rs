@@ -169,12 +169,12 @@ impl MerkleTree {
 
                 if target_index < mid {
                     // Target is in left subtree, add right sibling
-                    proof.push((*right.hash(), false)); // false = right
                     self.collect_proof(left, target_index, start, mid, proof);
+                    proof.push((*right.hash(), false)); // false = right
                 } else {
                     // Target is in right subtree, add left sibling
-                    proof.push((*left.hash(), true)); // true = left
                     self.collect_proof(right, target_index, mid, end, proof);
+                    proof.push((*left.hash(), true)); // true = left
                 }
             }
         }

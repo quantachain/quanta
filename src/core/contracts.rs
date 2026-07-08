@@ -761,9 +761,8 @@ mod tests {
             },
         );
         let addr = NativeContracts::generate_address(&t.hash());
-        let mut t2 = t.clone();
-        t2.recipient = addr.clone();
-        state.credit_account(&t2, 100, 0);
+        state.credit_account(&t, 100, 0);
+        state.credit_account_direct(&addr, t.amount);
         let claim_args = serde_json::to_vec(&EscrowClaimArgs {
             preimage: hex::encode(pre),
         })
@@ -811,9 +810,8 @@ mod tests {
             },
         );
         let addr = NativeContracts::generate_address(&t.hash());
-        let mut t2 = t.clone();
-        t2.recipient = addr.clone();
-        state.credit_account(&t2, 100, 0);
+        state.credit_account(&t, 100, 0);
+        state.credit_account_direct(&addr, t.amount);
         let ca = serde_json::to_vec(&AgentJobClaimArgs {
             result_hash: "result_cid".into(),
         })
@@ -857,9 +855,8 @@ mod tests {
             },
         );
         let addr = NativeContracts::generate_address(&t.hash());
-        let mut t2 = t.clone();
-        t2.recipient = addr.clone();
-        state.credit_account(&t2, 0, 0);
+        state.credit_account(&t, 0, 0);
+        state.credit_account_direct(&addr, t.amount);
         let wt = tx(
             "0xrecip",
             &addr,
@@ -893,9 +890,8 @@ mod tests {
             },
         );
         let addr = NativeContracts::generate_address(&t.hash());
-        let mut t2 = t.clone();
-        t2.recipient = addr.clone();
-        state.credit_account(&t2, 100, 0);
+        state.credit_account(&t, 100, 0);
+        state.credit_account_direct(&addr, t.amount);
         let ba = serde_json::to_vec(&AgentBidSubmitArgs {
             result_hash: "r1".into(),
             price: 60_000,
