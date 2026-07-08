@@ -34,7 +34,7 @@ mod tests {
     #[test]
     fn test_parallel_verification_fast_path() {
         // Create a dummy coinbase transaction which should be fast-pathed
-        let mut coinbase_tx = Transaction::new("COINBASE".to_string(), "Alice".to_string(), 50_000_000);
+        let mut coinbase_tx = Transaction::new("COINBASE".to_string(), "Alice".to_string(), 50_000_000, 1_700_000_000);
         coinbase_tx.signature = vec![]; // Invalid signature, but it's a coinbase so it should pass the fast-path
         
         let txs = vec![coinbase_tx];

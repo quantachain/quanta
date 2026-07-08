@@ -3170,12 +3170,6 @@ mod tests {
 
     /// After 10 years, reward should be reduced roughly down to ~10M
     #[test]
-    fn test_reward_decade_reduction() {
-        let reward = apply_annual_reduction(YEAR_1_REWARD, 10);
-        assert!(reward < YEAR_1_REWARD, "Decade reward must be lower");
-        assert!(reward > MIN_REWARD, "Decade reward must be higher than floor");
-    }
-
     /// After 10 years, reward should be reduced roughly down to ~10M
     #[test]
     fn test_reward_decade_reduction() {
@@ -3247,7 +3241,8 @@ mod tests {
     #[tokio::test]
     async fn test_mempool_rejects_duplicates() {
         let dir = tempdir().unwrap();
-        let mut blockchain = Blockchain::new(dir.path().to_str().unwrap()).unwrap();
+        let storage = Arc::new(crate::storage::db::BlockchainStorage::new(dir.path().to_str().unwrap()).unwrap());
+        let mut blockchain = Blockchain::new(storage, crate::core::ChainNetwork::Mainnet).unwrap();
         
         let wallet = QuantumWallet::new();
         let mut tx = Transaction::new(
@@ -3255,15 +3250,15 @@ mod tests {
             "0xreceiver".to_string(),
             100_000,
             1,
-            None,
         );
-        tx.sign(&wallet).unwrap();
+        tx.public_key = wallet.keypair.public_key.clone();
+        tx.signature = wallet.keypair.sign_transaction_canonical(&tx.get_signing_bytes());
         
         // First addition should succeed
-        assert!(blockchain.add_transaction_to_mempool(tx.clone()).is_ok());
+        assert!(blockchain.add_transaction(tx.clone()).is_ok());
         
         // Second addition of the exact same tx should fail (DuplicateTransaction)
-        let result = blockchain.add_transaction_to_mempool(tx);
+        let result = blockchain.add_transaction(tx);
         assert!(matches!(result, Err(BlockchainError::DuplicateTransaction)));
     }
 }

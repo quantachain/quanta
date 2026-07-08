@@ -260,7 +260,7 @@ impl Network {
                     let message_tx = self.message_tx.clone();
                     let peer_manager = Arc::clone(&self.peer_manager);
                     let blockchain = Arc::clone(&self.blockchain);
-                    let discovery = Arc::clone(&self.discovery);
+                    let _discovery = Arc::clone(&self.discovery);
                     let node_id = self.config.node_id.clone();
 
                     tokio::spawn(async move {

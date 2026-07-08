@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn test_keychain_signature_and_verify() {
         let wallet = Arc::new(QuantumWallet::new());
-        let pubkey = wallet.keypair.public_key_bytes();
+        let pubkey = wallet.keypair.public_key.clone();
         
         let keychain = QuantaKeychain::new(
             wallet,
@@ -202,10 +202,10 @@ mod tests {
         let w4 = Arc::new(QuantumWallet::new()); // 4 nodes -> required 3 sigs
         
         let pubkeys = vec![
-            w1.keypair.public_key_bytes().to_vec(),
-            w2.keypair.public_key_bytes().to_vec(),
-            w3.keypair.public_key_bytes().to_vec(),
-            w4.keypair.public_key_bytes().to_vec(),
+            w1.keypair.public_key.clone(),
+            w2.keypair.public_key.clone(),
+            w3.keypair.public_key.clone(),
+            w4.keypair.public_key.clone(),
         ];
         
         let keychain1 = QuantaKeychain::new(w1, NodeIndex(0), NodeCount(4), pubkeys.clone());

@@ -442,7 +442,7 @@ mod tests {
     #[test]
     fn test_legacy_account_fails_gracefully() {
         let mut wallet = HDWallet::new();
-        let account = wallet.generate_account(None);
+        let _account = wallet.generate_account(None);
         
         // Corrupt the account to simulate a legacy placeholder without encrypted SK
         wallet.accounts[0].encrypted_secret_key.clear();

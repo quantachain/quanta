@@ -230,11 +230,16 @@ async fn handle_shutdown(_state: &AppState) -> JsonRpcResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::db::BlockchainStorage;
+    use crate::core::ChainNetwork;
+    use tempfile::tempdir;
 
     #[test]
     fn test_rpc_server_config() {
+        let dir = tempdir().unwrap();
+        let storage = Arc::new(BlockchainStorage::new(dir.path().to_str().unwrap()).unwrap());
         // Just verify struct fields don't cross boundaries unexpectedly
-        let blockchain = Arc::new(RwLock::new(Blockchain::new()));
+        let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, ChainNetwork::Mainnet).unwrap()));
         let server = RpcServer::new(blockchain, None, 8000, 8001, 8002);
         
         assert_eq!(server.api_port, 8000);
@@ -244,7 +249,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_rpc_missing_params_rejection() {
-        let blockchain = Arc::new(RwLock::new(Blockchain::new()));
+        let dir = tempdir().unwrap();
+        let storage = Arc::new(BlockchainStorage::new(dir.path().to_str().unwrap()).unwrap());
+        let blockchain = Arc::new(RwLock::new(Blockchain::new(storage, ChainNetwork::Mainnet).unwrap()));
         let state = AppState {
             blockchain,
             network: None,

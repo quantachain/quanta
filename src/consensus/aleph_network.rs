@@ -150,7 +150,7 @@ mod tests {
 
     #[test]
     fn test_bridge_initialization() {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (_tx, _rx) = mpsc::unbounded_channel::<Vec<u8>>();
         let committee = vec!["0x123".to_string(), "0x456".to_string()];
         
         // Use a dummy network but since Network is complex to initialize, 

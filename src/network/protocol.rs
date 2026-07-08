@@ -212,7 +212,7 @@ mod tests {
 
     #[test]
     fn test_invalid_network_magic() {
-        let msg = P2PMessage::Ping;
+        let msg = P2PMessage::Ping(1234);
         // Create a wrapper with BAD magic bytes
         let bad_wrapper = NetworkMessage {
             magic: [0x00, 0x00, 0x00, 0x00],
@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn test_valid_network_magic() {
-        let msg = P2PMessage::Ping;
+        let msg = P2PMessage::Ping(1234);
         let good_wrapper = NetworkMessage {
             magic: NETWORK_MAGIC,
             message: msg,
