@@ -90,21 +90,18 @@ impl MerkleTree {
     }
 
     /// Build the tree recursively - hashes RAW BYTES, not strings
+    ///
+    /// Leaves are split at `ceil(n / 2)`: the left subtree takes the extra leaf when
+    /// `n` is odd. No leaf is ever duplicated, so the tree is not vulnerable to the
+    /// CVE-2012-2459 style root collision. `collect_proof` must use this same midpoint.
     fn build_tree(hashes: &[Hash]) -> MerkleNode {
         if hashes.len() == 1 {
             return MerkleNode::Leaf { hash: hashes[0] };
         }
 
-        let mid = (hashes.len() + 1) / 2;
-        let left_hashes = &hashes[..mid];
-        let right_hashes = if mid < hashes.len() {
-            &hashes[mid..]
-        } else {
-            &hashes[mid - 1..mid] // Duplicate last if odd (STANDARDIZED)
-        };
-
-        let left = Self::build_tree(left_hashes);
-        let right = Self::build_tree(right_hashes);
+        let mid = hashes.len().div_ceil(2);
+        let left = Self::build_tree(&hashes[..mid]);
+        let right = Self::build_tree(&hashes[mid..]);
 
         // CRITICAL: Concatenate BYTES, not strings
         let mut combined = Vec::with_capacity(64);
@@ -165,7 +162,10 @@ impl MerkleTree {
         match node {
             MerkleNode::Leaf { .. } => {}
             MerkleNode::Branch { left, right, .. } => {
-                let mid = (start + end) / 2;
+                // Must mirror build_tree's ceil(n / 2) split, otherwise odd-sized
+                // subtrees descend into the wrong child and the proof authenticates
+                // a neighbouring leaf instead of the target.
+                let mid = start + (end - start).div_ceil(2);
 
                 if target_index < mid {
                     // Target is in left subtree, add right sibling
@@ -255,7 +255,7 @@ mod tests {
     fn test_single_leaf_tree() {
         let h1 = dummy_hash(1);
         let tree = MerkleTree::from_hashes_bytes(vec![h1]);
-        
+
         // Root of single leaf should be the leaf itself
         assert_eq!(tree.root_hash_bytes().unwrap(), h1);
         assert!(tree.verify_tree());
@@ -300,8 +300,44 @@ mod tests {
         let tree = MerkleTree::from_hashes_bytes(hashes.clone());
         let root = tree.root_hash_bytes().unwrap();
 
-        let proof = tree.generate_proof(&hashes[2]).unwrap();
-        assert!(proof.verify(&root));
+        // Every leaf must be provable, not just the last one.
+        for (i, h) in hashes.iter().enumerate() {
+            let proof = tree.generate_proof(h).expect("proof should generate");
+            assert!(proof.verify(&root), "proof for leaf {i} must verify");
+        }
+    }
+
+    /// `build_tree` splits at `ceil(n/2)`, so proof collection must descend using
+    /// the same midpoint. Any tree whose leaf count is not a power of two exercises
+    /// the mismatch.
+    #[test]
+    fn test_proofs_verify_for_every_leaf_count() {
+        for n in 1..=33usize {
+            let hashes: Vec<Hash> = (0..n).map(|i| dummy_hash(i as u8)).collect();
+            let tree = MerkleTree::from_hashes_bytes(hashes.clone());
+            let root = tree.root_hash_bytes().unwrap();
+
+            for (i, h) in hashes.iter().enumerate() {
+                let proof = tree
+                    .generate_proof(h)
+                    .unwrap_or_else(|| panic!("n={n}: proof for leaf {i} should generate"));
+                assert!(
+                    proof.verify(&root),
+                    "n={n}: proof for leaf {i} must verify against the root"
+                );
+            }
+        }
+    }
+
+    /// A proof built for one leaf must not verify when replayed for a different leaf.
+    #[test]
+    fn test_proof_does_not_verify_for_wrong_leaf() {
+        let hashes = vec![dummy_hash(1), dummy_hash(2), dummy_hash(3)];
+        let tree = MerkleTree::from_hashes_bytes(hashes.clone());
+        let root = tree.root_hash_bytes().unwrap();
+
+        let mut proof = tree.generate_proof(&hashes[0]).unwrap();
+        proof.tx_hash = hashes[1];
+        assert!(!proof.verify(&root), "proof must be bound to its own leaf");
     }
 }
-
