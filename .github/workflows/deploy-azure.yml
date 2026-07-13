@@ -100,5 +100,11 @@ jobs:
 
     - name: Teardown Infrastructure (Terraform Destroy)
       if: always()
-      run: terraform destroy -auto-approve -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" -var="node_count=${{ github.event.inputs.node_count }}"
+      run: |
+        for i in {1..4}; do
+          echo "Attempt $i to destroy infrastructure..."
+          terraform destroy -auto-approve -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" -var="node_count=${{ github.event.inputs.node_count }}" && break
+          echo "Destroy failed. Waiting 60 seconds before retrying..."
+          sleep 60
+        done
       working-directory: ./quanta-devnet
