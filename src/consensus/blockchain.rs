@@ -389,7 +389,20 @@ impl Blockchain {
             }
 
             // BOOTSTRAP BFT VALIDATORS
-            if network == ChainNetwork::Testnet {
+            if let ChainNetwork::Devnet(num_nodes) = network {
+                tracing::info!("DEVNET MODE: Bootstrapping {} validators dynamically into AccountState...", num_nodes);
+                let limit = num_nodes.min(100); // safety limit
+                for i in 0..limit {
+                    let w = crate::crypto::wallet::QuantumWallet::generate_devnet(i);
+                    let pk_bytes = w.keypair.public_key;
+                    account_state.register_validator(
+                        &w.address,
+                        pk_bytes,
+                        1_000_000_000_000,
+                        0,
+                    );
+                }
+            } else if network == ChainNetwork::Testnet {
                 tracing::info!("Bootstrapping BFT validators into AccountState...");
 
                 #[derive(serde::Deserialize)]

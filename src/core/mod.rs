@@ -28,11 +28,13 @@ use serde::{Deserialize, Serialize};
 ///   1 = Mainnet
 pub const TESTNET_NETWORK_ID: u32 = 0;
 pub const MAINNET_NETWORK_ID: u32 = 1;
+pub const DEVNET_NETWORK_ID: u32 = 99;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum ChainNetwork {
     Mainnet,
     Testnet,
+    Devnet(u32),
 }
 
 impl ChainNetwork {
@@ -42,6 +44,7 @@ impl ChainNetwork {
         match self {
             ChainNetwork::Testnet => TESTNET_NETWORK_ID,
             ChainNetwork::Mainnet => MAINNET_NETWORK_ID,
+            ChainNetwork::Devnet(_) => DEVNET_NETWORK_ID,
         }
     }
 }
