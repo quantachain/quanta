@@ -45,6 +45,18 @@ jobs:
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
 
+    - name: Sanitize Azure Credentials
+      env:
+        SUB: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        TEN: ${{ secrets.ARM_TENANT_ID }}
+        CLI: ${{ secrets.ARM_CLIENT_ID }}
+        SEC: ${{ secrets.ARM_CLIENT_SECRET }}
+      run: |
+        echo "ARM_SUBSCRIPTION_ID=$(echo -n "$SUB" | tr -d '\n\r ')" >> $GITHUB_ENV
+        echo "ARM_TENANT_ID=$(echo -n "$TEN" | tr -d '\n\r ')" >> $GITHUB_ENV
+        echo "ARM_CLIENT_ID=$(echo -n "$CLI" | tr -d '\n\r ')" >> $GITHUB_ENV
+        echo "ARM_CLIENT_SECRET=$(echo -n "$SEC" | tr -d '\n\r ')" >> $GITHUB_ENV
+
     - name: Terraform Init
       run: terraform init
       working-directory: ./quanta-devnet
@@ -52,11 +64,6 @@ jobs:
     - name: Provision Infrastructure (Terraform Apply)
       run: terraform apply -auto-approve -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" -var="node_count=${{ github.event.inputs.node_count }}"
       working-directory: ./quanta-devnet
-      env:
-        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
-        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
 
     - name: Extract Node IPs
       id: extract_ips
@@ -95,8 +102,3 @@ jobs:
       if: always()
       run: terraform destroy -auto-approve -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" -var="node_count=${{ github.event.inputs.node_count }}"
       working-directory: ./quanta-devnet
-      env:
-        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-        ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
-        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
