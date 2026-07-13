@@ -2,6 +2,11 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
+> **v2.2.9-alpha — DEVNET MODE & MERKLE PROOF FIX (2026-07-13)**
+> **NO WIPE REQUIRED.** Hot-fix release adding tools for automated cloud deployment and addressing an SPV proof bug.
+> * **Devnet Mode**: Added `--devnet <ID>` and `--devnet-nodes <N>` flags to auto-bootstrap private networks on Azure/AWS without manual wallet configuration.
+> * **Merkle Proof Bugfix**: Fixed a bug where odd-sized SPV subtrees would fail verification due to a midpoint rounding error. Proofs now correctly mirror the `ceil(n/2)` split.
+
 > **v2.2.8-alpha — BFT CONSENSUS FIX & LOG CLEANUP (2026-07-08)**
 > **NO WIPE REQUIRED.** Hot-fix release targeting two regressions introduced in v2.2.6:
 > * **Block production freeze**: Fixed a write-lock deadlock in `Peer::send_message` that caused AlephBFT to starve while all nodes appeared Online. Blocks were not produced despite a fully-connected validator set.

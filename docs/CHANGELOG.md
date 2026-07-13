@@ -9,6 +9,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.2.9] — 2026-07-13
+
+### Added
+- **Devnet Mode**: Added `--devnet <ID>` and `--devnet-nodes <N>` to auto-bootstrap deterministic Devnet testing instances without manual wallet configuration.
+- **Docker Auto-Devnet**: Removed the need for pre-generated `genesis.json` and static wallets for Devnet orchestration.
+
+### Fixed
+- **Merkle Proof Bug**: Fixed a bug where odd-sized SPV subtrees would fail verification due to a midpoint rounding error in `collect_proof`. Proof generation now strictly mirrors the `ceil(n/2)` split logic used in `build_tree`.
+
 ## [2.2.7] — 2026-07-08
 
 ### Fixed
