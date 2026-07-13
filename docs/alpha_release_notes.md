@@ -2,6 +2,11 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
+> **v2.2.10-alpha — SYBIL PROTECTION FIX (2026-07-13)**
+> **NO WIPE REQUIRED.** Hot-fix release increasing the Sybil connection limit from 2 to 100 per IP.
+> * **Sybil Limit Increased**: Increased the maximum connections allowed from a single IP to allow multiple validators to run on the same VPS without being banned.
+> * **Network Magic Updated**: Changed network magic to `Q6TE`. Ensure all nodes in your cluster are updated.
+
 > **v2.2.9-alpha — DEVNET MODE & MERKLE PROOF FIX (2026-07-13)**
 > **NO WIPE REQUIRED.** Hot-fix release adding tools for automated cloud deployment and addressing an SPV proof bug.
 > * **Devnet Mode**: Added `--devnet <ID>` and `--devnet-nodes <N>` flags to auto-bootstrap private networks on Azure/AWS without manual wallet configuration.

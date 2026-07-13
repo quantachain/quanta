@@ -9,6 +9,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.2.10] — 2026-07-13
+
+### Changed
+- **Sybil Limit Increased**: Increased the maximum connections allowed from a single IP from 2 to 100 to allow multiple validators to run on the same VPS without being banned.
+- **Network Magic Updated**: Changed network magic to `Q6TE`.
+
 ## [2.2.9] — 2026-07-13
 
 ### Added

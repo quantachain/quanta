@@ -462,9 +462,9 @@ impl PeerManager {
             peers.remove(idx);
         }
 
-        if subnet_count >= 2 {
+        if subnet_count >= 100 {
             return Err(format!(
-                "Too many connections from subnet of {} (Sybil Protection — max 2 per /24 IPv4 or /48 IPv6)",
+                "Too many connections from subnet of {} (Sybil Protection — max 100 per /24 IPv4 or /48 IPv6)",
                 peer_ip
             ));
         }
@@ -590,18 +590,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_sybil_protection_ipv4_subnet() {
-        let pm = PeerManager::new(10, "my_node".to_string());
+        let pm = PeerManager::new(110, "my_node".to_string());
         
-        // Add two peers from the same /24 subnet (allowed, limit is 2)
-        let p1 = create_dummy_peer(Ipv4Addr::new(200, 10, 20, 1)).await;
-        let p2 = create_dummy_peer(Ipv4Addr::new(200, 10, 20, 2)).await;
+        // Add 100 peers from the same /24 subnet (allowed, limit is 100)
+        for i in 1..=100 {
+            let p = create_dummy_peer(Ipv4Addr::new(200, 10, 20, i as u8)).await;
+            assert!(pm.add_peer(p).await.is_ok());
+        }
         
-        assert!(pm.add_peer(p1).await.is_ok());
-        assert!(pm.add_peer(p2).await.is_ok());
-        
-        // The third peer from the SAME /24 subnet should be REJECTED
-        let p3 = create_dummy_peer(Ipv4Addr::new(200, 10, 20, 3)).await;
-        let result = pm.add_peer(p3).await;
+        // The 101st peer from the SAME /24 subnet should be REJECTED
+        let p_reject = create_dummy_peer(Ipv4Addr::new(200, 10, 20, 101)).await;
+        let result = pm.add_peer(p_reject).await;
         
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Sybil Protection"));
