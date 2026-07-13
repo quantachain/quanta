@@ -84,8 +84,8 @@ impl QuantumWallet {
 
     /// Generate a deterministic wallet for Devnet testing
     pub fn generate_devnet(node_index: u32) -> Self {
-        use sha2::{Digest, Sha256};
-        let mut hasher = Sha256::new();
+        use sha3::{Digest, Sha3_256};
+        let mut hasher = Sha3_256::new();
         hasher.update(b"quanta-devnet-validator-");
         hasher.update(node_index.to_le_bytes());
         let seed_hash = hasher.finalize();

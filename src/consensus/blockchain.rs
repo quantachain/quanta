@@ -394,7 +394,7 @@ impl Blockchain {
                 let limit = num_nodes.min(100); // safety limit
                 for i in 0..limit {
                     let w = crate::crypto::wallet::QuantumWallet::generate_devnet(i);
-                    let pk_bytes = w.keypair.public_key;
+                    let pk_bytes = w.keypair.public_key.clone();
                     account_state.register_validator(
                         &w.address,
                         pk_bytes,
@@ -649,6 +649,7 @@ impl Blockchain {
         let checkpoints = match self.network {
             ChainNetwork::Testnet => TESTNET_CHECKPOINTS,
             ChainNetwork::Mainnet => MAINNET_CHECKPOINTS,
+            ChainNetwork::Devnet(_) => &[],
         };
         for (checkpoint_height, checkpoint_hash) in checkpoints {
             if *checkpoint_height == height {
@@ -1696,6 +1697,7 @@ impl Blockchain {
             let checkpoints = match self.network {
                 ChainNetwork::Testnet => TESTNET_CHECKPOINTS,
                 ChainNetwork::Mainnet => MAINNET_CHECKPOINTS,
+                ChainNetwork::Devnet(_) => &[],
             };
             checkpoints.iter().any(|(h, _)| *h == block.index)
         };
@@ -2918,6 +2920,7 @@ impl Blockchain {
         let checkpoints = match self.network {
             ChainNetwork::Testnet => TESTNET_CHECKPOINTS,
             ChainNetwork::Mainnet => MAINNET_CHECKPOINTS,
+            ChainNetwork::Devnet(_) => &[],
         };
         for (cp_height, cp_hash) in checkpoints {
             if *cp_height >= rollback_to && *cp_height < our_height {
@@ -3255,7 +3258,7 @@ mod tests {
     async fn test_mempool_rejects_duplicates() {
         let dir = tempdir().unwrap();
         let storage = Arc::new(crate::storage::db::BlockchainStorage::new(dir.path().to_str().unwrap()).unwrap());
-        let mut blockchain = Blockchain::new(storage, crate::core::ChainNetwork::Mainnet).unwrap();
+        let blockchain = Blockchain::new(storage, crate::core::ChainNetwork::Mainnet).unwrap();
         
         let wallet = QuantumWallet::new();
         blockchain.account_state.write().credit_account_direct(&wallet.address, 200_000);
