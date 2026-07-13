@@ -84,6 +84,15 @@ enum Commands {
         /// Validator wallet file to enable BFT block production
         #[arg(long = "validator-wallet")]
         validator_wallet: Option<String>,
+        
+        /// Devnet mode: run as node ID (generates deterministic keys, ignores genesis.json)
+        #[arg(long = "devnet")]
+        devnet: Option<u32>,
+
+        /// Total number of nodes in devnet (default 20, max 100)
+        #[arg(long = "devnet-nodes", default_value = "20")]
+        devnet_nodes: u32,
+        
         // --detach (daemon mode) is commented out for now — Unix-only, not needed yet
         // /// Run in background as daemon
         // #[arg(long)]
@@ -285,9 +294,11 @@ async fn main() {
             bootstrap,
             no_network,
             validator_wallet,
+            devnet,
+            devnet_nodes,
         } => {
             // Load configuration with RPC port override
-            let cfg = QuantaConfig::load_with_overrides(
+            let mut cfg = QuantaConfig::load_with_overrides(
                 config,
                 port,
                 network_port,
@@ -297,6 +308,14 @@ async fn main() {
                 no_network,
             )
             .expect("Failed to load configuration");
+
+            if devnet.is_some() {
+                if devnet_nodes > 100 {
+                    tracing::error!("Devnet node limit exceeded (max 100). Found: {}", devnet_nodes);
+                    std::process::exit(1);
+                }
+                cfg.network_type = crate::core::ChainNetwork::Devnet(devnet_nodes);
+            }
 
             // Set RPC port from CLI or default
             let rpc_port = rpc_port.unwrap_or(7782);
@@ -390,7 +409,9 @@ async fn main() {
                 // UUID) so that the AlephBFT network bridge can look up a peer's TCP connection
                 // from its committee index (NodeIndex → wallet address → peer.node_id → SocketAddr).
                 // Non-validator nodes keep a UUID — they don't participate in BFT committee routing.
-                let validator_node_id = if let Some(ref wf) = validator_wallet {
+                let validator_node_id = if let Some(devnet_id) = devnet {
+                    crate::crypto::wallet::QuantumWallet::generate_devnet(devnet_id).address
+                } else if let Some(ref wf) = validator_wallet {
                     let pw = std::env::var("QUANTA_WALLET_PASSWORD").unwrap_or_default();
                     match crate::crypto::wallet::QuantumWallet::load_quantum_safe(wf, &pw) {
                         Ok(w) => w.address,
@@ -463,19 +484,30 @@ async fn main() {
 
             // Start BFT Proposer if a validator wallet is provided
             if cfg.consensus_engine == crate::config::types::ConsensusEngine::Bft {
-                if let Some(wallet_file) = validator_wallet {
+                let wallet_opt = if let Some(devnet_id) = devnet {
+                    Some(crate::crypto::wallet::QuantumWallet::generate_devnet(devnet_id))
+                } else if let Some(wallet_file) = validator_wallet {
                     let password = if let Ok(p) = std::env::var("QUANTA_WALLET_PASSWORD") {
                         p
                     } else {
                         println!("Enter password for validator wallet '{}':", wallet_file);
                         rpassword::read_password().expect("Failed to read password")
                     };
-
                     match crate::crypto::wallet::QuantumWallet::load_quantum_safe(
                         &wallet_file,
                         &password,
                     ) {
-                        Ok(w) => {
+                        Ok(w) => Some(w),
+                        Err(e) => {
+                            tracing::error!("Failed to load validator wallet: {}. Node will run without proposing blocks.", e);
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+
+                if let Some(w) = wallet_opt {
                             let wallet = Arc::new(w);
                             tracing::info!(
                                 "Starting BFT Proposer for validator {}",
@@ -507,13 +539,8 @@ async fn main() {
                                 )
                                 .await;
                             });
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to load validator wallet: {}. Node will run without proposing blocks.", e);
-                        }
-                    }
                 } else {
-                    tracing::warn!("BFT Consensus is active but NO --validator-wallet was provided. This node will only sync and observe!");
+                    tracing::warn!("BFT Consensus is active but NO --validator-wallet or --devnet was provided. This node will only sync and observe!");
                 }
             }
 

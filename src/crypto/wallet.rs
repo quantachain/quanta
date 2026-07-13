@@ -82,6 +82,26 @@ impl QuantumWallet {
         Self { keypair, address }
     }
 
+    /// Generate a deterministic wallet for Devnet testing
+    pub fn generate_devnet(node_index: u32) -> Self {
+        use sha3::{Digest, Sha3_256};
+        let mut hasher = Sha3_256::new();
+        hasher.update(b"quanta-devnet-validator-");
+        hasher.update(node_index.to_le_bytes());
+        let seed_hash = hasher.finalize();
+        
+        let mut seed = [0u8; 32];
+        seed.copy_from_slice(&seed_hash);
+        
+        let keypair = FalconKeypair::generate_from_seed(seed);
+        let address = keypair.get_address();
+
+        tracing::info!("Devnet Wallet Generated for Node {}", node_index);
+        tracing::info!("Address: {}", address);
+        
+        Self { keypair, address }
+    }
+
     /// Save wallet with post-quantum encryption (CORRECT IMPLEMENTATION)
     ///
     /// SECURITY MODEL (TWO-LAYER):
