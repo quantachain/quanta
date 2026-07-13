@@ -22,6 +22,12 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
 
+    - name: Checkout Azure Scripts
+      uses: actions/checkout@v4
+      with:
+        repository: quantachain/quanta-devnet
+        path: quanta-devnet
+
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
 
@@ -41,11 +47,11 @@ jobs:
 
     - name: Terraform Init
       run: terraform init
-      working-directory: ./quanta-azure
+      working-directory: ./quanta-devnet
 
     - name: Provision Infrastructure (Terraform Apply)
       run: terraform apply -auto-approve -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" -var="node_count=${{ github.event.inputs.node_count }}"
-      working-directory: ./quanta-azure
+      working-directory: ./quanta-devnet
       env:
         ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
         ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
@@ -57,7 +63,7 @@ jobs:
       run: |
         IPS=$(terraform output -json node_ips | jq -r 'join(",")')
         echo "NODE_IPS=$IPS" >> $GITHUB_ENV
-      working-directory: ./quanta-azure
+      working-directory: ./quanta-devnet
 
     - name: Install and Start Nodes (Ansible)
       run: |
@@ -69,7 +75,7 @@ jobs:
         
         # Run playbook
         ansible-playbook -i inventory.ini playbook.yml
-      working-directory: ./quanta-azure
+      working-directory: ./quanta-devnet
       env:
         ANSIBLE_HOST_KEY_CHECKING: "False"
 
@@ -81,14 +87,14 @@ jobs:
     - name: Run Spammer Stress Test
       run: |
         python spammer.py ${{ github.event.inputs.tx_count }}
-      working-directory: ./quanta-azure
+      working-directory: ./quanta-devnet
       env:
         TARGET_IPS: ${{ env.NODE_IPS }}
 
     - name: Teardown Infrastructure (Terraform Destroy)
       if: always()
       run: terraform destroy -auto-approve -var="ssh_public_key=${{ secrets.SSH_PUBLIC_KEY }}" -var="node_count=${{ github.event.inputs.node_count }}"
-      working-directory: ./quanta-azure
+      working-directory: ./quanta-devnet
       env:
         ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
         ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
