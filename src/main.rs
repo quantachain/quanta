@@ -294,6 +294,8 @@ async fn main() {
             bootstrap,
             no_network,
             validator_wallet,
+            devnet,
+            devnet_nodes,
         } => {
             // Load configuration with RPC port override
             let mut cfg = QuantaConfig::load_with_overrides(

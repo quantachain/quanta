@@ -13,7 +13,7 @@ use crate::storage::{BlockchainStorage, StorageError};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use sha3::Digest;
+
 use std::collections::VecDeque;
 use std::sync::Arc;
 use thiserror::Error;
