@@ -34,6 +34,7 @@ jobs:
 
       - name: Remove rust-toolchain.toml
         run: rm -f rust-toolchain.toml
+        shell: bash
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
