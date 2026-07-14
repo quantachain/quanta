@@ -422,6 +422,11 @@ pub struct ValidatorInfoResponse {
     pub blocks_missed: u64,
     pub sign_rate_pct: f64,
     pub uptime_window: u64,
+    // Slashing and Unbonding details
+    pub unbonding_epoch: u64,
+    pub slash_cooldown_until_epoch: u64,
+    pub epoch_slots_assigned: u64,
+    pub epoch_slots_produced: u64,
 }
 
 #[derive(Serialize)]
@@ -444,7 +449,7 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
         signed_counts,
         actual_window,
     ): (
-        Vec<(String, Vec<u8>, u64, u64, bool)>,
+        Vec<(String, Vec<u8>, u64, u64, bool, u64, u64, u64, u64)>,
         std::collections::HashMap<String, u64>,
         std::collections::HashMap<String, u64>,
         u64,
@@ -461,6 +466,10 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
                     info.stake,
                     info.registered_height,
                     info.active,
+                    info.unbonding_epoch,
+                    info.slash_cooldown_until_epoch,
+                    info.epoch_slots_assigned,
+                    info.epoch_slots_produced,
                 )
             })
             .collect::<Vec<_>>();
@@ -471,7 +480,7 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
         let mut proposed: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
         let mut signed: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
         for h in start..height {
-            if let Some(block) = blockchain.get_block_by_height(h) {
+            if let Some(block) = blockchain.load_block_from_storage(h) {
                 *proposed.entry(block.proposer.clone()).or_insert(0) += 1;
                 for signer in &block.bft_signers {
                     *signed.entry(signer.clone()).or_insert(0) += 1;
@@ -496,7 +505,7 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
 
     let mut validators: Vec<ValidatorInfoResponse> = raw_validators
         .into_iter()
-        .map(|(address, falcon_pk, stake, registered_height, active)| {
+        .map(|(address, falcon_pk, stake, registered_height, active, unbonding, slash_cooldown, assigned, produced)| {
             let b_signed   = *signed_counts.get(&address).unwrap_or(&0);
             let b_proposed = *proposed_counts.get(&address).unwrap_or(&0);
             let b_missed   = actual_window.saturating_sub(b_signed);
@@ -513,6 +522,10 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
                 blocks_missed: b_missed,
                 sign_rate_pct: (sign_rate * 10.0).round() / 10.0, // 1 decimal place
                 uptime_window: actual_window,
+                unbonding_epoch: unbonding,
+                slash_cooldown_until_epoch: slash_cooldown,
+                epoch_slots_assigned: assigned,
+                epoch_slots_produced: produced,
                 address,
                 falcon_pk_hex: hex::encode(&falcon_pk),
                 stake_microunits: stake,
@@ -531,6 +544,85 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
         active_count,
         validators,
     })
+}
+
+async fn get_validator(
+    Path(address): Path<String>,
+    State(state): State<Arc<ApiState>>,
+) -> impl IntoResponse {
+    // Fetch peers FIRST before taking any synchronous locks to ensure the Future is Send.
+    let peers = if let Some(ref network) = state.network {
+        network.get_peers_info().await
+    } else {
+        vec![]
+    };
+
+    let blockchain = state.blockchain.read().await;
+    let account_state = blockchain.get_account_state_read();
+    
+    if let Some(info) = account_state.get_validator_info(&address) {
+        // Collect basic participation stats for the single validator
+        let height = blockchain.get_height();
+        let start = height.saturating_sub(UPTIME_WINDOW);
+        let mut b_proposed: u64 = 0;
+        let mut b_signed: u64 = 0;
+        let mut actual_window: u64 = 0;
+        
+        for h in start..height {
+            if let Some(block) = blockchain.load_block_from_storage(h) {
+                actual_window += 1;
+                if block.proposer == address {
+                    b_proposed += 1;
+                }
+                if block.bft_signers.contains(&address) {
+                    b_signed += 1;
+                }
+            }
+        }
+        
+        let b_missed = actual_window.saturating_sub(b_signed);
+        let sign_rate = if actual_window > 0 {
+            (b_signed as f64 / actual_window as f64) * 100.0
+        } else {
+            100.0
+        };
+        
+        // Check online status if network is available
+        let mut is_online = false;
+        let mut node_version = None;
+        for p in peers {
+            if p.node_id == address {
+                is_online = true;
+                node_version = Some(p.version);
+                break;
+            }
+        }
+
+        let resp = ValidatorInfoResponse {
+            is_online,
+            node_version,
+            blocks_proposed: b_proposed,
+            blocks_signed: b_signed,
+            blocks_missed: b_missed,
+            sign_rate_pct: (sign_rate * 10.0).round() / 10.0,
+            uptime_window: actual_window,
+            unbonding_epoch: info.unbonding_epoch,
+            slash_cooldown_until_epoch: info.slash_cooldown_until_epoch,
+            epoch_slots_assigned: info.epoch_slots_assigned,
+            epoch_slots_produced: info.epoch_slots_produced,
+            address: address.clone(),
+            falcon_pk_hex: hex::encode(&info.falcon_pk),
+            stake_microunits: info.stake,
+            registered_epoch: info.registered_height,
+            active: info.active,
+        };
+        (axum::http::StatusCode::OK, Json(resp)).into_response()
+    } else {
+        (
+            axum::http::StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Validator not found" })),
+        ).into_response()
+    }
 }
 
 /// Get node metrics (Prometheus format)
@@ -748,6 +840,7 @@ pub fn create_router(
         .route("/api/validate", get(validate_chain))
         .route("/api/peers", get(get_peers))
         .route("/api/validators", get(get_validators))
+        .route("/api/validators/:address", get(get_validator))
         .route("/api/metrics", get(get_metrics))
         // ── Blocks ──────────────────────────────────────────────────────
         .route("/api/block/:height", get(get_block))

@@ -26,6 +26,9 @@ pub const UNBONDING_EPOCHS: u64 = 60;
 /// Number of blocks per epoch.
 pub const EPOCH_SIZE: u64 = 1000;
 
+/// V3 Economics Activation Height
+pub const V3_ECONOMICS_HEIGHT: u64 = 100_000;
+
 /// Minimum QUA (in microunits) a validator must stake to register.
 /// 100,000 QUA — meaningful economic commitment, but low enough for testnet.
 /// Change to 1,000,000 QUA (1_000_000_000_000) for mainnet launch.

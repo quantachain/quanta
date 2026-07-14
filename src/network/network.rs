@@ -17,7 +17,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 /// Maximum blocks requested per sync batch (HIGH-2 FIX: prevents height-forgery storm)
-const MAX_SYNC_BATCH: u64 = 500;
+const MAX_SYNC_BATCH: u64 = 5000;
 
 /// Maximum headers served per GetHeaders response.
 /// 2000 = ~400 KB of compressed header data — safe for a single network message.
@@ -1092,6 +1092,9 @@ impl Network {
         // to detect potential fork points. On subsequent iterations the chain is
         // already at the right tip and we only need a small anchor window.
         let mut first_iteration = true;
+        
+        // Dynamic batching state
+        let mut dynamic_batch_size: u64 = 5000;
 
         loop {
             // Always re-read the actual chain height — it changes after every reorg/apply.
@@ -1210,12 +1213,8 @@ impl Network {
             }
 
             // Step 3: Request Full Blocks for the validated headers.
-            // CAP to 50 blocks per request — PQC blocks are ~2 MB each.
-            // 50 blocks ≈ 100 MB which transfers within ~30s on a typical VPS link.
-            // Smaller batches mean the connection is idle for shorter periods, making
-            // it less likely to be closed by the seed node's liveness checker.
-            const BLOCK_BATCH_CAP: u64 = 50;
-            let batch_end = request_end.min(request_start + BLOCK_BATCH_CAP - 1);
+            // Use the dynamically calculated batch limit.
+            let batch_end = request_end.min(request_start + dynamic_batch_size - 1);
             info!(
                 "Headers validated. Requesting full blocks [{}-{}]",
                 request_start, batch_end
@@ -1314,6 +1313,20 @@ impl Network {
                         blocks.len(), expected);
                     break;
                 }
+            }
+
+            // Dynamic Batching Logic: calculate total serialized size of blocks applied
+            if !blocks.is_empty() {
+                let mut total_bytes = 0;
+                for block in &blocks {
+                    if let Ok(size) = bincode::serialized_size(block) {
+                        total_bytes += size as usize;
+                    }
+                }
+                let avg_size = total_bytes.saturating_div(blocks.len());
+                // Target ~50 MB per payload. If blocks are 2MB, batch size drops to ~25. If 2KB, 5000.
+                dynamic_batch_size = (50_000_000 / avg_size.max(1)) as u64;
+                dynamic_batch_size = dynamic_batch_size.clamp(50, 5000);
             }
 
             // Step 4: Apply Blocks

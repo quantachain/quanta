@@ -89,7 +89,7 @@ const TARGET_BLOCK_TIME: u64 = 30; // seconds
 // Block time: SLOT_SECONDS = 6 (bft_proposer.rs)
 const YEAR_1_REWARD: u64 = 50_000_000; // 50 QUA/block — tighter emission for AI era
 const ANNUAL_REDUCTION_PERCENT: u64 = 15; // 15% smooth decay (no halving shocks)
-const MIN_REWARD: u64 = 2_000_000; // 2 QUA floor — more deflationary long-term
+const MIN_REWARD: u64 = 100_000; // 0.1 QUA floor — more deflationary long-term
 const BLOCKS_PER_YEAR: u64 = 5_256_000; // 365.25 days * 86400 / 6s (BFT SLOT_SECONDS)
 
 // UNIQUE FEATURES - Network Bootstrap
@@ -1167,9 +1167,11 @@ impl Blockchain {
 
     /// Get current BFT block reward (proposer reward = mining reward equivalent).
     fn get_block_reward(&self) -> u64 {
+        use crate::consensus::authorities::V3_ECONOMICS_HEIGHT;
         let chain_len = self.get_height();
+        let base_reward = if chain_len >= V3_ECONOMICS_HEIGHT { 500_000 } else { YEAR_1_REWARD };
         let years_elapsed = chain_len / BLOCKS_PER_YEAR;
-        apply_annual_reduction(YEAR_1_REWARD, years_elapsed).max(MIN_REWARD)
+        apply_annual_reduction(base_reward, years_elapsed).max(MIN_REWARD)
     }
 
     /// Get current difficulty — reads from STORAGE (the real chain), not the
@@ -1888,8 +1890,10 @@ impl Blockchain {
     /// CONSENSUS-CRITICAL: Must match `get_mining_reward` exactly.
     /// Pure integer math — no f64.
     fn calculate_reward_at_height(&self, height: u64) -> u64 {
+        use crate::consensus::authorities::V3_ECONOMICS_HEIGHT;
+        let base_reward = if height >= V3_ECONOMICS_HEIGHT { 500_000 } else { YEAR_1_REWARD };
         let years_elapsed = height / BLOCKS_PER_YEAR;
-        apply_annual_reduction(YEAR_1_REWARD, years_elapsed).max(MIN_REWARD)
+        apply_annual_reduction(base_reward, years_elapsed).max(MIN_REWARD)
     }
 
     /// Get median timestamp from last N blocks (prevents timestamp manipulation)

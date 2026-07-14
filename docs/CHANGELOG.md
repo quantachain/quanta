@@ -9,6 +9,16 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-07-14
+
+### Added
+- **Validator API Expansion**: `/api/validators` and `/api/validators/:address` now return advanced statistics (uptime, `blocks_signed`, lockup status, and `slash_cooldown_until_epoch`).
+- **Dynamic Batching Engine**: P2P block syncing now auto-scales batch sizes from 25 to 5,000 blocks based on exact payload bytes, preventing OOM while drastically improving sync speed on empty networks.
+
+### Changed
+- **Tokenomics V3 Target Price**: Changed block emission reward from 50 QUA to 0.5 QUA starting at Block 100,000.
+- **Protocol Version Updated**: Bumped `PROTOCOL_VERSION` to `10` to enforce node upgrades before the Tokenomics V3 cutoff height.
+
 ## [2.2.12] — 2026-07-14
 
 ### Fixed

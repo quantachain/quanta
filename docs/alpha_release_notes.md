@@ -1,6 +1,13 @@
-# QuantaChain Testnet — V2 Release (v2.2.12-alpha)
+# QuantaChain Testnet — V2 Release (v2.3.0-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.3.0-alpha — TOKENOMICS V3 & SYNC OPTIMIZATION (2026-07-14)**
+> **NO WIPE REQUIRED.** Major feature release addressing testnet sustainability and P2P sync performance.
+> * **Tokenomics V3**: Block rewards reduce to 0.5 QUA starting at Block 100,000 to align with $0.10 valuation target.
+> * **Dynamic Batching**: Node sync engine now scales batch requests dynamically up to 5,000 blocks for ultra-fast syncing.
+> * **Validator API Expansion**: `/api/validators` now exposes advanced slashing, uptime, and lockup statistics.
+> * **Protocol Bump**: Bumped PROTOCOL_VERSION to 10 to enforce network upgrades before block 100,000.
 
 > **v2.2.12-alpha — TIME WARP RECOVERY FIX (2026-07-14)**
 > **NO WIPE REQUIRED.** Hot-fix release addressing the network stall that occurred when trying to recover from the Time Warp DOS.
