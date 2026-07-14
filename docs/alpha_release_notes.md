@@ -1,6 +1,9 @@
-# QuantaChain Testnet — V2 Release (v2.3.0-alpha)
+# QuantaChain Testnet — V2 Release (v2.3.1-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.3.1-alpha — SYNC THROTTLING HOTFIX (2026-07-14)**
+> **NO WIPE REQUIRED.** Hotfix to repair a logic flaw that crippled dynamic batching performance by artificially capping sync batches to 100 blocks due to anti-gossip limits. Node syncing should now confidently scale to 5,000 blocks per network request.
 
 > **v2.3.0-alpha — TOKENOMICS V3 & SYNC OPTIMIZATION (2026-07-14)**
 > **NO WIPE REQUIRED.** Major feature release addressing testnet sustainability and P2P sync performance.

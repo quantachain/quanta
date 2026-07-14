@@ -9,6 +9,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.3.1] — 2026-07-14
+
+### Fixed
+- **Sync Throttling Bug**: Fixed a logic error in `handle_new_block` where the 100-block anti-gossip protection dropped valid sync blocks, artificially capping download speed to 100 blocks per minute. P2P block syncing will now reliably scale up to the `MAX_SYNC_BATCH` limit (5,000 blocks).
+
 ## [2.3.0] — 2026-07-14
 
 ### Added
