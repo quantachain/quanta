@@ -101,13 +101,13 @@ impl From<&Block> for BlockHeader {
 }
 
 /// Protocol constants
-pub const PROTOCOL_VERSION: u32 = 7; // v2.2.10-alpha: increase sybil limit
+pub const PROTOCOL_VERSION: u32 = 8; // v2.2.11-alpha: Time Warp DOS fix
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"Q6TE"; // Quanta V2 Testnet (v2.2.10-alpha)
+pub const TESTNET_MAGIC: [u8; 4] = *b"Q7TE"; // Quanta V2 Testnet (v2.2.11-alpha)
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;

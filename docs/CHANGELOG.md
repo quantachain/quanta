@@ -9,6 +9,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.2.11] — 2026-07-14
+
+### Fixed
+- **Time Warp Protection**: Fixed a critical vulnerability where blocks with future timestamps could cause the AlephBFT slot gate to stall indefinitely, resulting in a complete network consensus halt. The slot gate now uses local system time to measure elapsed time, and the maximum allowed future timestamp drift for blocks has been reduced from 2 hours (7200 seconds) to 15 seconds.
+- **Monotonic Timestamps**: Block validation now strictly enforces that block timestamps must always move forward, preventing DOS loops in data provisioning.
+
+### Changed
+- **Network Magic Updated**: Changed network magic to `Q7TE` and protocol version to 8.
+
 ## [2.2.10] — 2026-07-13
 
 ### Changed

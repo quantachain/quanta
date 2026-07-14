@@ -279,9 +279,9 @@ impl Block {
                 return false;
             }
             let now = Utc::now().timestamp();
-            if self.timestamp > now + 7200 {
+            if self.timestamp > now + 15 {
                 tracing::warn!(
-                    "Block {}: timestamp {} is more than 2 hours in the future",
+                    "Block {}: timestamp {} is more than 15 seconds in the future",
                     self.index,
                     self.timestamp
                 );

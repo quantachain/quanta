@@ -1,6 +1,12 @@
-# QuantaChain Testnet — V2 Release (v2.2.8-alpha)
+# QuantaChain Testnet — V2 Release (v2.2.11-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.2.11-alpha — TIME WARP DOS HOTFIX (2026-07-14)**
+> **NO WIPE REQUIRED.** Hot-fix release addressing a critical vulnerability where blocks with future timestamps could completely halt network consensus.
+> * **Time Warp Protection**: Reduced maximum allowed future timestamp drift from 2 hours to 15 seconds.
+> * **Monotonic Timestamps**: Block validation now strictly enforces that block timestamps must always move forward, preventing DOS loops in AlephBFT data provisioning.
+> * **Network Magic Updated**: Changed network magic to `Q7TE`. Ensure all nodes in your cluster are updated.
 
 > **v2.2.10-alpha — SYBIL PROTECTION FIX (2026-07-13)**
 > **NO WIPE REQUIRED.** Hot-fix release increasing the Sybil connection limit from 2 to 100 per IP.

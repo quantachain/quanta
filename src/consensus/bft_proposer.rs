@@ -120,8 +120,8 @@ pub async fn run_bft_proposer(
             info!("BFT Proposer: AlephBFT finalized block {}", block.index);
 
             // FIX (Bug 4): Update the shared timestamp BEFORE releasing the lock
-            // so that get_data() sees the new tip immediately.
-            ts_for_finalization.store(block.timestamp, Ordering::Release);
+            // so that get_data() sees the new tip immediately. Uses real wall time to prevent Time Warp DOS.
+            ts_for_finalization.store(chrono::Utc::now().timestamp(), Ordering::Release);
 
             let bc = bc_for_finalization.write().await;
             if let Err(e) = bc.add_network_block(block.clone()) {

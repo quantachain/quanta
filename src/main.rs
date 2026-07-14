@@ -518,13 +518,10 @@ async fn main() {
                             let net_clone = network.clone();
 
                             // Shared atomic: last finalized block timestamp (Unix seconds).
-                            // Initialised to the current chain tip so the first block is
-                            // proposed at the correct 6-second offset from the real tip,
-                            // not from Unix epoch 0.
-                            let tip_ts = {
-                                let bc = blockchain.read().await;
-                                bc.get_latest_block().timestamp
-                            };
+                            // Initialised to the current local system time (minus 6s) so the first block is
+                            // proposed immediately on startup, without relying on the potentially spoofed
+                            // timestamp of the previous block (preventing Time Warp DOS).
+                            let tip_ts = chrono::Utc::now().timestamp() - 6;
                             let last_finalized_ts = Arc::new(AtomicI64::new(tip_ts));
 
                             tokio::spawn(async move {
