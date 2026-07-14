@@ -296,12 +296,7 @@ pub async fn run_bft_proposer(
         use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
         let backup_path = Path::new(&data_dir).join(format!("alephbft_backup_{}.dat", session_id));
-        if current_height == session_id * SESSION_LENGTH {
-            // FIX (Bug 6): If we are exactly at the start of a session, we must delete any existing
-            // backup file from previous aborted runs, otherwise AlephBFT will load old DAG units
-            // and get stuck waiting for parents that the rest of the network dropped.
-            let _ = tokio::fs::remove_file(&backup_path).await;
-        }
+
 
         info!(
             "BFT Proposer: session_id={} backup={:?}",

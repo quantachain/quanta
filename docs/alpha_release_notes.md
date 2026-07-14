@@ -1,6 +1,9 @@
-# QuantaChain Testnet — V2 Release (v2.3.1-alpha)
+# QuantaChain Testnet — V2 Release (v2.3.2-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.3.2-alpha — ALEPHBFT BACKUP LOOP HOTFIX (2026-07-14)**
+> **NO WIPE REQUIRED.** Hotfix to resolve a crash loop issue where AlephBFT's backup file was incorrectly deleted on node restart if the node's block height happened to land precisely on a session boundary (e.g. block 80700). Node restarts will now properly load their DAG state instead of crashing with `Backup state behind unit collection state`.
 
 > **v2.3.1-alpha — SYNC THROTTLING HOTFIX (2026-07-14)**
 > **NO WIPE REQUIRED.** Hotfix to repair a logic flaw that crippled dynamic batching performance by artificially capping sync batches to 100 blocks due to anti-gossip limits. Node syncing should now confidently scale to 5,000 blocks per network request.

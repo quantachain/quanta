@@ -9,6 +9,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.3.2] — 2026-07-14
+
+### Fixed
+- **AlephBFT Backup Loop**: Removed buggy logic that aggressively deleted AlephBFT backup files at session boundaries during restarts. This prevented the node from continuously throwing "Backup state behind unit collection state" errors and infinitely restarting the consensus service.
+
 ## [2.3.1] — 2026-07-14
 
 ### Fixed
