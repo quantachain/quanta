@@ -279,9 +279,11 @@ impl Block {
                 return false;
             }
             let now = Utc::now().timestamp();
-            if self.timestamp > now + 15 {
+            // Allow up to 7200s in the future, to let the network heal from the current time warp.
+            // The root cause (sleeping based on chain time) is fixed in main.rs and bft_proposer.rs.
+            if self.timestamp > now + 7200 {
                 tracing::warn!(
-                    "Block {}: timestamp {} is more than 15 seconds in the future",
+                    "Block {}: timestamp {} is more than 7200 seconds in the future",
                     self.index,
                     self.timestamp
                 );

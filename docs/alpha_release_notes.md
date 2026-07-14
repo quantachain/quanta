@@ -1,6 +1,12 @@
-# QuantaChain Testnet — V2 Release (v2.2.11-alpha)
+# QuantaChain Testnet — V2 Release (v2.2.12-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.2.12-alpha — TIME WARP RECOVERY FIX (2026-07-14)**
+> **NO WIPE REQUIRED.** Hot-fix release addressing the network stall that occurred when trying to recover from the Time Warp DOS.
+> * **Time Warp Recovery**: Reverted the 15-second block limit back to 2 hours. Because the network's tip was already 2 hours in the future due to the exploit, enforcing a 15-second limit caused all new (healing) blocks to be rejected. The root cause (using chain-time instead of real-time to trigger block creation) remains fixed in `bft_proposer`.
+> * **DAG Cleanup**: Added logic to automatically clear old `alephbft_backup` files at session boundaries, ensuring validators don't get stuck waiting for parents from aborted runs.
+> * **Network Magic Updated**: Changed network magic to `Q8TE`. Ensure all nodes in your cluster are updated.
 
 > **v2.2.11-alpha — TIME WARP DOS HOTFIX (2026-07-14)**
 > **NO WIPE REQUIRED.** Hot-fix release addressing a critical vulnerability where blocks with future timestamps could completely halt network consensus.

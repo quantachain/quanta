@@ -9,6 +9,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.2.12] — 2026-07-14
+
+### Fixed
+- **Time Warp Recovery**: Reverted the 15-second block limit back to 2 hours. Because the network's tip was already 2 hours in the future due to the exploit, enforcing a 15-second limit caused all new (healing) blocks to be rejected. The root cause (using chain-time instead of real-time to trigger block creation) remains fixed.
+- **DAG Cleanup**: Added logic to automatically clear old `alephbft_backup` files at session boundaries, ensuring validators don't get stuck waiting for parents from aborted runs.
+
+### Changed
+- **Network Magic Updated**: Changed network magic to `Q8TE` and protocol version to 9.
+
 ## [2.2.11] — 2026-07-14
 
 ### Fixed
