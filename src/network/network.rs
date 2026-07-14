@@ -657,25 +657,8 @@ impl Network {
     async fn handle_new_block(&self, block: Block, peer: Option<Arc<Peer>>) -> Result<(), String> {
         let is_syncing = self.syncing.load(Ordering::SeqCst);
 
-        let blockchain = self.blockchain.read().await;
-        let latest = blockchain.get_latest_block();
-        let _our_height = blockchain.get_height();
-        drop(blockchain);
-
-        if block.index > latest.index + 100 {
-            // We just ignore it. The periodic sync loop in main.rs will
-            // detect the height gap and execute a proper sync_blockchain()
-            // batch process. We do not want to spam GetBlocks here.
-            return Ok(());
-        }
-
         // REORG FIX: Use the exact requested range (sync_request_range) to decide
-        // whether to buffer this block during sync. The old condition
-        //   `block.index > latest.index`
-        // silently dropped any reorg block whose index is AT or BELOW the current
-        // chain tip. During a deep reorg we request blocks [fork_point .. tip-1] which
-        // are all BELOW the current tip, so they were never buffered — causing
-        // "99/100 blocks, first block at height N+1 instead of N" failures.
+        // whether to buffer this block during sync. 
         if is_syncing {
             let range_opt = *self.sync_request_range.lock().await;
             if let Some((rstart, rend)) = range_opt {
@@ -687,6 +670,18 @@ impl Network {
                     return Ok(());
                 }
             }
+        }
+
+        let blockchain = self.blockchain.read().await;
+        let latest = blockchain.get_latest_block();
+        let _our_height = blockchain.get_height();
+        drop(blockchain);
+
+        if block.index > latest.index + 100 {
+            // We just ignore it. The periodic sync loop in main.rs will
+            // detect the height gap and execute a proper sync_blockchain()
+            // batch process. We do not want to spam GetBlocks here.
+            return Ok(());
         }
 
         // BETA FIX: Deduplication — only process + re-broadcast if not seen before.
