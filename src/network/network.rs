@@ -1418,7 +1418,7 @@ impl Network {
                         let peers = self.peer_manager.get_peers().await;
                         let mut connected = false;
                         for peer in peers {
-                            if peer.address().await.ip() == addr.ip() && peer.is_alive().await {
+                            if peer.address().await == addr && peer.is_alive().await {
                                 connected = true;
                                 break;
                             }

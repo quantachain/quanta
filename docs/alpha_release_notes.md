@@ -2,6 +2,12 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
+> **v2.4.2-alpha — NETWORK STABILITY HOTFIX (2026-07-15)**
+> **MANDATORY UPDATE (PROTOCOL V15, MAGIC=QT15).** Critical hotfix for P2P network stability:
+> * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `15` and `NETWORK_MAGIC` to `QT15`. This forces old nodes with the TOCTOU bug to disconnect, isolating the healthy network from corrupted streams.
+> * **TOCTOU Stream Corruption**: Fixed a concurrency bug in `send_message` where a slow write would timeout, dropping the write lock mid-message and leaving the TCP stream corrupted. This caused receivers to encounter `Decompression read error` and `Stream corrupted or dead` storms. 
+> * **IP Flapping Fix**: Fixed an issue where the discovery loop aggressively dropped connections to peers running on the same IP Address. VPS nodes can now seamlessly mesh with each other.
+
 > **v2.4.1-alpha — CRITICAL HOTFIX (2026-07-15)**
 > **NO PROTOCOL BUMP.** Critical hotfix for P2P network stability:
 > * **Flapping / Ban Fix**: Fixed a massive bug where any normal TCP stream disconnection (such as a timeout or intentional drop by a peer hitting its max connection limit) triggered an automatic 100-strike malicious behavior score. This caused nodes to instantly IP-ban each other on the slightest network hiccup, leading to a complete chain reaction network collapse and BFT stall. Dead streams are now cleanly marked without triggering bans.

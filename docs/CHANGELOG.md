@@ -9,6 +9,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.4.2-alpha] — 2026-07-15
+
+### Changed
+- **Protocol Bump:** Increased protocol version to `15` and network magic to `QT15` to hard-fork away from old nodes that contain the TOCTOU streaming bug, protecting the healthy network.
+
+### Fixed
+- Fixed a major TOCTOU stream corruption bug in `send_message` causing `Decompression read error` and `Stream corrupted or dead` storms across the network.
+- Fixed IP-based dialing suppression in `maintain_peers` which prevented nodes on the same host (e.g. VPS deployments) from meshing successfully.
+
 ## [2.4.1-alpha] — 2026-07-15
 
 ### Fixed

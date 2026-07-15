@@ -92,9 +92,18 @@ impl Peer {
 
         // Clone the Arc so the async block is self-contained and Send.
         let write_half = Arc::clone(&self.write_half);
+        let info_clone = Arc::clone(&self.info);
 
         let send_future = async move {
             let mut write = write_half.write().await;
+
+            // TOCTOU Fix: Check if stream was marked corrupted while we were waiting for the lock
+            {
+                let info = info_clone.read().await;
+                if info.strikes >= 100 || info.last_seen == 0 {
+                    return Err("Stream corrupted or dead (aborted write)".to_string());
+                }
+            }
 
             write
                 .write_all(&len.to_be_bytes())
