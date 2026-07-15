@@ -2,6 +2,10 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
+> **v2.4.1 — CRITICAL HOTFIX (2026-07-15)**
+> **NO PROTOCOL BUMP.** Critical hotfix for P2P network stability:
+> * **Flapping / Ban Fix**: Fixed a massive bug where any normal TCP stream disconnection (such as a timeout or intentional drop by a peer hitting its max connection limit) triggered an automatic 100-strike malicious behavior score. This caused nodes to instantly IP-ban each other on the slightest network hiccup, leading to a complete chain reaction network collapse and BFT stall. Dead streams are now cleanly marked without triggering bans.
+
 > **v2.4.0 — MAJOR RELEASE (2026-07-15)**
 > * **BFT Stability**: Fixed a BFT session restart timing bug that could cause block production to stall for 5+ minutes at session boundaries.
 > * **Locking Optimization**: Explicitly drop blockchain write locks in all paths to reduce thread latency.

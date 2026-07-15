@@ -1,9 +1,9 @@
 # ============================================================
 # Dockerfile — QUANTA Blockchain Node
 # ============================================================
-# V3 Release for testnet testing (v2.4.0)
+# V3 Release for testnet testing (v2.4.1)
 #
-# Image : xd637/quanta-node:v2.4.0
+# Image : xd637/quanta-node:v2.4.1
 # Repo  : https://hub.docker.com/r/xd637/quanta-node
 #
 # Quick start (single node):

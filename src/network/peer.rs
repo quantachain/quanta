@@ -79,15 +79,15 @@ impl Peer {
     /// other concurrent send (AlephBFT votes, pings, block gossip) behind it.
     /// That lock starvation was the direct cause of BFT consensus freezing while
     /// nodes showed as "Online".
-    pub async fn send_message(&self, msg: P2PMessage) -> Result<(), String> {
+    pub async fn send_message(&self, message: P2PMessage) -> Result<(), String> {
         {
             let info = self.info.read().await;
-            if info.strikes >= 100 {
+            if info.strikes >= 100 || info.last_seen == 0 {
                 return Err("Stream corrupted or dead".to_string());
             }
         }
 
-        let data = serialize_message(&msg)?;
+        let data = serialize_message(&message)?;
         let len = data.len() as u32;
 
         // Clone the Arc so the async block is self-contained and Send.
@@ -121,13 +121,11 @@ impl Peer {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(e)) => {
                 let mut info = self.info.write().await;
-                info.strikes = 100;
                 info.last_seen = 0;
                 Err(e)
             }
             Err(_) => {
                 let mut info = self.info.write().await;
-                info.strikes = 100;
                 info.last_seen = 0;
                 let _ = self.shutdown_tx.send(()).await;
                 Err(format!("Send timeout after 10s — peer disconnected and stream marked corrupted"))
@@ -139,7 +137,7 @@ impl Peer {
     pub async fn receive_message(&self) -> Result<P2PMessage, String> {
         {
             let info = self.info.read().await;
-            if info.strikes >= 100 {
+            if info.strikes >= 100 || info.last_seen == 0 {
                 return Err("Stream corrupted or dead".to_string());
             }
         }
@@ -154,13 +152,11 @@ impl Peer {
             }
             Ok(Err(e)) => {
                 let mut info = self.info.write().await;
-                info.strikes = 100;
                 info.last_seen = 0;
                 Err(e)
             }
             Err(_) => {
                 let mut info = self.info.write().await;
-                info.strikes = 100;
                 info.last_seen = 0;
                 Err("Receive timeout".to_string())
             }

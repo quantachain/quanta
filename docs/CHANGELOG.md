@@ -9,6 +9,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.4.1] — 2026-07-15
+
+### Fixed
+- Fixed critical P2P network bug where any TCP error resulted in a 100-strike instant IP ban, causing rapid network collapse and BFT stall. Streams are now correctly marked as dead without triggering malicious behavior bans.
+
 ## [2.4.0] — 2026-07-15
 
 ### Fixed
