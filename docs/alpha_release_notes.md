@@ -2,6 +2,11 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
+> **v2.4.3-alpha — TOCTOU RACE CONDITION HOTFIX (2026-07-15)**
+> **MANDATORY UPDATE (PROTOCOL V16, MAGIC=QT16).** Critical hotfix for P2P network stability:
+> * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `16` and `NETWORK_MAGIC` to `QT16` to cleanly hard fork away from nodes running the faulty `v2.4.2-alpha` code.
+> * **TOCTOU Stream Corruption**: Fixed the root cause of the stream corruption bug. The previous fix did not account for the `tokio::time::timeout` dropping the future and releasing the Mutex lock *before* setting `last_seen = 0`. The timeout is now performed *inside* the locked scope, fully preventing thread races from writing to a corrupted stream.
+
 > **v2.4.2-alpha — NETWORK STABILITY HOTFIX (2026-07-15)**
 > **MANDATORY UPDATE (PROTOCOL V15, MAGIC=QT15).** Critical hotfix for P2P network stability:
 > * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `15` and `NETWORK_MAGIC` to `QT15`. This forces old nodes with the TOCTOU bug to disconnect, isolating the healthy network from corrupted streams.

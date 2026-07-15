@@ -9,6 +9,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.4.3-alpha] — 2026-07-15
+
+### Changed
+- **Protocol Bump:** Increased protocol version to `16` and network magic to `QT16` to cleanly hard fork away from nodes running the faulty `v2.4.2-alpha` code.
+
+### Fixed
+- Fixed the root cause of the TOCTOU stream corruption bug by holding the write lock *during* the timeout evaluation, guaranteeing that partial bytes from timed-out futures cannot be silently interleaved with new messages.
+
 ## [2.4.2-alpha] — 2026-07-15
 
 ### Changed
