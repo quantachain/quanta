@@ -58,6 +58,7 @@ impl DataProvider for QuantaDataProvider {
     type Output = Block;
 
     async fn get_data(&mut self) -> Option<Self::Output> {
+        tracing::debug!("BFT DataProvider: AlephBFT is requesting data...");
         // -----------------------------------------------------------------------
         // SLOT GATE — primary block-time control.
         //
@@ -81,6 +82,7 @@ impl DataProvider for QuantaDataProvider {
         // -----------------------------------------------------------------------
         // BUILD BLOCK TEMPLATE
         // -----------------------------------------------------------------------
+        tracing::debug!("BFT DataProvider: slot opened, building block template...");
         let bc = self.blockchain.read().await;
         let elapsed = chrono::Utc::now()
             .timestamp()

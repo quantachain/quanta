@@ -1,7 +1,9 @@
-# QuantaChain Testnet — V2 Release (v2.3.3-alpha)
+# QuantaChain Testnet — V2 Release (v2.3.4-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
+> **v2.3.4-alpha — P2P FLAPPING & HANDSHAKE HOTFIX (2026-07-15)**
+>
 > **v2.3.3-alpha — NETWORK STALL & API BIND HOTFIX (2026-07-15)**
 > **NO WIPE REQUIRED.** Critical hotfix to restore block production and API visibility:
 > * **Network Discovery Fix**: Re-enabled gossiping of inbound connections. This prevents the network from forming a disconnected "star topology" around bootstrap nodes, allowing AlephBFT validators to discover each other and reach consensus.
@@ -81,7 +83,7 @@ For developers or those who prefer running natively without Docker:
 ```bash
 git clone https://github.com/quantachain/quanta.git
 cd quanta
-git checkout v2.3.3-alpha
+git checkout v2.3.4-alpha
 cargo build --release
 ```
 

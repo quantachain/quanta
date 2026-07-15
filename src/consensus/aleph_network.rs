@@ -58,6 +58,7 @@ impl<D: Encode + Decode + Send + std::fmt::Debug + 'static> AlephNetwork<D>
 {
     fn send(&self, data: D, recipient: Recipient) {
         let mut encoded = Vec::new();
+        tracing::debug!("AlephBFT: sending message to {:?}", recipient);
 
         // Tag byte 0 = broadcast, 1 = unicast (target node index in next 4 bytes).
         // The receive side (next_event) already filters on this tag.
@@ -109,6 +110,7 @@ impl<D: Encode + Decode + Send + std::fmt::Debug + 'static> AlephNetwork<D>
     async fn next_event(&mut self) -> Option<D> {
         let mut rx = self.aleph_rx.lock().await;
         while let Some(data) = rx.recv().await {
+            tracing::debug!("AlephBFT: received message of size {} bytes", data.len());
             if data.is_empty() {
                 continue;
             }

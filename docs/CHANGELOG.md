@@ -9,6 +9,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.3.4] — 2026-07-15
+
+### Fixed
+- Fixed silent handshake failures caused by `Result::is_ok()` dropping errors.
+- Fixed P2P connection flapping where nodes continually attempt to reconnect every 10 seconds.
+- Added explicit `PROTOCOL_VERSION` bump to force clean network upgrades after network magic changes.
+
 ## [2.3.3] — 2026-07-15
 
 ### Fixed

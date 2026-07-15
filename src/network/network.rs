@@ -315,6 +315,8 @@ impl Network {
                                             let _ = peer.send_message(P2PMessage::Disconnect).await;
                                         }
                                     }
+                                } else {
+                                    tracing::warn!("Handshake with {} failed (timeout or version mismatch)", addr);
                                 }
                             }
                             Err(e) => {
