@@ -9,6 +9,12 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.3.8] — 2026-07-15
+
+### Fixed
+- Fixed critical TCP stream corruption causing massive CPU spikes, decompression errors, and AlephBFT decode panics when a slow peer's read/write operation timed out but the stream remained open.
+- Optimized BFT broadcast to immediately skip dead peers instead of spinning up tasks and waiting for timeouts.
+
 ## [2.3.7] — 2026-07-15
 
 ### Fixed

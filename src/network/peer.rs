@@ -80,6 +80,13 @@ impl Peer {
     /// That lock starvation was the direct cause of BFT consensus freezing while
     /// nodes showed as "Online".
     pub async fn send_message(&self, msg: P2PMessage) -> Result<(), String> {
+        {
+            let info = self.info.read().await;
+            if info.strikes >= 100 {
+                return Err("Stream corrupted or dead".to_string());
+            }
+        }
+
         let data = serialize_message(&msg)?;
         let len = data.len() as u32;
 
@@ -111,16 +118,32 @@ impl Peer {
         // 8 MB block (≈640 ms), with headroom for congestion.  The previous
         // 60-second value allowed one hung peer to starve BFT for a full minute.
         match tokio::time::timeout(std::time::Duration::from_secs(10), send_future).await {
-            Ok(result) => result,
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => {
+                let mut info = self.info.write().await;
+                info.strikes = 100;
+                info.last_seen = 0;
+                Err(e)
+            }
             Err(_) => {
+                let mut info = self.info.write().await;
+                info.strikes = 100;
+                info.last_seen = 0;
                 let _ = self.shutdown_tx.send(()).await;
-                Err(format!("Send timeout after 10s — peer disconnected"))
+                Err(format!("Send timeout after 10s — peer disconnected and stream marked corrupted"))
             }
         }
     }
 
     /// Receive a message from this peer with timeout
     pub async fn receive_message(&self) -> Result<P2PMessage, String> {
+        {
+            let info = self.info.read().await;
+            if info.strikes >= 100 {
+                return Err("Stream corrupted or dead".to_string());
+            }
+        }
+
         let result = timeout(Duration::from_secs(120), self.receive_message_internal()).await;
 
         match result {
@@ -129,8 +152,18 @@ impl Peer {
                 self.info.write().await.last_seen = chrono::Utc::now().timestamp();
                 Ok(msg)
             }
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err("Receive timeout".to_string()),
+            Ok(Err(e)) => {
+                let mut info = self.info.write().await;
+                info.strikes = 100;
+                info.last_seen = 0;
+                Err(e)
+            }
+            Err(_) => {
+                let mut info = self.info.write().await;
+                info.strikes = 100;
+                info.last_seen = 0;
+                Err("Receive timeout".to_string())
+            }
         }
     }
 
@@ -510,6 +543,9 @@ impl PeerManager {
 
         // Spawn concurrent sends — don't let one slow peer block everyone
         for peer in peers {
+            if peer.info.read().await.strikes >= 100 {
+                continue; // Skip dead peers instantly to save CPU
+            }
             let msg_clone = msg.clone();
             tokio::spawn(async move {
                 if let Err(e) = peer.send_message(msg_clone).await {

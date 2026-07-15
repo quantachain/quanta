@@ -1,6 +1,11 @@
-# QuantaChain Testnet — V2 Release (v2.3.7-alpha)
+# QuantaChain Testnet — V2 Release (v2.3.8-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.3.8-alpha — HIGH CPU & DATA CORRUPTION HOTFIX (2026-07-15)**
+> **NO PROTOCOL BUMP.** Critical hotfix to resolve CPU spikes and data corruption:
+> * **TCP Stream Framing Fix**: Fixed a massive bug where an I/O timeout during `send_message` or `receive_message` would leave partial bytes in the OS TCP buffer while keeping the stream open. This caused all subsequent messages to lose their framing, resulting in `Decompression read error`, `Could not decode 'NetworkDataInner'`, and extreme CPU spikes as the node repeatedly spun up tasks trying to decode garbage data or allocating massive chunks of memory (`Message too large`). Streams are now properly marked as corrupted and dead on any timeout.
+> * **Broadcast CPU Optimization**: The BFT broadcasting loop now explicitly drops dead peers instantly instead of spinning up thousands of `tokio::spawn` tasks that all independently wait for network timeouts.
 
 > **v2.3.7-alpha — LOG SPAM HOTFIX 2 (2026-07-15)**
 > **NO PROTOCOL BUMP.** Cleaned up remaining terminal output:
@@ -93,7 +98,7 @@ For developers or those who prefer running natively without Docker:
 ```bash
 git clone https://github.com/quantachain/quanta.git
 cd quanta
-git checkout v2.3.7-alpha
+git checkout v2.3.8-alpha
 cargo build --release
 ```
 
