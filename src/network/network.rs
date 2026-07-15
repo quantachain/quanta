@@ -558,14 +558,15 @@ impl Network {
                     let mut seen = self.seen_bft.lock().unwrap();
                     let now = std::time::Instant::now();
                     match seen.get(&hash).copied() {
-                        Some(time) if now.duration_since(time).as_secs() < 1 => {
-                            // Flood protection: drop completely from gossip if seen < 1s ago
+                        Some(time) if now.duration_since(time).as_secs() < 3 => {
+                            // Flood protection: drop completely from gossip if relayed < 3s ago
                             // CRITICAL FIX: skip_local MUST be false so AlephBFT receives its retries!
                             (true, false)
                         }
                         Some(_) => {
+                            // Legitimate retry after 3s. Update timestamp and relay it!
                             seen.put(hash, now);
-                            (true, false) // already seen (no relay), but pass locally
+                            (false, false) // pass locally and relay
                         }
                         None => {
                             seen.put(hash, now);

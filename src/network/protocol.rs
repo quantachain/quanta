@@ -102,7 +102,7 @@ impl From<&Block> for BlockHeader {
 
 /// Protocol constants
 /// IMPORTANT: Ensure this matches across the cluster during testing!
-pub const PROTOCOL_VERSION: u32 = 12; // v2.3.4-alpha: P2P Flapping & Handshake Hotfix
+pub const PROTOCOL_VERSION: u32 = 13; // v2.3.5-alpha: BFT Consensus Retry Hotfix
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
