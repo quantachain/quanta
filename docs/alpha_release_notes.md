@@ -1,6 +1,11 @@
-# QuantaChain Testnet — V2 Release (v2.3.9-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.0)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.4.0 — MAJOR RELEASE (2026-07-15)**
+> * **BFT Stability**: Fixed a BFT session restart timing bug that could cause block production to stall for 5+ minutes at session boundaries.
+> * **Locking Optimization**: Explicitly drop blockchain write locks in all paths to reduce thread latency.
+> * **Docker Cleanup**: Cleaned up redundant container configuration in docker-compose.
 
 > **v2.3.9-alpha — MANDATORY PROTOCOL UPGRADE (2026-07-15)**
 > **MANDATORY UPDATE (PROTOCOL V14, MAGIC=QT14).** All nodes MUST upgrade. This version permanently breaks compatibility with all prior versions to eliminate the stream corruption issue:
@@ -105,7 +110,7 @@ For developers or those who prefer running natively without Docker:
 ```bash
 git clone https://github.com/quantachain/quanta.git
 cd quanta
-git checkout v2.3.9-alpha
+git checkout v2.4.0
 cargo build --release
 ```
 

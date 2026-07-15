@@ -9,6 +9,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.4.0] — 2026-07-15
+
+### Fixed
+- Fixed BFT session restart timestamp reset to prevent 286s slot gate stalls.
+- Fixed BFT block production write lock being held across error branches.
+- Removed redundant Docker compose CLI args.
+
 ## [2.3.9] — 2026-07-15
 
 ### Fixed
