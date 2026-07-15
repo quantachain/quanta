@@ -1,6 +1,13 @@
-# QuantaChain Testnet — V2 Release (v2.3.8-alpha)
+# QuantaChain Testnet — V2 Release (v2.3.9-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.3.9-alpha — MANDATORY PROTOCOL UPGRADE (2026-07-15)**
+> **MANDATORY UPDATE (PROTOCOL V14, MAGIC=QT14).** All nodes MUST upgrade. This version permanently breaks compatibility with all prior versions to eliminate the stream corruption issue:
+> * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `14`. Nodes on v13 or below will be rejected at handshake.
+> * **Network Magic Changed**: Updated magic bytes from `Q9TE` to `QT14`. Any node with the old magic will be instantly rejected before any data is exchanged, preventing TCP stream corruption.
+> * **Signature Verification Logs**: Demoted `AlephBFT signature verification FAILED` from `WARN` to `DEBUG`.
+> * **Decode Failure Logs**: Demoted `Failed to decode incoming AlephBFT message` from `WARN` to `DEBUG`.
 
 > **v2.3.8-alpha — HIGH CPU & DATA CORRUPTION HOTFIX (2026-07-15)**
 > **NO PROTOCOL BUMP.** Critical hotfix to resolve CPU spikes and data corruption:
@@ -98,7 +105,7 @@ For developers or those who prefer running natively without Docker:
 ```bash
 git clone https://github.com/quantachain/quanta.git
 cd quanta
-git checkout v2.3.8-alpha
+git checkout v2.3.9-alpha
 cargo build --release
 ```
 

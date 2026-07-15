@@ -77,7 +77,7 @@ impl Keychain for QuantaKeychain {
 
         let result = crate::crypto::signatures::verify_hash_strict(&hash_arr, &sgn.raw, pubkey);
         if !result {
-            tracing::warn!(
+            tracing::debug!(
                 "AlephBFT signature verification FAILED for node index {}",
                 index.0
             );

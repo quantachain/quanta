@@ -9,6 +9,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.3.9] — 2026-07-15
+
+### Fixed
+- **MANDATORY UPDATE (PROTOCOL V14).** Bumped `PROTOCOL_VERSION` to `14` and `NETWORK_MAGIC` to `QT14` to permanently reject all old nodes (v13 and below) that were connecting and corrupting TCP streams.
+- Silenced `AlephBFT signature verification FAILED` log spam (demoted to `debug`).
+- Silenced `Failed to decode incoming AlephBFT message` log spam (demoted to `debug`).
+
 ## [2.3.8] — 2026-07-15
 
 ### Fixed

@@ -137,7 +137,7 @@ impl<D: Encode + Decode + Send + std::fmt::Debug + 'static> AlephNetwork<D>
                     return Some(decoded);
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to decode incoming AlephBFT message: {}", e);
+                    tracing::debug!("Failed to decode incoming AlephBFT message: {}", e);
                     continue;
                 }
             }
