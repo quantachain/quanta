@@ -1,8 +1,8 @@
 # ========================================
 # QUANTA Node Configuration
 # ========================================
-# Version: 2.0.1
-# Last Updated: 2026-07-02
+# Version: 2.3.3
+# Last Updated: 2026-07-15
 # This configuration matches the current codebase structure
 # For standalone/development nodes without bootstrap infrastructure
 # ========================================
@@ -19,6 +19,9 @@ consensus_engine = "bft"
 [node]
 # API server port - REST API for wallet interactions
 api_port = 3000
+
+# API bind host - 0.0.0.0 exposes it to all interfaces, 127.0.0.1 restricts to localhost
+api_bind_host = "0.0.0.0"
 
 # P2P network port - For peer-to-peer communication
 network_port = 8333

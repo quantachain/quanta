@@ -9,6 +9,14 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.3.3] — 2026-07-15
+
+### Fixed
+- **Network Discovery Fix**: Re-enabled gossiping of inbound connections. This prevents the network from forming a disconnected "star topology" around bootstrap nodes, allowing AlephBFT validators to discover each other and reach consensus.
+- **API Bind Fix**: The REST API now securely defaults to `0.0.0.0` (configurable via `api_bind_host` in `quanta.toml`), fixing the issue where LUA and other nodes appeared OFFLINE to block explorers.
+
+### Changed
+- **Network Isolation**: Bumped `PROTOCOL_VERSION` from 10 to 11 and `TESTNET_MAGIC` from `Q8TE` to `Q9TE` to cleanly evict un-patched nodes from polluting the consensus layer.
 ## [2.3.2] — 2026-07-14
 
 ### Fixed

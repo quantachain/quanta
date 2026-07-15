@@ -262,7 +262,7 @@ impl Network {
                     let blockchain = Arc::clone(&self.blockchain);
                     let discovery = Arc::clone(&self.discovery);
                     let node_id = self.config.node_id.clone();
-                    let assumed_port = self.config.network_port;
+                    let assumed_port = self.config.listen_addr.port();
 
                     tokio::spawn(async move {
                         match Peer::new(stream, addr).await {
