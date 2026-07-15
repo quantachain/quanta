@@ -47,7 +47,7 @@ impl Default for NetworkConfig {
 
 /// Network manager for P2P blockchain network
 pub struct Network {
-    config: NetworkConfig,
+    pub config: NetworkConfig,
     blockchain: Arc<RwLock<Blockchain>>,
     pub peer_manager: Arc<PeerManager>,
     message_tx: mpsc::Sender<(SocketAddr, P2PMessage)>,

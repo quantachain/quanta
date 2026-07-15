@@ -495,6 +495,10 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
     let mut node_versions = std::collections::HashMap::new();
 
     if let Some(network) = &state.network {
+        // Add ourselves to the online list, since we won't be in our own peer manager
+        online_nodes.insert(network.config.node_id.clone());
+        node_versions.insert(network.config.node_id.clone(), crate::network::protocol::PROTOCOL_VERSION);
+
         let peers = network.peer_manager.get_peers().await;
         for peer in peers {
             let info = peer.get_info().await;
