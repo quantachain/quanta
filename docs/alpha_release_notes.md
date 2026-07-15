@@ -2,7 +2,11 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.3.4-alpha — P2P FLAPPING & HANDSHAKE HOTFIX (2026-07-15)**
+> **v2.3.4-alpha — P2P FLAPPING & PORT CONFLICT HOTFIX (2026-07-15)**
+> **MANDATORY UPDATE (PROTOCOL V12).** Critical hotfix to resolve consensus stalling and multi-node Docker deployments:
+> * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `12` to strictly isolate the network from old v11 nodes causing silent TCP connection resets and P2P flapping loops.
+> * **Handshake Observability**: Added explicit `WARN` logging for handshake timeouts and version mismatches instead of silently dropping peers.
+> * **Docker Port Conflicts Fixed**: Fixed a critical bug where multi-node `docker-compose` clusters crashed in an infinite loop due to environment variable configurations (e.g., `QUANTA_NODE__API_PORT`) being ignored. The recommended `docker-compose` topology now uses explicit CLI port overrides (`--port`, `--rpc-port`, `--network-port`).
 >
 > **v2.3.3-alpha — NETWORK STALL & API BIND HOTFIX (2026-07-15)**
 > **NO WIPE REQUIRED.** Critical hotfix to restore block production and API visibility:
