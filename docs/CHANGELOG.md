@@ -9,6 +9,11 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.3.7] — 2026-07-15
+
+### Fixed
+- Fixed secondary AlephBFT log spam during unicast fallback to disconnected peers.
+
 ## [2.3.6] — 2026-07-15
 
 ### Fixed

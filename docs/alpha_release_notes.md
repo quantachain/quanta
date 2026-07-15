@@ -2,6 +2,10 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
+> **v2.3.7-alpha — LOG SPAM HOTFIX 2 (2026-07-15)**
+> **NO PROTOCOL BUMP.** Cleaned up remaining terminal output:
+> * **BFT Unicast Spam Fix**: Demoted a secondary `Unicast AlephBFT to ... failed` log to `DEBUG`. This fixes the remaining terminal spam when attempting to unicast to a newly disconnected validator.
+
 > **v2.3.7-alpha — REMOVED DEBUG LOGS (2026-07-15)**
 > **NO PROTOCOL BUMP.** Cleaned up terminal output:
 > * **BFT Observability**: Removed the verbose diagnostic logs displaying the quorum size (`f` and `2f+1`) that were added during the consensus stall debugging phase, returning to the standard session start logs.
