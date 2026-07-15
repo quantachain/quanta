@@ -879,11 +879,12 @@ pub async fn start_server(
     metrics: Option<Arc<crate::consensus::mempool::MetricsCollector>>,
     network: Option<Arc<crate::network::Network>>,
     tls_enabled: bool,
+    api_bind_host: String,
 ) {
     let app = create_router(blockchain, metrics, network);
 
-    // CRIT-1 FIX: Only bind to 0.0.0.0 when TLS is active; otherwise localhost only.
-    let bind_host = if tls_enabled { "0.0.0.0" } else { "127.0.0.1" };
+    // Use the explicitly configured api_bind_host (defaults to 0.0.0.0)
+    let bind_host = api_bind_host;
     let addr = format!("{}:{}", bind_host, port);
 
     tracing::info!(

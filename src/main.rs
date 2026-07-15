@@ -602,8 +602,9 @@ async fn main() {
                 let metrics_clone = Some(metrics.clone());
                 let network_clone = network.clone();
                 let port = cfg.node.api_port;
+                let api_bind_host = cfg.node.api_bind_host.clone();
                 tokio::spawn(async move {
-                    api::start_server(blockchain_clone, port, metrics_clone, network_clone, false)
+                    api::start_server(blockchain_clone, port, metrics_clone, network_clone, false, api_bind_host)
                         .await;
                 })
             };

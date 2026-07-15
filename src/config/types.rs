@@ -59,6 +59,9 @@ pub struct NodeConfig {
     /// Prune window in days (only used when mode = pruned, default: 30)
     #[serde(default = "NodeConfig::default_prune_days")]
     pub prune_days: u64,
+    /// API server bind host (default: 0.0.0.0)
+    #[serde(default = "NodeConfig::default_api_bind_host")]
+    pub api_bind_host: String,
 }
 
 impl NodeConfig {
@@ -67,6 +70,9 @@ impl NodeConfig {
     }
     fn default_prune_days() -> u64 {
         30
+    }
+    fn default_api_bind_host() -> String {
+        "0.0.0.0".to_string()
     }
 }
 
@@ -111,6 +117,7 @@ impl Default for QuantaConfig {
                 no_network: false,
                 mode: NodeMode::Archive,
                 prune_days: 30,
+                api_bind_host: "0.0.0.0".to_string(),
             },
             network: NetworkConfig {
                 max_peers: 125,
@@ -265,6 +272,7 @@ impl QuantaConfig {
         tracing::info!("Quanta Node Configuration (v{})", self.version);
         tracing::info!("========================================");
         tracing::info!("Node:");
+        tracing::info!("  API Bind Host: {}", self.node.api_bind_host);
         tracing::info!("  API Port: {}", self.node.api_port);
         tracing::info!("  Network Port: {}", self.node.network_port);
         tracing::info!("  DB Path: {}", self.node.db_path);

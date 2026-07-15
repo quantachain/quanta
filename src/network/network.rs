@@ -260,8 +260,9 @@ impl Network {
                     let message_tx = self.message_tx.clone();
                     let peer_manager = Arc::clone(&self.peer_manager);
                     let blockchain = Arc::clone(&self.blockchain);
-                    let _discovery = Arc::clone(&self.discovery);
+                    let discovery = Arc::clone(&self.discovery);
                     let node_id = self.config.node_id.clone();
+                    let assumed_port = self.config.network_port;
 
                     tokio::spawn(async move {
                         match Peer::new(stream, addr).await {
@@ -284,9 +285,11 @@ impl Network {
                                     info!("Successful handshake with {}", addr);
                                     match peer_manager.add_peer(Arc::clone(&peer)).await {
                                         Ok(_) => {
-                                            // We no longer blindly add inbound connections to discovery with port 8333.
-                                            // Nodes will naturally discover each other via GetAddr/Addr messages,
-                                            // which prevents the "Connection to self" loops and NAT port overriding.
+                                            // Re-enable inbound discovery so the network doesn't form disconnected star topologies.
+                                            // We guess the peer's listener port based on our own network port to avoid gossiping ephemeral NAT ports.
+                                            let mut peer_addr = addr;
+                                            peer_addr.set_port(assumed_port);
+                                            discovery.add_peer(peer_addr).await;
 
                                             // Request known peers from this new connection to discover the rest of the network
                                             let _ = peer.send_message(P2PMessage::GetAddr).await;
