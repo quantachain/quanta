@@ -9,6 +9,19 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.3.6] — 2026-07-15
+
+### Fixed
+- Fixed BFT broadcast log spam during peer disconnects by demoting the send failure log to `debug`.
+- Removed verbose BFT quorum observability logs.
+
+## [2.3.5] — 2026-07-15
+
+### Fixed
+- Fixed BFT consensus stall caused by P2P LRU cache dropping AlephBFT retry messages.
+- Added verbose BFT quorum observability logs.
+- Bumped `PROTOCOL_VERSION` to 13.
+
 ## [2.3.4] — 2026-07-15
 
 ### Fixed

@@ -222,14 +222,10 @@ pub async fn run_bft_proposer(
         };
 
         let node_count = NodeCount(committee.len());
-        let f = (node_count.0.saturating_sub(1)) / 3;
-        let quorum = 2 * f + 1;
         tracing::info!(
-            "BFT Proposer: I am validator {} out of {} for this session. Quorum required: {} nodes (f={})",
+            "BFT Proposer: I am validator {} out of {} for this session",
             node_idx.0,
-            node_count.0,
-            quorum,
-            f
+            node_count.0
         );
 
         // Compute the current session_id from chain height.

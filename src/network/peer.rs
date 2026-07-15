@@ -513,7 +513,7 @@ impl PeerManager {
             let msg_clone = msg.clone();
             tokio::spawn(async move {
                 if let Err(e) = peer.send_message(msg_clone).await {
-                    warn!("Failed to send message to peer: {}", e);
+                    tracing::debug!("Failed to send message to peer: {}", e);
                 }
             });
         }

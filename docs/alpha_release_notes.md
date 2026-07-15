@@ -1,6 +1,14 @@
-# QuantaChain Testnet — V2 Release (v2.3.5-alpha)
+# QuantaChain Testnet — V2 Release (v2.3.7-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.3.7-alpha — REMOVED DEBUG LOGS (2026-07-15)**
+> **NO PROTOCOL BUMP.** Cleaned up terminal output:
+> * **BFT Observability**: Removed the verbose diagnostic logs displaying the quorum size (`f` and `2f+1`) that were added during the consensus stall debugging phase, returning to the standard session start logs.
+
+> **v2.3.6-alpha — LOG SPAM HOTFIX (2026-07-15)**
+> **NO PROTOCOL BUMP.** Hotfix to resolve terminal log spam during node disconnections:
+> * **BFT Broadcast Spam Fix**: Demoted the `Failed to send message to peer` log from `WARN` to `DEBUG`. This prevents the node from spamming the terminal with hundreds of warnings per second when it attempts to broadcast consensus messages to a recently disconnected peer before the dead-peer cleanup cycle removes them.
 
 > **v2.3.5-alpha — BFT CONSENSUS RETRY HOTFIX (2026-07-15)**
 > **MANDATORY UPDATE (PROTOCOL V13).** Critical hotfix to resolve consensus stalling when validators drop units during initialization:
@@ -81,7 +89,7 @@ For developers or those who prefer running natively without Docker:
 ```bash
 git clone https://github.com/quantachain/quanta.git
 cd quanta
-git checkout v2.3.5-alpha
+git checkout v2.3.7-alpha
 cargo build --release
 ```
 
