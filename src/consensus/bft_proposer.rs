@@ -123,8 +123,13 @@ pub async fn run_bft_proposer(
             // so that get_data() sees the new tip immediately. Uses real wall time to prevent Time Warp DOS.
             ts_for_finalization.store(chrono::Utc::now().timestamp(), Ordering::Release);
 
-            let bc = bc_for_finalization.write().await;
-            if let Err(e) = bc.add_network_block(block.clone()) {
+            let apply_result = {
+                let bc = bc_for_finalization.write().await;
+                let result = bc.add_network_block(block.clone());
+                drop(bc); // Release write lock immediately after apply
+                result
+            };
+            if let Err(e) = apply_result {
                 error!(
                     "BFT Proposer: failed to apply finalized block {}: {}",
                     block.index, e
@@ -132,7 +137,6 @@ pub async fn run_bft_proposer(
             } else {
                 info!("✓ BFT block {} applied to local chain.", block.index);
                 last_applied_height = block.index;
-                drop(bc);
                 net_for_finalization.broadcast_block(block).await;
             }
         }
@@ -183,6 +187,19 @@ pub async fn run_bft_proposer(
             );
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
+
+        // SESSION RESTART TIMESTAMP RESET:
+        // After a session rotation (or any BFT session exit), reset last_finalized_ts
+        // to now() - SLOT_SECONDS so the slot gate opens immediately for the new session.
+        // Without this, the stale timestamp from the PREVIOUS session causes the next
+        // get_data() to report a huge elapsed time (e.g. 286s) while AlephBFT rebuilds
+        // its DAG — the gate opens fine, but the log is misleading and could interact
+        // with any future rate-limiting. This reset is safe: the finalization consumer
+        // will overwrite it with Utc::now() as soon as the next block is finalized.
+        last_finalized_ts.store(
+            chrono::Utc::now().timestamp() - 6,
+            std::sync::atomic::Ordering::Release,
+        );
 
         // DYNAMIC COMMITTEE FIX: Compute committee HERE, every session, instead of at startup!
         let (committee, committee_pubkeys) = {
