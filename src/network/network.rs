@@ -988,7 +988,7 @@ impl Network {
                 // Clone before move so we can fall back to broadcast on send failure.
                 let data_clone = data.clone();
                 if let Err(e) = peer.send_message(P2PMessage::AlephBFTMessage(data)).await {
-                    warn!(
+                    tracing::debug!(
                         "Unicast AlephBFT to {} failed: {} — broadcasting as fallback",
                         validator_address, e
                     );
