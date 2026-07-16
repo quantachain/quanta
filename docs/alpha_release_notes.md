@@ -2,6 +2,12 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
+> **v2.4.4-alpha — MEMORY LEAK & ZIP BOMB HOTFIX (2026-07-16)**
+> **MANDATORY UPDATE (PROTOCOL V17, MAGIC=QT17).** Critical hotfix for OOM and CPU freezing:
+> * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `17` and `NETWORK_MAGIC` to `QT17` to cleanly hard fork away from nodes running the faulty `v2.4.3-alpha` code.
+> * **Decompression Bomb Fix**: Prevented an eager 8MB memory allocation for every single incoming compressed message which caused 100% CPU utilization and immediate RAM exhaustion.
+> * **Channel Queue Exhaustion**: Reduced network message queue capacity by 10x to prevent an attacker from piling up to 80GB of 8MB messages in memory.
+
 > **v2.4.3-alpha — TOCTOU RACE CONDITION HOTFIX (2026-07-15)**
 > **MANDATORY UPDATE (PROTOCOL V16, MAGIC=QT16).** Critical hotfix for P2P network stability:
 > * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `16` and `NETWORK_MAGIC` to `QT16` to cleanly hard fork away from nodes running the faulty `v2.4.2-alpha` code.

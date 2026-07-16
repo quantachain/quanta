@@ -78,9 +78,9 @@ pub struct Network {
 impl Network {
     /// Create a new network instance
     pub fn new(config: NetworkConfig, blockchain: Arc<RwLock<Blockchain>>) -> Self {
-        // CRIT-3 FIX: Bounded channel(10_000) prevents OOM via message flood.
-        // An attacker sending millions of messages will now get dropped, not buffered.
-        let (message_tx, message_rx) = mpsc::channel(10_000);
+        // CRIT-3 FIX: Bounded channel(1_000) prevents OOM via message flood.
+        // 10_000 * 8MB max message size was causing 80GB OOMs.
+        let (message_tx, message_rx) = mpsc::channel(1_000);
         let discovery = Arc::new(PeerDiscovery::with_dns_seeds(
             config.bootstrap_nodes.clone(),
             config.dns_seeds.clone(),

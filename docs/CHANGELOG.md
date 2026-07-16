@@ -9,6 +9,15 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.4.4-alpha] — 2026-07-16
+
+### Changed
+- **Protocol Bump:** Increased protocol version to `17` and network magic to `QT17` to hard-fork away from nodes running the faulty `v2.4.3-alpha` code.
+
+### Fixed
+- **Decompression Bomb (OOM/CPU Leak)**: Fixed a vulnerability in `deserialize_message` where an eager 8MB allocation for every compressed message caused massive allocator churn and OOM crashes. Buffer now scales dynamically.
+- **Queue Memory Exhaustion**: Reduced `message_tx` channel capacity from `10,000` to `1,000` to prevent attackers from hoarding up to 80GB of RAM with backlogged maximum-size blocks.
+
 ## [2.4.3-alpha] — 2026-07-15
 
 ### Changed

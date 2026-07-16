@@ -102,13 +102,13 @@ impl From<&Block> for BlockHeader {
 
 /// Protocol constants
 /// IMPORTANT: Ensure this matches across the cluster during testing!
-pub const PROTOCOL_VERSION: u32 = 16; // v2.4.3-alpha: TOCTOU stream corruption fix
+pub const PROTOCOL_VERSION: u32 = 17; // v2.4.4-alpha: Zip bomb / Decompression OOM hotfix
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"QT16"; // Quanta V2 Testnet (v2.4.3-alpha)
+pub const TESTNET_MAGIC: [u8; 4] = *b"QT17"; // Quanta V2 Testnet (v2.4.4-alpha)
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;
@@ -168,8 +168,8 @@ pub fn deserialize_message(data: &[u8]) -> Result<P2PMessage, String> {
     let decompressed = if is_compressed {
         let mut decoder =
             zstd::stream::Decoder::new(data).map_err(|e| format!("Decompression error: {}", e))?;
-        // HIGH-6 FIX: Pre-allocate with strict cap; take() = MAX exactly (no +1)
-        let mut decomp_data = Vec::with_capacity(MAX_MESSAGE_SIZE);
+        // HIGH-6 FIX: Do not pre-allocate MAX_MESSAGE_SIZE eagerly to prevent OOM/CPU churn
+        let mut decomp_data = Vec::new();
         std::io::Read::take(&mut decoder, MAX_MESSAGE_SIZE as u64)
             .read_to_end(&mut decomp_data)
             .map_err(|e| format!("Decompression read error: {}", e))?;
