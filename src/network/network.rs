@@ -541,6 +541,15 @@ impl Network {
                 self.peer_manager.remove_peer(addr).await;
             }
             P2PMessage::AlephBFTMessage(data) => {
+                // HIGH-3 FIX: Strict size limit to prevent memory exhaustion and hashing CPU spikes
+                if data.len() > 1024 * 1024 {
+                    tracing::warn!("Rejecting oversized AlephBFTMessage from {} ({} bytes)", addr, data.len());
+                    if let Some(p) = &peer {
+                        let _ = p.add_misbehavior(100).await;
+                    }
+                    return Ok(());
+                }
+
                 let tx_opt = self.aleph_bft_tx.read().await;
 
                 // CRITICAL FIX: If the channel is not registered yet, drop the message
@@ -622,6 +631,22 @@ impl Network {
             return Ok(());
         }
 
+        // HIGH-5 FIX: Pre-verify signatures off the Tokio executor thread!
+        // This prevents an attacker from starving the executor and the Blockchain write lock
+        // by spamming invalid transactions.
+        let tx_clone = tx.clone();
+        let is_valid = tokio::task::spawn_blocking(move || tx_clone.verify())
+            .await
+            .map_err(|e| format!("Signature verification panicked: {}", e))?;
+
+        if !is_valid {
+            tracing::warn!("Rejecting transaction with invalid signature");
+            if let Some(p) = peer {
+                let _ = p.add_misbehavior(10).await;
+            }
+            return Ok(());
+        }
+
         let blockchain = self.blockchain.write().await;
         // Check for duplicates in mempool (extra safety)
         {
@@ -661,6 +686,30 @@ impl Network {
     /// silently dropped instead of triggering additional GetBlocks requests.
     /// This prevents the request storm that was causing the stuck-at-272 bug.
     async fn handle_new_block(&self, block: Block, peer: Option<Arc<Peer>>) -> Result<(), String> {
+        // HIGH FIX: Pre-verify signatures off the Tokio executor thread!
+        // This prevents an attacker from starving the executor and the Blockchain read lock
+        // by spamming invalid blocks that pass PoW check but fail signatures.
+        let block_clone = block.clone();
+        let sigs_valid = tokio::task::spawn_blocking(move || {
+            use rayon::prelude::*;
+            block_clone.transactions.par_iter().all(|tx| {
+                if tx.is_coinbase() || tx.sender == "TREASURY" || tx.is_genesis_premine() {
+                    return true;
+                }
+                tx.verify()
+            })
+        })
+        .await
+        .map_err(|e| format!("Signature verification panicked: {}", e))?;
+
+        if !sigs_valid {
+            tracing::warn!("Rejecting block with invalid signatures");
+            if let Some(p) = &peer {
+                let _ = p.add_misbehavior(50).await;
+            }
+            return Ok(());
+        }
+
         let is_syncing = self.syncing.load(Ordering::SeqCst);
 
         // REORG FIX: Use the exact requested range (sync_request_range) to decide
@@ -892,7 +941,12 @@ impl Network {
 
         // Batch header response — push to buffer for the sync loop.
         let mut buffer = self.header_buffer.lock().await;
-        buffer.extend(headers);
+        // HIGH FIX: Prevent memory exhaustion attack from infinite header spam
+        if buffer.len() < 10_000 {
+            buffer.extend(headers);
+        } else {
+            tracing::warn!("Header buffer full, dropping batch");
+        }
         Ok(())
     }
 

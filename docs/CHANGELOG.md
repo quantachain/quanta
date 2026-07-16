@@ -9,6 +9,18 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.4.5-alpha] — 2026-07-16
+
+### Changed
+- **Protocol Bump:** Increased protocol version to `18` and network magic to `QT18` to hard-fork away from nodes running the faulty `v2.4.4-alpha` code.
+
+### Fixed
+- **Header Buffer OOM Fix**: Bounded the block header sync buffer to 10,000 headers to prevent a memory leak and OOM crash via header spamming.
+- **Transaction Signature Pre-verification**: Offloaded `Falcon-512` mempool signature validation to the blocking threadpool *before* acquiring the Blockchain lock. This stops a massive Tokio executor starvation attack caused by spamming invalid transactions.
+- **Block Signature Pre-verification**: Offloaded Rayon multi-threaded signature validation inside blocks to the blocking threadpool to prevent freezing the entire Tokio runtime.
+- **AlephBFT Message Limit**: Bounded incoming BFT gossip messages to 1MB max.
+- **Lock Scope Deadlock Fix**: Fixed a bug where a read lock was artificially held across the blocking Zstd decompression task.
+
 ## [2.4.4-alpha] — 2026-07-16
 
 ### Changed

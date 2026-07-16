@@ -79,7 +79,7 @@ impl Peer {
     /// other concurrent send (AlephBFT votes, pings, block gossip) behind it.
     /// That lock starvation was the direct cause of BFT consensus freezing while
     /// nodes showed as "Online".
-    pub async fn send_message(&self, message: P2PMessage) -> Result<(), String> {
+    pub async fn send_raw_data(&self, data: Vec<u8>) -> Result<(), String> {
         {
             let info = self.info.read().await;
             if info.strikes >= 100 || info.last_seen == 0 {
@@ -87,7 +87,6 @@ impl Peer {
             }
         }
 
-        let data = serialize_message(&message)?;
         let len = data.len() as u32;
 
         // CRITICAL FIX: We must acquire the write lock OUTSIDE the timeout.
@@ -126,6 +125,15 @@ impl Peer {
                 Err(format!("Send timeout after 10s — peer disconnected and stream marked corrupted"))
             }
         }
+    }
+
+    pub async fn send_message(&self, message: P2PMessage) -> Result<(), String> {
+        // BETA FIX: Offload CPU-heavy Zstd compression to blocking threadpool
+        let data = tokio::task::spawn_blocking(move || serialize_message(&message))
+            .await
+            .map_err(|e| format!("Serialization task panicked: {}", e))??;
+            
+        self.send_raw_data(data).await
     }
 
     /// Receive a message from this peer with timeout
@@ -181,7 +189,11 @@ impl Peer {
             .map_err(|e| format!("Failed to read message data: {}", e))?;
 
         // CRIT-6: magic bytes verified inside deserialize_message (protocol.rs)
-        deserialize_message(&data)
+        // BETA FIX: Offload CPU-heavy Zstd decompression to blocking threadpool
+        drop(read);
+        tokio::task::spawn_blocking(move || deserialize_message(&data))
+            .await
+            .map_err(|e| format!("Deserialization task panicked: {}", e))?
     }
 
     /// Update peer information after handshake
@@ -532,14 +544,29 @@ impl PeerManager {
     pub async fn broadcast(&self, msg: P2PMessage) {
         let peers = self.peers.read().await.clone();
 
+        // BETA FIX: Serialize and compress ONLY ONCE to eliminate O(N) CPU amplification.
+        // Previously, broadcasting a 1MB BFT message to 15 peers would run Zstd compression
+        // 15 separate times on the Tokio executor, causing immediate freezing and OOM.
+        let data = match tokio::task::spawn_blocking(move || serialize_message(&msg)).await {
+            Ok(Ok(d)) => d,
+            Ok(Err(e)) => {
+                tracing::error!("Failed to serialize broadcast message: {}", e);
+                return;
+            }
+            Err(e) => {
+                tracing::error!("Broadcast serialization task panicked: {}", e);
+                return;
+            }
+        };
+
         // Spawn concurrent sends — don't let one slow peer block everyone
         for peer in peers {
             if peer.info.read().await.strikes >= 100 {
                 continue; // Skip dead peers instantly to save CPU
             }
-            let msg_clone = msg.clone();
+            let data_clone = data.clone();
             tokio::spawn(async move {
-                if let Err(e) = peer.send_message(msg_clone).await {
+                if let Err(e) = peer.send_raw_data(data_clone).await {
                     tracing::debug!("Failed to send message to peer: {}", e);
                 }
             });
