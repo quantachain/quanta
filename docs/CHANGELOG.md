@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.4.7-alpha] - 2026-07-17
+
+### Changed
+- **Network Isolation**: Bumped `PROTOCOL_VERSION` from 18 to 19 and `NETWORK_MAGIC` to `QT19` to cleanly evict unpatched nodes running `v2.4.5-alpha` that were caught in an infinite proposing loop and flooding the network with garbage blocks and AlephBFT messages.
+
 All notable changes to QuantaChain are documented here.
 
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)  

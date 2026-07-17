@@ -1,6 +1,10 @@
-# QuantaChain Testnet — V2 Release (v2.4.6-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.7-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.4.7-alpha — NETWORK ISOLATION HOTFIX (2026-07-17)**
+> **MANDATORY UPDATE (PROTOCOL V19, MAGIC=QT19).** 
+> * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `19`. This completely isolates your node from older `v2.4.5` community nodes that are stuck in an infinite loop and flooding the network with garbage messages. This fixes the RAM spike and VM crash. The network will resume block production once the community nodes upgrade.
 
 > **v2.4.6-alpha — BFT INFINITE LOOP HOTFIX (2026-07-17)**
 > **MANDATORY UPDATE.** Critical hotfix for an infinite block proposal loop that caused 120% CPU spikes and unbounded memory leaks:
