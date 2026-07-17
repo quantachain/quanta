@@ -1,90 +1,27 @@
-# QuantaChain Testnet — V2 Release (v2.4.9-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.10-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
+> **v2.4.10-alpha — AlephBFT CPU SPIKE FIX (2026-07-17)**
+> **MANDATORY UPDATE.** Root-cause fix for 80–90% CPU usage when the network has no block finalization (insufficient quorum):
+> * **Session Watchdog**: Added a 120-second watchdog in `bft_proposer.rs`. If no block is finalized for >120s, the AlephBFT session is terminated and the node sleeps 30s before restarting. This prevents the DAG unit-creation loop (which fires every 500ms per validator via Falcon-512 signing) from running indefinitely when fewer than 9/13 validators are online.
+> * **Stuck Backoff in DataProvider**: `aleph_data.rs` now sleeps 30s before proposing a block if no block has been finalized for >30s, further reducing CPU during network downtime.
+> * **Root Cause**: AlephBFT creates a Falcon-512-signed DAG unit every 500ms per node. With 4 nodes and no quorum, this produced ~8 heavy crypto ops/second indefinitely — 80–90% CPU. Previously this never triggered because blocks were finalized every 6s and sessions rotated quickly.
+> * **Protocol unchanged**: Still v19 / QT19. No chain reset required.
+
 > **v2.4.9-alpha — EPOCH POOL REWARD MODEL (2026-07-17)**
-> **MANDATORY UPDATE.** Activates at block 100,000 alongside Tokenomics V3:
-> * **Fair Uptime-Based Rewards**: All block proposer rewards now flow into a shared `EPOCH_POOL_ADDRESS` instead of going directly to whoever wins the DAG latency race. At each epoch boundary (every 1,000 blocks), the pool is distributed proportionally to all validators by their uptime (blocks proposed). A validator online 100% of the time earns exactly their fair share — regardless of server location or ping.
-> * **No Chain Reset**: The existing chain continues from block ~81,664. The new model activates automatically at block 100,000. All validators must upgrade before that height.
-> * **Protocol unchanged**: Still v19 / QT19.
+> * Reward distribution switches from single-proposer-wins-all to uptime-proportional pooling at block 100,000. No chain reset required.
 
-> **v2.4.8-alpha — CPU SPIKE HOTFIX (2026-07-17)**
-> **MANDATORY UPDATE.** Critical fix for 100% CPU usage when the node has 0 peers:
-> * **AlephBFT No-Peer Guard**: Added a check in `bft_proposer.rs` to prevent AlephBFT from starting a consensus session when 0 peers are connected. Previously, with 0 peers, AlephBFT would spin forever calling `get_data()` in a tight loop (since it can never reach 2/3+1 quorum with 1 validator) burning 100% of a CPU core. The node now sleeps 10s between checks and waits until at least 1 peer connects.
+> **v2.4.7-alpha** \u2014 Network isolation (Protocol v19 / QT19): evicts old v2.4.5 nodes flooding network.
+> **v2.4.6-alpha** \u2014 BFT infinite loop fix: strict stake/unstake validation in mempool and block template.
+> **v2.4.5-alpha** \u2014 CPU/RAM DOS fix (Protocol v18 / QT18): header buffer OOM, Tokio starvation, BFT message limit.
+> **v2.4.4-alpha** \u2014 Memory leak and zip bomb fix (Protocol v17 / QT17).
+> **v2.4.3-alpha** \u2014 TOCTOU race condition fix (Protocol v16 / QT16).
+> **v2.4.2-alpha** \u2014 Network stability and IP flapping fix (Protocol v15 / QT15).
+> **v2.4.1-alpha** \u2014 Peer ban/flapping fix: dead streams no longer trigger bans.
+> **v2.4.0-alpha** \u2014 BFT session restart timing fix, locking optimisation.
+> **v2.3.x-alpha** \u2014 Protocol v14/QT14, stream framing fix, log spam cleanup, BFT gossip relay fix.
 
-> **MANDATORY UPDATE (PROTOCOL V19, MAGIC=QT19).** 
-> * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `19`. This completely isolates your node from older `v2.4.5` community nodes that are stuck in an infinite loop and flooding the network with garbage messages. This fixes the RAM spike and VM crash. The network will resume block production once the community nodes upgrade.
-
-> **v2.4.6-alpha — BFT INFINITE LOOP HOTFIX (2026-07-17)**
-> **MANDATORY UPDATE.** Critical hotfix for an infinite block proposal loop that caused 120% CPU spikes and unbounded memory leaks:
-> * **Mempool Transaction Type Validation**: Fixed a bug where `add_transaction` accepted completely invalid `Stake` and `Unstake` transactions into the mempool because it only checked balances and nonces.
-> * **Proposer Poison Block Prevention**: `create_block_template` now performs strict state validation on `Stake`, `Unstake`, and `SlashEvidence` transactions *before* including them in a block. This prevents honest nodes from proposing invalid blocks that would be finalized by AlephBFT and then subsequently rejected by the local node, breaking consensus and causing an infinite loop.
-
-> **v2.4.5-alpha — CPU/RAM DOS HOTFIX (2026-07-16)**
-> **MANDATORY UPDATE (PROTOCOL V18, MAGIC=QT18).** Critical hotfix for Tokio threadpool starvation and memory leaks:
-> * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `18` and `NETWORK_MAGIC` to `QT18` to cleanly hard fork away from nodes running the faulty `v2.4.4-alpha` code.
-> * **Header Buffer OOM Fix**: Bounded the block header sync buffer to 10,000 headers to prevent a memory leak and OOM crash via header spamming.
-> * **Transaction Signature Pre-verification**: Offloaded `Falcon-512` mempool signature validation to the blocking threadpool *before* acquiring the Blockchain lock. This stops a massive Tokio executor starvation attack caused by spamming invalid transactions.
-> * **Block Signature Pre-verification**: Offloaded Rayon multi-threaded signature validation inside blocks to the blocking threadpool to prevent freezing the entire Tokio runtime.
-> * **AlephBFT Message Limit**: Bounded incoming BFT gossip messages to 1MB max.
-> * **Lock Scope Deadlock Fix**: Fixed a bug where a read lock was artificially held across the blocking Zstd decompression task.
-
-
-> **v2.4.4-alpha — MEMORY LEAK & ZIP BOMB HOTFIX (2026-07-16)**
-> **MANDATORY UPDATE (PROTOCOL V17, MAGIC=QT17).** Critical hotfix for OOM and CPU freezing:
-> * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `17` and `NETWORK_MAGIC` to `QT17` to cleanly hard fork away from nodes running the faulty `v2.4.3-alpha` code.
-> * **Decompression Bomb Fix**: Prevented an eager 8MB memory allocation for every single incoming compressed message which caused 100% CPU utilization and immediate RAM exhaustion.
-> * **Channel Queue Exhaustion**: Reduced network message queue capacity by 10x to prevent an attacker from piling up to 80GB of 8MB messages in memory.
-
-> **v2.4.3-alpha — TOCTOU RACE CONDITION HOTFIX (2026-07-15)**
-> **MANDATORY UPDATE (PROTOCOL V16, MAGIC=QT16).** Critical hotfix for P2P network stability:
-> * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `16` and `NETWORK_MAGIC` to `QT16` to cleanly hard fork away from nodes running the faulty `v2.4.2-alpha` code.
-> * **TOCTOU Stream Corruption**: Fixed the root cause of the stream corruption bug. The previous fix did not account for the `tokio::time::timeout` dropping the future and releasing the Mutex lock *before* setting `last_seen = 0`. The timeout is now performed *inside* the locked scope, fully preventing thread races from writing to a corrupted stream.
-
-> **v2.4.2-alpha — NETWORK STABILITY HOTFIX (2026-07-15)**
-> **MANDATORY UPDATE (PROTOCOL V15, MAGIC=QT15).** Critical hotfix for P2P network stability:
-> * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `15` and `NETWORK_MAGIC` to `QT15`. This forces old nodes with the TOCTOU bug to disconnect, isolating the healthy network from corrupted streams.
-> * **TOCTOU Stream Corruption**: Fixed a concurrency bug in `send_message` where a slow write would timeout, dropping the write lock mid-message and leaving the TCP stream corrupted. This caused receivers to encounter `Decompression read error` and `Stream corrupted or dead` storms. 
-> * **IP Flapping Fix**: Fixed an issue where the discovery loop aggressively dropped connections to peers running on the same IP Address. VPS nodes can now seamlessly mesh with each other.
-
-> **v2.4.1-alpha — CRITICAL HOTFIX (2026-07-15)**
-> **NO PROTOCOL BUMP.** Critical hotfix for P2P network stability:
-> * **Flapping / Ban Fix**: Fixed a massive bug where any normal TCP stream disconnection (such as a timeout or intentional drop by a peer hitting its max connection limit) triggered an automatic 100-strike malicious behavior score. This caused nodes to instantly IP-ban each other on the slightest network hiccup, leading to a complete chain reaction network collapse and BFT stall. Dead streams are now cleanly marked without triggering bans.
-
-> **v2.4.0-alpha — MAJOR RELEASE (2026-07-15)**
-> * **BFT Stability**: Fixed a BFT session restart timing bug that could cause block production to stall for 5+ minutes at session boundaries.
-> * **Locking Optimization**: Explicitly drop blockchain write locks in all paths to reduce thread latency.
-> * **Docker Cleanup**: Cleaned up redundant container configuration in docker-compose.
-
-> **v2.3.9-alpha — MANDATORY PROTOCOL UPGRADE (2026-07-15)**
-> **MANDATORY UPDATE (PROTOCOL V14, MAGIC=QT14).** All nodes MUST upgrade. This version permanently breaks compatibility with all prior versions to eliminate the stream corruption issue:
-> * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `14`. Nodes on v13 or below will be rejected at handshake.
-> * **Network Magic Changed**: Updated magic bytes from `Q9TE` to `QT14`. Any node with the old magic will be instantly rejected before any data is exchanged, preventing TCP stream corruption.
-> * **Signature Verification Logs**: Demoted `AlephBFT signature verification FAILED` from `WARN` to `DEBUG`.
-> * **Decode Failure Logs**: Demoted `Failed to decode incoming AlephBFT message` from `WARN` to `DEBUG`.
-
-> **v2.3.8-alpha — HIGH CPU & DATA CORRUPTION HOTFIX (2026-07-15)**
-> **NO PROTOCOL BUMP.** Critical hotfix to resolve CPU spikes and data corruption:
-> * **TCP Stream Framing Fix**: Fixed a massive bug where an I/O timeout during `send_message` or `receive_message` would leave partial bytes in the OS TCP buffer while keeping the stream open. This caused all subsequent messages to lose their framing, resulting in `Decompression read error`, `Could not decode 'NetworkDataInner'`, and extreme CPU spikes as the node repeatedly spun up tasks trying to decode garbage data or allocating massive chunks of memory (`Message too large`). Streams are now properly marked as corrupted and dead on any timeout.
-> * **Broadcast CPU Optimization**: The BFT broadcasting loop now explicitly drops dead peers instantly instead of spinning up thousands of `tokio::spawn` tasks that all independently wait for network timeouts.
-
-> **v2.3.7-alpha — LOG SPAM HOTFIX 2 (2026-07-15)**
-> **NO PROTOCOL BUMP.** Cleaned up remaining terminal output:
-> * **BFT Unicast Spam Fix**: Demoted a secondary `Unicast AlephBFT to ... failed` log to `DEBUG`. This fixes the remaining terminal spam when attempting to unicast to a newly disconnected validator.
-
-> **v2.3.7-alpha — REMOVED DEBUG LOGS (2026-07-15)**
-> **NO PROTOCOL BUMP.** Cleaned up terminal output:
-> * **BFT Observability**: Removed the verbose diagnostic logs displaying the quorum size (`f` and `2f+1`) that were added during the consensus stall debugging phase, returning to the standard session start logs.
-
-> **v2.3.6-alpha — LOG SPAM HOTFIX (2026-07-15)**
-> **NO PROTOCOL BUMP.** Hotfix to resolve terminal log spam during node disconnections:
-> * **BFT Broadcast Spam Fix**: Demoted the `Failed to send message to peer` log from `WARN` to `DEBUG`. This prevents the node from spamming the terminal with hundreds of warnings per second when it attempts to broadcast consensus messages to a recently disconnected peer before the dead-peer cleanup cycle removes them.
-
-> **v2.3.5-alpha — BFT CONSENSUS RETRY HOTFIX (2026-07-15)**
-> **MANDATORY UPDATE (PROTOCOL V13).** Critical hotfix to resolve consensus stalling when validators drop units during initialization:
-> * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `13` to strictly isolate the network from older versions that drop retry messages.
-> * **BFT Gossip Relay Fix**: Fixed a bug where the P2P LRU cache aggressively dropped all AlephBFT retries from being relayed, permanently starving validators and stalling the DAG consensus. Retries are now properly identified and gossiped across the network.
-> * **BFT Quorum Observability**: Added verbose diagnostic logging in the `BFT Proposer` task to clearly display validator index, total committee size, fault tolerance ($f$), and required quorum size ($2f+1$) during session initialization.
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
 

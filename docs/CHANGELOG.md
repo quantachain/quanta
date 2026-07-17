@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.4.10-alpha] - 2026-07-17
+
+### Fixed
+- **AlephBFT CPU Spike (Root Cause)**: Added a 120-second session watchdog in `bft_proposer.rs`. When no block is finalized for >120s (quorum lost), the watchdog terminates the AlephBFT session and sleeps 30s before restarting. Root cause: AlephBFT creates a Falcon-512-signed DAG unit every 500ms per node even when stuck — 4 nodes × 2 units/sec = ~8 heavy crypto ops/sec = 80–90% CPU indefinitely. Also added a 30s stuck-backoff in `aleph_data.rs` (`get_data()`) when no block is finalized for >30s.
+
 ## [v2.4.9-alpha] - 2026-07-17
 
 ### Added

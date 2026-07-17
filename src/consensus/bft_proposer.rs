@@ -397,6 +397,24 @@ pub async fn run_bft_proposer(
 
         let target_height_for_next_session = (session_id + 1) * SESSION_LENGTH;
         let bc_for_monitor = blockchain.clone();
+        let last_ts_monitor = last_finalized_ts.clone();
+
+        // -----------------------------------------------------------------------
+        // SESSION WATCHDOG — CPU SPIKE ROOT CAUSE FIX
+        //
+        // When AlephBFT is running but cannot reach 2/3+1 quorum (network stuck),
+        // it creates a new Falcon-512 signed DAG unit every 500ms per validator.
+        // With 4 nodes this is ~8 Falcon-512 sign+verify ops/second = 80-90% CPU.
+        //
+        // Before this issue never happened because blocks were finalized every 6s,
+        // sessions rotated cleanly, and the DAG round counter was always near 0.
+        // Now with the network isolated (only 4/13 validators), sessions run
+        // forever at 500ms intervals until hitting MAX_ROUNDS_PER_SESSION.
+        //
+        // Fix: If no block is finalized for >120s, kill the session and restart.
+        // On restart we sleep 30s before re-entering, dropping CPU to near-zero.
+        // -----------------------------------------------------------------------
+        const STUCK_WATCHDOG_SECS: i64 = 120; // kill session after 2min of no progress
 
         let mut session_task = tokio::spawn(async move {
             run_session(
@@ -422,6 +440,19 @@ pub async fn run_bft_proposer(
                     if height >= target_height_for_next_session {
                         if let Some(tx) = terminator_tx_opt.take() {
                             info!("BFT Proposer: reached session boundary (height {} >= {}). Terminating session {}...", height, target_height_for_next_session, session_id);
+                            let _ = tx.send(());
+                        }
+                    }
+
+                    // WATCHDOG: kill session if no block finalized for >120s
+                    let now_ts = chrono::Utc::now().timestamp();
+                    let last_ts = last_ts_monitor.load(std::sync::atomic::Ordering::Acquire);
+                    if now_ts.saturating_sub(last_ts) > STUCK_WATCHDOG_SECS {
+                        if let Some(tx) = terminator_tx_opt.take() {
+                            warn!(
+                                "BFT Proposer: WATCHDOG — no block finalized for {}s (quorum not met?). Terminating session {} to save CPU. Will sleep 30s before restart.",
+                                now_ts.saturating_sub(last_ts), session_id
+                            );
                             let _ = tx.send(());
                         }
                     }
@@ -461,10 +492,10 @@ pub async fn run_bft_proposer(
         }
 
         warn!(
-            "BFT Proposer: session {} ended. Restarting in 1 second…",
+            "BFT Proposer: session {} ended. Restarting in 30 seconds…",
             session_id
         );
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
     }
 }
 
