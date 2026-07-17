@@ -1,6 +1,10 @@
-# QuantaChain Testnet — V2 Release (v2.4.13-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.14-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.4.14-alpha — AUTOMATIC CPU/OOM RECOVERY (2026-07-17)**
+> **MANDATORY UPDATE.** Fixes nodes hanging at 100% CPU indefinitely upon reboot.
+> * **Bloated Backup Wiping**: Added an automatic size check in `bft_proposer.rs` that wipes the AlephBFT backup file *before* opening it if it exceeds 10 MB. This allows nodes that were previously stuck accumulating multi-GB files (due to earlier bugs) to automatically recover and boot instantly, without requiring manual `sudo rm` intervention from node operators.
 
 > **v2.4.13-alpha — UNICAST BROADCAST STORM HOTFIX (2026-07-17)**
 > **MANDATORY UPDATE.** Fixes the actual root cause of the 100% CPU lockup when quorum is lost.

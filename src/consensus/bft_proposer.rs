@@ -331,6 +331,26 @@ pub async fn run_bft_proposer(
             session_id, backup_path
         );
 
+        // -----------------------------------------------------------------------
+        // AUTO-WIPE BLOATED BACKUPS (CPU/OOM RECOVERY)
+        // If a node was previously stuck in a network partition without the 
+        // watchdog fix, its backup file might have grown to multiple GBs.
+        // Trying to read a multi-GB backup file spikes CPU to 100% and RAM 
+        // to 2GB+ during initialization, causing the node to hang on startup.
+        // A healthy backup file is ~1-2 MB. If it's >10 MB, it is hopelessly 
+        // bloated and we must delete it to allow the node to boot.
+        // -----------------------------------------------------------------------
+        if let Ok(metadata) = std::fs::metadata(&backup_path) {
+            if metadata.len() > 10 * 1024 * 1024 { // 10 MB
+                tracing::warn!(
+                    "AlephBFT backup file {:?} is abnormally large ({} bytes). Wiping to prevent OOM/CPU lockup on startup.",
+                    backup_path,
+                    metadata.len()
+                );
+                let _ = std::fs::remove_file(&backup_path);
+            }
+        }
+
         // Open file for saving (append-within-session is fine; it's the
         // cross-session accumulation that killed performance).
         let file_for_saving = tokio::fs::OpenOptions::new()

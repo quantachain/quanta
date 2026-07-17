@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.4.14-alpha] - 2026-07-17
+
+### Fixed
+- **Startup CPU/OOM Recovery**: Added an automatic size check in `bft_proposer.rs` that wipes the AlephBFT backup file *before* opening it if it exceeds 10 MB. This allows nodes that were previously stuck accumulating multi-GB files (due to earlier bugs) to automatically recover and boot without needing manual user intervention to delete the files via `sudo rm`.
+
 ## [v2.4.13-alpha] - 2026-07-17
 
 ### Fixed
