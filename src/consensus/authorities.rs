@@ -29,6 +29,12 @@ pub const EPOCH_SIZE: u64 = 1000;
 /// V3 Economics Activation Height
 pub const V3_ECONOMICS_HEIGHT: u64 = 100_000;
 
+/// Epoch Pool Reward Activation Height — aligned with V3 Economics for a single clean cutover.
+/// Before this height: coinbase goes directly to the block proposer (old model).
+/// From this height on: coinbase goes to the EPOCH_POOL_ADDRESS and is distributed
+/// proportionally to all validators at each epoch boundary based on pure uptime.
+pub const EPOCH_REWARD_ACTIVATION_HEIGHT: u64 = 100_000;
+
 /// Minimum QUA (in microunits) a validator must stake to register.
 /// 100,000 QUA — meaningful economic commitment, but low enough for testnet.
 /// Change to 1,000,000 QUA (1_000_000_000_000) for mainnet launch.

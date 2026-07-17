@@ -119,6 +119,12 @@ const TREASURY_ALLOCATION_PERCENT: u64 = 8; // 8% of block rewards → Quanta Ec
 // Keyset: treasury_key0.qua … treasury_key4.qua — any 3 of 5 must sign.
 const TREASURY_ADDRESS: &str = "ms69216b1d10425689704d5ae3b2a4aa17049f59b1";
 
+/// Epoch reward pool address — receives all block proposer rewards after EPOCH_REWARD_ACTIVATION_HEIGHT.
+/// Distributed to validators proportionally by uptime at each epoch boundary.
+/// Address is all-zeros + 1: cannot be derived from any known key, making it permanently
+/// non-spendable except through the epoch distribution logic below.
+const EPOCH_POOL_ADDRESS: &str = "0x0000000000000000000000000000000000000001";
+
 // NOTE: Reward lock removed — replaced by DPoS unbonding period (UNBONDING_EPOCHS).
 // The BFT proposer always receives the full block reward immediately; no lock is applied.
 
@@ -976,11 +982,22 @@ impl Blockchain {
             proposer_reward / 1_000_000
         );
 
+        // EPOCH POOL MODEL (activated at EPOCH_REWARD_ACTIVATION_HEIGHT):
+        // After activation, the proposer reward goes into the epoch pool address
+        // instead of directly to the proposer. The pool is distributed to all
+        // validators proportionally by uptime at each epoch boundary.
+        use crate::consensus::authorities::EPOCH_REWARD_ACTIVATION_HEIGHT;
+        let coinbase_recipient = if current_height >= EPOCH_REWARD_ACTIVATION_HEIGHT {
+            EPOCH_POOL_ADDRESS.to_string()
+        } else {
+            proposer_address.clone()
+        };
+
         // Coinbase transaction (full proposer reward + fee share)
         let coinbase_amount = proposer_reward.saturating_add(fee_to_miner);
         let coinbase_tx = Transaction {
             sender: "COINBASE".to_string(),
-            recipient: proposer_address.clone(),
+            recipient: coinbase_recipient,
             amount: coinbase_amount,
             timestamp: chrono::Utc::now().timestamp(),
             signature: vec![],
@@ -1410,6 +1427,22 @@ impl Blockchain {
                 actual: coinbase.amount,
                 expected: expected_coinbase,
             });
+        }
+
+        // Validate coinbase recipient: before activation → must be block proposer;
+        // after activation → must be EPOCH_POOL_ADDRESS.
+        use crate::consensus::authorities::EPOCH_REWARD_ACTIVATION_HEIGHT;
+        let expected_coinbase_recipient = if block.index >= EPOCH_REWARD_ACTIVATION_HEIGHT {
+            EPOCH_POOL_ADDRESS.to_string()
+        } else {
+            block.proposer.clone()
+        };
+        if coinbase.recipient != expected_coinbase_recipient {
+            tracing::warn!(
+                "Invalid coinbase recipient at block {}: expected {}, got {}",
+                block.index, expected_coinbase_recipient, coinbase.recipient
+            );
+            return Err(BlockchainError::InvalidBlock);
         }
 
         // Validate treasury transaction if fees or allocation exist
@@ -2661,8 +2694,9 @@ impl Blockchain {
         // Record the block proposer for downtime tracking
         new_state.record_block_proposed(&block.proposer, block.index);
 
-        // EPOCH BOUNDARY: process unbonding returns and downtime slashing
+        // EPOCH BOUNDARY: process unbonding returns, downtime slashing, and epoch pool distribution
         use crate::consensus::authorities::EPOCH_SIZE;
+        use crate::consensus::authorities::EPOCH_REWARD_ACTIVATION_HEIGHT;
         if block.index > 0 && block.index % EPOCH_SIZE == 0 {
             let epoch = crate::consensus::authorities::epoch_for_height(block.index);
             tracing::info!(
@@ -2678,6 +2712,58 @@ impl Blockchain {
                     // Return unbonded stake to validator immediately (spendable)
                     new_state.credit_account_direct(&addr, amount);
                     tracing::info!("Unbonded stake returned to {}: {} microunits", addr, amount);
+                }
+            }
+
+            // EPOCH POOL DISTRIBUTION (active from EPOCH_REWARD_ACTIVATION_HEIGHT)
+            // Read the last EPOCH_SIZE block headers to compute each validator's
+            // uptime (number of blocks they proposed). Distribute the pool proportionally.
+            if block.index >= EPOCH_REWARD_ACTIVATION_HEIGHT {
+                let pool_balance = new_state.get_balance(EPOCH_POOL_ADDRESS);
+                if pool_balance > 0 {
+                    // Count how many blocks each validator proposed in this epoch
+                    let epoch_start = block.index.saturating_sub(EPOCH_SIZE - 1);
+                    let mut proposer_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+                    let mut total_counted: u64 = 0;
+                    for h in epoch_start..=block.index {
+                        if let Some(b) = self.storage.load_block(h).ok() {
+                            if !b.proposer.is_empty() {
+                                *proposer_counts.entry(b.proposer.clone()).or_insert(0) += 1;
+                                total_counted += 1;
+                            }
+                        }
+                    }
+
+                    if total_counted > 0 {
+                        let mut distributed: u64 = 0;
+                        let mut last_proposer: Option<String> = None;
+                        for (proposer, count) in &proposer_counts {
+                            let share = (pool_balance * count) / total_counted;
+                            if share > 0 {
+                                new_state.credit_account_direct(proposer, share);
+                                distributed = distributed.saturating_add(share);
+                                last_proposer = Some(proposer.clone());
+                                tracing::info!(
+                                    "Epoch {} reward: {} gets {} microunits ({}/{} blocks, {:.1}% uptime)",
+                                    epoch, proposer, share, count, total_counted,
+                                    (*count as f64 / total_counted as f64) * 100.0
+                                );
+                            }
+                        }
+                        // Integer rounding remainder goes to last proposer (prevents dust)
+                        let remainder = pool_balance.saturating_sub(distributed);
+                        if remainder > 0 {
+                            if let Some(addr) = last_proposer {
+                                new_state.credit_account_direct(&addr, remainder);
+                            }
+                        }
+                        // Zero out the epoch pool
+                        new_state.debit_account_direct(EPOCH_POOL_ADDRESS, pool_balance);
+                        tracing::info!(
+                            "Epoch {} pool distributed: {} microunits across {} validators",
+                            epoch, pool_balance, proposer_counts.len()
+                        );
+                    }
                 }
             }
         }

@@ -1,6 +1,12 @@
-# QuantaChain Testnet — V2 Release (v2.4.7-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.9-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.4.9-alpha — EPOCH POOL REWARD MODEL (2026-07-17)**
+> **MANDATORY UPDATE.** Activates at block 100,000 alongside Tokenomics V3:
+> * **Fair Uptime-Based Rewards**: All block proposer rewards now flow into a shared `EPOCH_POOL_ADDRESS` instead of going directly to whoever wins the DAG latency race. At each epoch boundary (every 1,000 blocks), the pool is distributed proportionally to all validators by their uptime (blocks proposed). A validator online 100% of the time earns exactly their fair share — regardless of server location or ping.
+> * **No Chain Reset**: The existing chain continues from block ~81,664. The new model activates automatically at block 100,000. All validators must upgrade before that height.
+> * **Protocol unchanged**: Still v19 / QT19.
 
 > **v2.4.8-alpha — CPU SPIKE HOTFIX (2026-07-17)**
 > **MANDATORY UPDATE.** Critical fix for 100% CPU usage when the node has 0 peers:

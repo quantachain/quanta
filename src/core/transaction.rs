@@ -785,6 +785,17 @@ impl AccountState {
         account.balance = account.balance.saturating_add(amount);
     }
 
+    /// Directly debit an account by a specific amount, saturating at zero.
+    /// Used to zero out the epoch pool address after reward distribution.
+    pub fn debit_account_direct(&mut self, address: &str, amount: u64) {
+        if amount == 0 {
+            return;
+        }
+        if let Some(account) = self.accounts.get_mut(address) {
+            account.balance = account.balance.saturating_sub(amount);
+        }
+    }
+
     /// Move mature coinbase balances into the spendable pool.
     /// Called once per new block.
     pub fn unlock_mature_coinbase(&mut self, current_height: u64) {

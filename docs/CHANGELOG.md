@@ -1,6 +1,13 @@
 # Changelog
 
-## [v2.4.8-alpha] - 2026-07-17
+## [v2.4.9-alpha] - 2026-07-17
+
+### Added
+- **Epoch Pool Reward Model**: Activated at block 100,000 (aligned with V3 economics). Instead of the single DAG-race winner getting 100% of the block reward, all block rewards now accumulate in a dedicated `EPOCH_POOL_ADDRESS`. At every epoch boundary (every 1,000 blocks), the entire pool is distributed proportionally to all validators based on their **uptime** (number of blocks they proposed in the epoch). This completely eliminates latency-based reward inequality.
+  - `authorities.rs`: Added `EPOCH_REWARD_ACTIVATION_HEIGHT = 100_000`.
+  - `blockchain.rs`: Coinbase recipient switches to `EPOCH_POOL_ADDRESS` at activation height. Validation enforces this. Epoch boundary logic reads last 1,000 block proposers from disk and distributes proportionally.
+  - `transaction.rs`: Added `debit_account_direct()` to zero out pool after distribution.
+
 
 ### Fixed
 - **CPU Spike (0-Peer Bug)**: Added a minimum peer count guard in `bft_proposer.rs`. When the node has 0 connected peers, AlephBFT was being started despite having no way to reach 2/3+1 quorum. The DAG would spin forever calling `get_data()` in a tight loop, burning a full CPU core. The BFT proposer now waits (sleeping 10s between checks) until at least 1 peer is connected before starting a consensus session.
