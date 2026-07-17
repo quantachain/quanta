@@ -601,13 +601,6 @@ impl Network {
                     return Ok(());
                 }
 
-                // CPU SPIKE FIX: Do NOT relay UNICAST messages (tag == 1).
-                // Unicast messages are meant for a specific peer. Gossiping them
-                // causes massive network storms and O(N^2) CPU amplification, 
-                // especially for large Fetch responses or when validators are offline.
-                if data.first() == Some(&1) {
-                    return Ok(());
-                }
 
                 // HIGH FIX: Relay the message to all peers! This eliminates the need
                 // for a "Full Mesh" network topology and allows the network to scale

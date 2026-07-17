@@ -735,3 +735,7 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 [0.5.0-alpha]: https://github.com/quantachain/quanta/compare/v0.3.0-alpha...v0.5.0-alpha
 [0.3.0-alpha]: https://github.com/quantachain/quanta/compare/v0.2.0-alpha...v0.3.0-alpha
 [0.2.0-alpha]: https://github.com/quantachain/quanta/releases/tag/v0.2.0-alpha
+
+## [v2.4.21-alpha] - 2026-07-17
+### Fixed
+- **AlephBFT Unicast Routing**: Removed an aggressive CPU spike filter that was incorrectly dropping AlephBFT unicast messages. This fixes an issue where validators could not fetch missing DAG units across the P2P network, resolving stalled AlephBFT consensus when the network is not a full mesh.
