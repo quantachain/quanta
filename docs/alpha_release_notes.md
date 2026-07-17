@@ -1,6 +1,12 @@
-# QuantaChain Testnet — V2 Release (v2.4.14-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.15-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.4.15-alpha — NETWORK PROTOCOL HARD FORK (2026-07-17)**
+> **MANDATORY UPDATE.** Bumps the internal `PROTOCOL_VERSION` to 20 to fully isolate upgraded nodes from older nodes running v2.4.5 through v2.4.12.
+> * **Background**: In v2.4.13, we added a unicast routing wrapper to AlephBFT consensus messages to fix a broadcast storm. However, older nodes did not understand this new wrapper, causing them to silently drop units without ACKing them. This forced the upgraded nodes into a hyper-aggressive retry loop that consumed 100% CPU via ZSTD compression tasks.
+> * **Hard Fork Isolation**: By incrementing the `PROTOCOL_VERSION`, upgraded nodes now explicitly reject handshakes from older, incompatible validators. 
+> * **NOTE ON CHAIN STALL**: Because the network is now split between v19 and v20 nodes, **neither side currently has the 2/3 + 1 quorum needed to finalize new blocks**. The chain will remain stalled at height 81664 until the remaining community validators update their nodes to v2.4.15-alpha to rejoin the v20 network and restore quorum!
 
 > **v2.4.14-alpha — AUTOMATIC CPU/OOM RECOVERY (2026-07-17)**
 > **MANDATORY UPDATE.** Fixes nodes hanging at 100% CPU indefinitely upon reboot.
