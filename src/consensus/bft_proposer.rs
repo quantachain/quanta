@@ -478,20 +478,9 @@ pub async fn run_bft_proposer(
                                 now_ts.saturating_sub(last_ts), session_id
                             );
 
-                            // CRITICAL MEMORY LEAK FIX: If we've been stuck for a very long time, 
-                            // the backup file has accumulated thousands of useless DAG units.
-                            // When the watchdog restarts the session, AlephBFT tries to load all of them,
-                            // causing an instant 1.8GB+ RAM spike and 100% CPU lockup.
-                            // We must wipe the backup file so the next session starts completely fresh.
-                            let backup_path = std::path::Path::new(&data_dir).join(format!("alephbft_backup_{}.dat", session_id));
-                            if let Err(e) = std::fs::remove_file(&backup_path) {
-                                if e.kind() != std::io::ErrorKind::NotFound {
-                                    warn!("BFT Proposer: failed to wipe bloated backup file {:?}: {}", backup_path, e);
-                                }
-                            } else {
-                                info!("BFT Proposer: wiped bloated backup file {:?} to prevent OOM on restart", backup_path);
-                            }
-
+                            // We no longer wipe the backup file here. Wiping it causes AlephBFT to 
+                            // throw "Backup state behind unit collection state" when the session restarts,
+                            // permanently breaking the node for the duration of the current session.
                             let _ = tx.send(());
                         }
                     }
