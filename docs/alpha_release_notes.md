@@ -1,6 +1,11 @@
-# QuantaChain Testnet — V2 Release (v2.4.17-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.18-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.4.18-alpha — BINCODE DISCRIMINANT BUG HOTFIX (2026-07-17)**
+> **CRITICAL UPDATE: Restores network compatibility.**
+> - Fixed a severe binary incompatibility bug in the `P2PMessage` enum caused by inserting a new message variant in the middle of the enum. This had shifted all subsequent message IDs by 1, breaking bincode deserialization between different node versions and causing connections to instantly drop with `early eof` errors.
+> - Restored full backward compatibility with v15 nodes so that validators can successfully exchange messages, reach quorum, and finalize blocks.
 
 > **v2.4.17-alpha — CONSENSUS DEADLOCK HOTFIX (2026-07-17)**
 > **CRITICAL UPDATE: Required for all validators to resume chain consensus.**

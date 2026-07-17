@@ -27,7 +27,6 @@ pub enum P2PMessage {
         end_height: u64,
     },
     Block(Block),
-    AlephBFTMessage(Vec<u8>),
     GetHeaders {
         start_height: u64,
     },

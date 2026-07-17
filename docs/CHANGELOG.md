@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.4.18-alpha] - 2026-07-17
+
+### Fixed
+- **Network Protocol Compatibility**: Fixed a severe bincode discriminant bug in the `P2PMessage` enum where an incorrectly placed variant shifted all subsequent message IDs, breaking deserialization between nodes. Restored backward compatibility with v15 nodes to allow the network to reach quorum and finalize blocks.
+
 ## [v2.4.17-alpha] - 2026-07-17
 
 ### Fixed
