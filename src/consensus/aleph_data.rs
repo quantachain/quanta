@@ -65,29 +65,13 @@ impl DataProvider for QuantaDataProvider {
         // Yield until at least SLOT_SECONDS of real time have elapsed since
         // the last finalized block.  All validators propose simultaneously
         // once the slot opens; AlephBFT's DAG selects one via consensus.
-        //
-        // STUCK BACKOFF (CPU SPIKE FIX): If no block has been finalized for
-        // >30 seconds, the network is stuck (not enough validators online for
-        // 2/3+1 quorum). In this case, slow down proposals to 30s intervals
-        // instead of hammering every 6s. This saves ~80% CPU while waiting
-        // for community validators to come online and join consensus.
         // -----------------------------------------------------------------------
-        const STUCK_THRESHOLD_SECS: i64 = 30;
-        const STUCK_SLEEP_SECS: u64 = 30;
-
         loop {
             let now_unix = chrono::Utc::now().timestamp();
             let last_ts = self.last_finalized_ts.load(Ordering::Acquire);
             let elapsed = now_unix.saturating_sub(last_ts);
 
-            if elapsed >= STUCK_THRESHOLD_SECS {
-                // Network is stuck — sleep 30s to save CPU, then try one proposal
-                // (so AlephBFT can detect when quorum is restored and resume).
-                tracing::debug!(
-                    "BFT DataProvider: network stuck ({}s since last finalized block). Sleeping {}s to save CPU...",
-                    elapsed, STUCK_SLEEP_SECS
-                );
-                tokio::time::sleep(std::time::Duration::from_secs(STUCK_SLEEP_SECS)).await;
+            if elapsed >= SLOT_SECONDS {
                 break;
             }
 

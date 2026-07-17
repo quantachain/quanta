@@ -1,6 +1,15 @@
-# QuantaChain Testnet — V2 Release (v2.4.15-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.17-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.4.17-alpha — CONSENSUS DEADLOCK HOTFIX (2026-07-17)**
+> **CRITICAL UPDATE: Required for all validators to resume chain consensus.**
+> - Removed a 30-second block generation delay that was originally added as a temporary hack to mitigate CPU spikes. This delay prevented the AlephBFT DAG from building fast enough.
+> - Extended the AlephBFT watchdog timeout from 120s to 600s to allow the network ample time to rebuild its DAG and finalize blocks during hard forks or network partitions.
+> - Removed the exponential round-delay from the AlephBFT config to prevent network latency from cascading into multi-hour delays.
+
+> **v2.4.16-alpha — ALEPHBFT STARTUP CRASH HOTFIX (2026-07-17)**
+> **MANDATORY UPDATE.** Fixes a crash occurring during session initialization where DAG units were parsed before the network peer list was fully synced.
 
 > **v2.4.15-alpha — NETWORK PROTOCOL HARD FORK (2026-07-17)**
 > **MANDATORY UPDATE.** Bumps the internal `PROTOCOL_VERSION` to 20 to fully isolate upgraded nodes from older nodes running v2.4.5 through v2.4.12.

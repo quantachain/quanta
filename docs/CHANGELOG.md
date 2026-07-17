@@ -1,5 +1,17 @@
 # Changelog
 
+## [v2.4.17-alpha] - 2026-07-17
+
+### Fixed
+- **Consensus Deadlock**: Removed a 30s block generation delay hack that caused AlephBFT to stall and hit the watchdog timeout.
+- **Watchdog Recovery**: Extended the watchdog timeout from 120s to 600s to allow AlephBFT enough time to rebuild DAGs during network recovery.
+- **Constant Delay**: Removed exponential round-delay from AlephBFT config to keep network speed constant during catchup.
+
+## [v2.4.16-alpha] - 2026-07-17
+
+### Fixed
+- **Startup CPU/OOM Recovery**: Added an automatic size check in `bft_proposer.rs` that wipes the AlephBFT backup file *before* opening it if it exceeds 10 MB. This allows nodes that were previously stuck accumulating multi-GB files (due to earlier bugs) to automatically recover and boot without needing manual user intervention to delete the files via `sudo rm`.
+
 ## [v2.4.14-alpha] - 2026-07-17
 
 ### Fixed

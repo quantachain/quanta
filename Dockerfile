@@ -19,11 +19,11 @@
 FROM rust:latest AS builder
 
 # Version metadata
-LABEL version="2.4.16-alpha"
+LABEL version="2.4.17-alpha"
 LABEL org.quanta.network.protocol="20"
 LABEL org.opencontainers.image.title="quanta-node" \
-      org.opencontainers.image.description="QuantaChain V2 node — post-quantum BFT, Falcon-512 signatures, zero-mining. v2.4.16." \
-      org.opencontainers.image.version="v2.4.16" \
+      org.opencontainers.image.description="QuantaChain V2 node — post-quantum BFT, Falcon-512 signatures, zero-mining. v2.4.17." \
+      org.opencontainers.image.version="v2.4.17" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="Apache-2.0"

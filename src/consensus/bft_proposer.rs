@@ -391,12 +391,8 @@ pub async fn run_bft_proposer(
         delay_config.unit_creation_delay = std::sync::Arc::new(|t| {
             if t == 0 {
                 std::time::Duration::from_millis(5000)
-            } else if t < 10 {
-                std::time::Duration::from_millis(500)
-            } else if t < 30 {
-                std::time::Duration::from_millis(2000)
             } else {
-                std::time::Duration::from_millis(10000) // Drops CPU 20x when stuck
+                std::time::Duration::from_millis(500)
             }
         });
 
@@ -435,10 +431,10 @@ pub async fn run_bft_proposer(
         // Now with the network isolated (only 4/13 validators), sessions run
         // forever at 500ms intervals until hitting MAX_ROUNDS_PER_SESSION.
         //
-        // Fix: If no block is finalized for >120s, kill the session and restart.
+        // Fix: If no block is finalized for >600s, kill the session and restart.
         // On restart we sleep 30s before re-entering, dropping CPU to near-zero.
         // -----------------------------------------------------------------------
-        const STUCK_WATCHDOG_SECS: i64 = 120; // kill session after 2min of no progress
+        const STUCK_WATCHDOG_SECS: i64 = 600; // kill session after 10min of no progress
 
         let mut session_task = tokio::spawn(async move {
             run_session(
