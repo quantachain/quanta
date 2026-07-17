@@ -102,7 +102,7 @@ impl From<&Block> for BlockHeader {
 
 /// Protocol constants
 /// IMPORTANT: Ensure this matches across the cluster during testing!
-pub const PROTOCOL_VERSION: u32 = 19; // v2.4.7-alpha: Isolate from v2.4.5 infinite loop DOS
+pub const PROTOCOL_VERSION: u32 = 20; // v2.4.14-alpha: Isolate from older nodes lacking Unicast wrapper
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;

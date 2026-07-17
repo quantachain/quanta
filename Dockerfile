@@ -20,7 +20,7 @@ FROM rust:latest AS builder
 
 # Version metadata
 LABEL version="2.4.12-alpha"
-LABEL org.quanta.network.protocol="19"
+LABEL org.quanta.network.protocol="20"
 LABEL org.opencontainers.image.title="quanta-node" \
       org.opencontainers.image.description="QuantaChain V2 node — post-quantum BFT, Falcon-512 signatures, zero-mining. v2.4.12." \
       org.opencontainers.image.version="v2.4.12" \
