@@ -620,6 +620,7 @@ async fn main() {
                     tracing::info!("Final chain height: {}", chain_height);
                     drop(blockchain_lock);
 
+                    tracing::info!("QUANTA Node Version: v2.4.16-alpha");
                     tracing::info!("Node stopped successfully");
                 }
                 _ = server_handle => {
