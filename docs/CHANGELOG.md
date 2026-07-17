@@ -1,6 +1,10 @@
 # Changelog
 
-## [v2.4.7-alpha] - 2026-07-17
+## [v2.4.8-alpha] - 2026-07-17
+
+### Fixed
+- **CPU Spike (0-Peer Bug)**: Added a minimum peer count guard in `bft_proposer.rs`. When the node has 0 connected peers, AlephBFT was being started despite having no way to reach 2/3+1 quorum. The DAG would spin forever calling `get_data()` in a tight loop, burning a full CPU core. The BFT proposer now waits (sleeping 10s between checks) until at least 1 peer is connected before starting a consensus session.
+
 
 ### Changed
 - **Network Isolation**: Bumped `PROTOCOL_VERSION` from 18 to 19 and `NETWORK_MAGIC` to `QT19` to cleanly evict unpatched nodes running `v2.4.5-alpha` that were caught in an infinite proposing loop and flooding the network with garbage blocks and AlephBFT messages.

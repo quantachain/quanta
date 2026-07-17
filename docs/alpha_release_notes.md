@@ -2,7 +2,10 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.4.7-alpha — NETWORK ISOLATION HOTFIX (2026-07-17)**
+> **v2.4.8-alpha — CPU SPIKE HOTFIX (2026-07-17)**
+> **MANDATORY UPDATE.** Critical fix for 100% CPU usage when the node has 0 peers:
+> * **AlephBFT No-Peer Guard**: Added a check in `bft_proposer.rs` to prevent AlephBFT from starting a consensus session when 0 peers are connected. Previously, with 0 peers, AlephBFT would spin forever calling `get_data()` in a tight loop (since it can never reach 2/3+1 quorum with 1 validator) burning 100% of a CPU core. The node now sleeps 10s between checks and waits until at least 1 peer connects.
+
 > **MANDATORY UPDATE (PROTOCOL V19, MAGIC=QT19).** 
 > * **Protocol Version Bump**: Increased `PROTOCOL_VERSION` to `19`. This completely isolates your node from older `v2.4.5` community nodes that are stuck in an infinite loop and flooding the network with garbage messages. This fixes the RAM spike and VM crash. The network will resume block production once the community nodes upgrade.
 

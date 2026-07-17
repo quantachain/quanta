@@ -174,16 +174,27 @@ pub async fn run_bft_proposer(
             };
 
             let peers = network_ref.get_peers_info().await;
+            let peer_count = peers.len();
             let max_peer_height = peers.iter().map(|p| p.height).max().unwrap_or(0);
+
+            // CPU SPIKE FIX: With 0 peers, AlephBFT cannot reach 2/3+1 quorum and
+            // will spin forever in get_data() burning 100% of a CPU core.
+            // Wait until we have at least 1 peer before starting a BFT session.
+            if peer_count == 0 {
+                tracing::info!("BFT Proposer: no peers connected, waiting for network...");
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                continue;
+            }
 
             if current_height >= max_peer_height.saturating_sub(2) {
                 break;
             }
 
             tracing::info!(
-                "BFT Proposer: waiting for sync (at height {}, network at {})...",
+                "BFT Proposer: waiting for sync (at height {}, network at {}, peers={})...",
                 current_height,
-                max_peer_height
+                max_peer_height,
+                peer_count
             );
             tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
