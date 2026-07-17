@@ -347,7 +347,7 @@ impl Network {
                         // AlephBFTMessage dumps the entire raw byte vector which spams
                         // operator logs with hundreds of lines of unreadable binary data.
                         let label = match &msg {
-                            crate::network::protocol::P2PMessage::BftMessage(d) =>
+                            crate::network::protocol::P2PMessage::AlephBFTMessage(d) =>
                                 format!("AlephBFT({} bytes)", d.len()),
                             crate::network::protocol::P2PMessage::Block(b) =>
                                 format!("Block(#{})", b.index),
@@ -460,7 +460,7 @@ impl Network {
                 let _permit = permit;
                 if let Err(e) = network.handle_message(addr, msg.clone(), peer_opt).await {
                     let label = match &msg {
-                        P2PMessage::BftMessage(d) => format!("AlephBFT({} bytes)", d.len()),
+                        P2PMessage::AlephBFTMessage(d) => format!("AlephBFT({} bytes)", d.len()),
                         P2PMessage::Block(b) => format!("Block(#{})", b.index),
                         P2PMessage::NewTx(tx) => format!("NewTx({})", &tx.hash()[..8]),
                         other => format!("{:?}", other),
@@ -540,7 +540,7 @@ impl Network {
             P2PMessage::Disconnect => {
                 self.peer_manager.remove_peer(addr).await;
             }
-            P2PMessage::BftMessage(data) => {
+            P2PMessage::AlephBFTMessage(data) => {
                 // HIGH-3 FIX: Strict size limit to prevent memory exhaustion and hashing CPU spikes
                 if data.len() > 1024 * 1024 {
                     tracing::warn!("Rejecting oversized AlephBFTMessage from {} ({} bytes)", addr, data.len());
@@ -613,7 +613,7 @@ impl Network {
                 // for a "Full Mesh" network topology and allows the network to scale
                 // massively without hardcoding bootstrap IPs.
                 self.peer_manager
-                    .broadcast(P2PMessage::BftMessage(data))
+                    .broadcast(P2PMessage::AlephBFTMessage(data))
                     .await;
             }
             _ => {
@@ -1033,7 +1033,7 @@ impl Network {
     /// Broadcast an AlephBFT message to all connected peers
     pub async fn broadcast_aleph_bft(&self, data: Vec<u8>) {
         self.peer_manager
-            .broadcast(P2PMessage::BftMessage(data))
+            .broadcast(P2PMessage::AlephBFTMessage(data))
             .await;
     }
 
@@ -1047,7 +1047,9 @@ impl Network {
         let peers = self.peer_manager.get_peers().await;
         for peer in &peers {
             if peer.get_info().await.node_id == validator_address {
-                if let Err(e) = peer.send_message(P2PMessage::BftMessage(data)).await {
+                // Clone before move so we can fall back to broadcast on send failure.
+                let data_clone = data.clone();
+                if let Err(e) = peer.send_message(P2PMessage::AlephBFTMessage(data)).await {
                     tracing::debug!(
                         "Unicast AlephBFT to {} failed: {} — dropping",
                         validator_address, e
