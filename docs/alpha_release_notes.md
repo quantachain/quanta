@@ -1,6 +1,10 @@
-# QuantaChain Testnet — V2 Release (v2.4.19-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.20-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.4.20-alpha — NETWORK ISOLATION HOTFIX (2026-07-17)**
+> **MANDATORY UPDATE.** 
+> - **Protocol version 21 & Magic QT21**: Bumps network identifiers to explicitly reject community nodes still running the corrupted `v18` image. This completely stops the noisy `unexpected end of file` bincode errors caused by `v18` and `v19` colliding on `QT19` magic bytes despite differing payload formats.
 
 > **v2.4.19-alpha — DAG CORRUPTION RECOVERY / HARD FORK (2026-07-17)**
 > **CRITICAL UPDATE: Required to rescue the stalled network.**

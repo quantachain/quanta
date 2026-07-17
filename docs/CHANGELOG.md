@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.4.20-alpha] - 2026-07-17
+
+### Changed
+- **Network Isolation**: Bumped `PROTOCOL_VERSION` to 21 and `TESTNET_MAGIC` to `QT21`. This enforces clean isolation between v19 nodes (which restored the correct wire format) and legacy v18/v15 nodes, eliminating the `unexpected end of file` bincode deserialization errors caused by magic byte collisions across different payload formats.
+
 ## [v2.4.19-alpha] - 2026-07-17
 
 ### Fixed
