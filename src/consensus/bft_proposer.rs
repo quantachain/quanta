@@ -261,7 +261,14 @@ pub async fn run_bft_proposer(
             let bc = blockchain.read().await;
             bc.get_height()
         };
-        let session_id: u64 = current_height / SESSION_LENGTH;
+        let mut session_id: u64 = current_height / SESSION_LENGTH;
+        // HARD FORK FIX: Session 1361's DAG was corrupted when operators deleted their multi-GB 
+        // backup files to recover from OOM crashes. The network is permanently stalled at height 81664.
+        // We force a session rotation here to start a fresh session (1362) with a clean DAG,
+        // without altering the existing committee election rules which evaluated at 81660.
+        if current_height >= 81664 {
+            session_id += 1;
+        }
 
         // 1. Setup Keychain
         let keychain = QuantaKeychain::new(
@@ -490,7 +497,10 @@ pub async fn run_bft_proposer(
             let bc = blockchain.read().await;
             bc.get_height()
         };
-        let new_session_id = new_height / SESSION_LENGTH;
+        let mut new_session_id = new_height / SESSION_LENGTH;
+        if new_height >= 81664 {
+            new_session_id += 1;
+        }
 
         if new_session_id > session_id {
             let old_backup =

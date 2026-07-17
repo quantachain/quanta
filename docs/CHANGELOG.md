@@ -1,5 +1,11 @@
 # Changelog
 
+## [v2.4.19-alpha] - 2026-07-17
+
+### Fixed
+- **DAG Corruption Recovery**: Hard forked the AlephBFT session ID to jump from 1361 to 1362 for block heights >= 81664. This was necessary to rescue the network after operators manually deleted their `alephbft_backup_1361.dat` files (to recover from OOM crashes), permanently corrupting the DAG for session 1361.
+- **Reverted v18**: Removed the incorrect fix from v18 that broke network compatibility for community nodes.
+
 ## [v2.4.17-alpha] - 2026-07-17
 
 ### Fixed

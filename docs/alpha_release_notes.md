@@ -1,11 +1,12 @@
-# QuantaChain Testnet — V2 Release (v2.4.17-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.19-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.4.17-alpha — CONSENSUS DEADLOCK HOTFIX (2026-07-17)**
-> **CRITICAL UPDATE: Required for all validators to resume chain consensus.**
-> - Removed a 30-second block generation delay that was originally added as a temporary hack to mitigate CPU spikes. This delay prevented the AlephBFT DAG from building fast enough.
-> - Extended the AlephBFT watchdog timeout from 120s to 600s to allow the network ample time to rebuild its DAG and finalize blocks during hard forks or network partitions.
+> **v2.4.19-alpha — DAG CORRUPTION RECOVERY / HARD FORK (2026-07-17)**
+> **CRITICAL UPDATE: Required to rescue the stalled network.**
+> - **Reverted v2.4.18-alpha**: The previous release contained an incorrect assumption about a bincode discriminant shift that broke compatibility. `v2.4.19-alpha` restores the exact binary wire format of `v15`-`v17`.
+> - **Session 1361 Rescue**: The network permanently stalled at height 81664 because node operators manually deleted their multi-GB AlephBFT backup files (`alephbft_backup_1361.dat`) to recover from OOM crashes. Deleting these files mid-session permanently corrupts the cryptographic DAG for that session.
+> - **Hard Fork**: Added a consensus rule to artificially advance the AlephBFT session ID to 1362 for heights >= 81664. This forces the entire network to start a brand new DAG from Round 0, allowing consensus to resume immediately.
 > - Removed the exponential round-delay from the AlephBFT config to prevent network latency from cascading into multi-hour delays.
 
 > **v2.4.16-alpha — ALEPHBFT STARTUP CRASH HOTFIX (2026-07-17)**
