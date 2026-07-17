@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.4.13-alpha] - 2026-07-17
+
+### Fixed
+- **Unicast Broadcast Storm (CPU/Network Spike)**: Fixed a severe `O(N^2)` network broadcast storm triggered when AlephBFT lost quorum. When validators were missing, AlephBFT frantically tried to send Unicast `Fetch` requests to them. Because they were offline, the network layer fell back to broadcasting these Unicast messages. Furthermore, `handle_aleph_bft_message` mistakenly relayed incoming Unicast messages to the entire network. This resulted in exponential ZSTD-compression task spawns, completely locking up 100% of a CPU core and crashing nodes. Unicast messages are no longer relayed or blindly broadcast as a fallback.
+
 ## [v2.4.12-alpha] - 2026-07-17
 
 ### Fixed

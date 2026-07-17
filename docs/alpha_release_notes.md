@@ -1,6 +1,10 @@
-# QuantaChain Testnet — V2 Release (v2.4.12-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.13-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.4.13-alpha — UNICAST BROADCAST STORM HOTFIX (2026-07-17)**
+> **MANDATORY UPDATE.** Fixes the actual root cause of the 100% CPU lockup when quorum is lost.
+> * **Broadcast Storm Prevention**: When validators were offline, AlephBFT frantically tried to send Unicast `Fetch` requests to them to catch up. Because they were offline, the network layer fell back to broadcasting these Unicast messages. Furthermore, nodes mistakenly relayed incoming Unicast messages to the entire network. This resulted in an `O(N^2)` broadcast storm of ZSTD-compression tasks, completely pegging CPU at 100% and stalling the node. Unicast messages are now correctly dropped if the recipient is not directly connected, and nodes no longer gossip Unicast messages meant for others.
 
 > **v2.4.12-alpha — AlephBFT MEMORY LEAK HOTFIX (2026-07-17)**
 > **MANDATORY UPDATE.** Fixes a massive memory leak (1.8GB+ RAM per node) caused by the v2.4.10-alpha watchdog.

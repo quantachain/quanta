@@ -601,6 +601,14 @@ impl Network {
                     return Ok(());
                 }
 
+                // CPU SPIKE FIX: Do NOT relay UNICAST messages (tag == 1).
+                // Unicast messages are meant for a specific peer. Gossiping them
+                // causes massive network storms and O(N^2) CPU amplification, 
+                // especially for large Fetch responses or when validators are offline.
+                if data.first() == Some(&1) {
+                    return Ok(());
+                }
+
                 // HIGH FIX: Relay the message to all peers! This eliminates the need
                 // for a "Full Mesh" network topology and allows the network to scale
                 // massively without hardcoding bootstrap IPs.
@@ -1043,24 +1051,22 @@ impl Network {
                 let data_clone = data.clone();
                 if let Err(e) = peer.send_message(P2PMessage::AlephBFTMessage(data)).await {
                     tracing::debug!(
-                        "Unicast AlephBFT to {} failed: {} — broadcasting as fallback",
+                        "Unicast AlephBFT to {} failed: {} — dropping",
                         validator_address, e
                     );
-                    self.peer_manager
-                        .broadcast(P2PMessage::AlephBFTMessage(data_clone))
-                        .await;
                 }
                 return;
             }
         }
-        // Peer not found (not yet connected) — broadcast so AlephBFT isn't starved.
-        tracing::debug!(
-            "Unicast target {} not connected — broadcasting AlephBFT msg as fallback",
+        // CPU SPIKE FIX: Do NOT broadcast unicast messages as fallback.
+        // If the target validator is offline (e.g., missing from a partitioned network),
+        // falling back to broadcast causes a massive O(N^2) broadcast storm of Fetch requests
+        // because every node relays the unicast message thinking it's a gossip message.
+        // AlephBFT will internally retry if the peer comes back online.
+        tracing::trace!(
+            "Unicast target {} not connected — dropping message to prevent broadcast storm",
             validator_address
         );
-        self.peer_manager
-            .broadcast(P2PMessage::AlephBFTMessage(data))
-            .await;
     }
 
     /// Synchronize blockchain from peers
