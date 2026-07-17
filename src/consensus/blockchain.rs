@@ -683,7 +683,96 @@ impl Blockchain {
         }
     }
 
+    /// Check if a transaction is semantically valid against a specific AccountState.
+    /// This handles Stake, Unstake, and SlashEvidence rules (which depend on the state).
+    fn is_transaction_valid_for_state(
+        &self,
+        tx: &Transaction,
+        state: &crate::core::transaction::AccountState,
+        block_index: u64,
+    ) -> Result<(), BlockchainError> {
+        let epoch = crate::consensus::authorities::epoch_for_height(block_index);
+
+        match &tx.tx_type {
+            crate::core::transaction::TransactionType::Stake { .. } => {
+                use crate::consensus::authorities::MIN_VALIDATOR_STAKE;
+
+                if tx.amount < MIN_VALIDATOR_STAKE {
+                    return Err(BlockchainError::InvalidBlock);
+                }
+
+                let already_active = state
+                    .get_validator_info(&tx.sender)
+                    .map(|v| v.active)
+                    .unwrap_or(false);
+                if already_active {
+                    return Err(BlockchainError::InvalidBlock);
+                }
+
+                let slash_cooldown = state
+                    .get_validator_info(&tx.sender)
+                    .map(|v| v.slash_cooldown_until_epoch)
+                    .unwrap_or(0);
+                if slash_cooldown > epoch {
+                    return Err(BlockchainError::InvalidBlock);
+                }
+
+                let is_unbonding = state
+                    .get_validator_info(&tx.sender)
+                    .map(|v| v.unbonding_epoch > 0)
+                    .unwrap_or(false);
+                if is_unbonding {
+                    return Err(BlockchainError::InvalidBlock);
+                }
+            }
+            crate::core::transaction::TransactionType::Unstake => {
+                let is_active = state
+                    .get_validator_info(&tx.sender)
+                    .map(|v| v.active)
+                    .unwrap_or(false);
+                if !is_active {
+                    return Err(BlockchainError::InvalidBlock);
+                }
+            }
+            crate::core::transaction::TransactionType::SlashEvidence {
+                offender,
+                hash_a,
+                hash_b,
+                sig_a,
+                sig_b,
+                ..
+            } => {
+                if hash_a == hash_b {
+                    return Err(BlockchainError::InvalidBlock);
+                }
+                let validator_pk = state
+                    .get_validator_info(offender)
+                    .map(|v| v.falcon_pk.clone());
+                if let Some(pk) = validator_pk {
+                    let sig_a_valid = crate::crypto::verify_signature_strict(
+                        &crate::crypto::canonical_signing_hash(hash_a.as_bytes()),
+                        sig_a,
+                        &pk,
+                    );
+                    let sig_b_valid = crate::crypto::verify_signature_strict(
+                        &crate::crypto::canonical_signing_hash(hash_b.as_bytes()),
+                        sig_b,
+                        &pk,
+                    );
+                    if !sig_a_valid || !sig_b_valid {
+                        return Err(BlockchainError::InvalidBlock);
+                    }
+                } else {
+                    return Err(BlockchainError::InvalidBlock);
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// Add a new transaction to the mempool
+
     pub fn add_transaction(&self, transaction: Transaction) -> Result<(), BlockchainError> {
         // Skip validation for coinbase transactions
         if transaction.is_coinbase() {
@@ -771,6 +860,13 @@ impl Blockchain {
             if sender_count >= MAX_MEMPOOL_TXS_PER_SENDER {
                 return Err(BlockchainError::MempoolFull(sender_count));
             }
+        }
+
+        // Validate TransactionType specific state rules (Stake/Unstake/Slash)
+        let current_height = self.get_height();
+        let state_snapshot = self.account_state.read().clone();
+        if self.is_transaction_valid_for_state(&transaction, &state_snapshot, current_height + 1).is_err() {
+            return Err(BlockchainError::InvalidBlock);
         }
 
         // OPT-2 (PQC): Bloom filter duplicate check — O(1) instead of O(n) scan
@@ -1060,13 +1156,18 @@ impl Blockchain {
                     let tx_size = bincode::serialize(tx).unwrap_or_default().len();
                     if block_size + tx_size <= MAX_BLOCK_SIZE_BYTES {
                         let total_required = tx.amount.saturating_add(tx.fee);
-                        if temp_state.debit_account(&tx.sender, total_required) {
-                            temp_state.increment_nonce(&tx.sender);
-                            transactions.push(tx.clone());
-                            block_size += tx_size;
-                            added_any = true;
+                        
+                        // Pre-validate TransactionType rules (Stake, Unstake, Slash)
+                        if self.is_transaction_valid_for_state(tx, &temp_state, next_height).is_ok() {
+                            if temp_state.debit_account(&tx.sender, total_required) {
+                                temp_state.increment_nonce(&tx.sender);
+                                transactions.push(tx.clone());
+                                block_size += tx_size;
+                                added_any = true;
+                            }
                         }
                     }
+
                     sorted_txs.remove(i);
                 } else if tx.nonce < expected_nonce {
                     sorted_txs.remove(i);

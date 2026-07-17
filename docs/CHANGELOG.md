@@ -9,6 +9,13 @@ Versioning: [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+## [2.4.6-alpha] — 2026-07-17
+
+### Fixed
+- **BFT Infinite Loop Hotfix:** Fixed an infinite block proposal loop that caused 120% CPU utilization and unbound memory leaks (up to 1.5GB+).
+- **Mempool Transaction Type Validation:** Fixed a bug where `add_transaction` accepted completely invalid `Stake` and `Unstake` transactions into the mempool by omitting state-dependent `TransactionType` checks.
+- **Proposer Poison Block Prevention:** `create_block_template` now correctly filters out state-invalid transactions (such as redundant stakes or unstakes from inactive validators) *before* including them in a block, preventing honest nodes from proposing blocks that would fail application during consensus.
+
 ## [2.4.5-alpha] — 2026-07-16
 
 ### Changed

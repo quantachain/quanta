@@ -1,6 +1,11 @@
-# QuantaChain Testnet — V2 Release (v2.4.5-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.6-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.4.6-alpha — BFT INFINITE LOOP HOTFIX (2026-07-17)**
+> **MANDATORY UPDATE.** Critical hotfix for an infinite block proposal loop that caused 120% CPU spikes and unbounded memory leaks:
+> * **Mempool Transaction Type Validation**: Fixed a bug where `add_transaction` accepted completely invalid `Stake` and `Unstake` transactions into the mempool because it only checked balances and nonces.
+> * **Proposer Poison Block Prevention**: `create_block_template` now performs strict state validation on `Stake`, `Unstake`, and `SlashEvidence` transactions *before* including them in a block. This prevents honest nodes from proposing invalid blocks that would be finalized by AlephBFT and then subsequently rejected by the local node, breaking consensus and causing an infinite loop.
 
 > **v2.4.5-alpha — CPU/RAM DOS HOTFIX (2026-07-16)**
 > **MANDATORY UPDATE (PROTOCOL V18, MAGIC=QT18).** Critical hotfix for Tokio threadpool starvation and memory leaks:
