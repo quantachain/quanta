@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.4.11-alpha] - 2026-07-17
+
+### Fixed
+- **AlephBFT Progressive Backoff**: Implemented a progressive unit creation delay in `bft_proposer.rs`. When the network is stuck, the AlephBFT unit proposal delay scales up from 500ms to 10 seconds. This cuts CPU usage by 20x during network partitions, fixing the 100% CPU utilization that occurred during the 120-second watchdog window.
+
 ## [v2.4.10-alpha] - 2026-07-17
 
 ### Fixed

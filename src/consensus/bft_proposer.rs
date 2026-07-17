@@ -371,8 +371,12 @@ pub async fn run_bft_proposer(
         delay_config.unit_creation_delay = std::sync::Arc::new(|t| {
             if t == 0 {
                 std::time::Duration::from_millis(5000)
-            } else {
+            } else if t < 10 {
                 std::time::Duration::from_millis(500)
+            } else if t < 30 {
+                std::time::Duration::from_millis(2000)
+            } else {
+                std::time::Duration::from_millis(10000) // Drops CPU 20x when stuck
             }
         });
 

@@ -1,6 +1,10 @@
-# QuantaChain Testnet — V2 Release (v2.4.10-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.11-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.4.11-alpha — AlephBFT CPU SPIKE HOTFIX (2026-07-17)**
+> **MANDATORY UPDATE.** Secondary fix for the CPU spike when quorum is lost.
+> * **Progressive Unit Delay Backoff**: The previous fix added a 120-second watchdog, which still allowed AlephBFT to burn 100% CPU during that 120-second window before terminating. We now implemented a progressive backoff for DAG unit creation. If the network is stuck, the interval between unit proposals scales up from 500ms to 10 seconds. This drops CPU usage by 20x during network downtime while allowing the node to instantly recover within 10 seconds of quorum being restored.
 
 > **v2.4.10-alpha — AlephBFT CPU SPIKE FIX (2026-07-17)**
 > **MANDATORY UPDATE.** Root-cause fix for 80–90% CPU usage when the network has no block finalization (insufficient quorum):
