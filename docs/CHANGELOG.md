@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.4.12-alpha] - 2026-07-17
+
+### Fixed
+- **AlephBFT Memory Leak (OOM)**: When the session watchdog terminates a stuck session, it now deletes the `alephbft_backup_{session}.dat` file. This prevents AlephBFT from loading a massive accumulated history of useless DAG units on every restart, which previously caused instant 1.8GB+ RAM usage and 100% CPU lockup leading to VM crashes.
+
 ## [v2.4.11-alpha] - 2026-07-17
 
 ### Fixed

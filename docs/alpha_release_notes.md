@@ -1,6 +1,10 @@
-# QuantaChain Testnet — V2 Release (v2.4.11-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.12-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+
+> **v2.4.12-alpha — AlephBFT MEMORY LEAK HOTFIX (2026-07-17)**
+> **MANDATORY UPDATE.** Fixes a massive memory leak (1.8GB+ RAM per node) caused by the v2.4.10-alpha watchdog.
+> * **Bloated Backup Wipe**: When the 120-second session watchdog kills a stuck session, it now deletes the `alephbft_backup_{session}.dat` file. Previously, the file was kept, meaning every 120s AlephBFT would restart and load a massive history of useless DAG units into memory, which spiked CPU to 100% and RAM to 1.8GB+ until the VM crashed with an OOM.
 
 > **v2.4.11-alpha — AlephBFT CPU SPIKE HOTFIX (2026-07-17)**
 > **MANDATORY UPDATE.** Secondary fix for the CPU spike when quorum is lost.
