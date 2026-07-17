@@ -1,0 +1,10 @@
+target/
+**/*.rs.bk
+data1/
+data2/
+data3/
+data4/
+quanta_data/
+*.qua
+*.txt
+.git/
