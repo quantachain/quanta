@@ -1,4 +1,4 @@
-# QuantaChain Testnet — V2 Release (v2.4.23-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.25-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
