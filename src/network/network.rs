@@ -1051,15 +1051,7 @@ impl Network {
                 return;
             }
         }
-        // CPU SPIKE FIX: Do NOT broadcast unicast messages as fallback.
-        // If the target validator is offline (e.g., missing from a partitioned network),
-        // falling back to broadcast causes a massive O(N^2) broadcast storm of Fetch requests
-        // because every node relays the unicast message thinking it's a gossip message.
-        // AlephBFT will internally retry if the peer comes back online.
-        tracing::trace!(
-            "Unicast target {} not connected — dropping message to prevent broadcast storm",
-            validator_address
-        );
+        self.broadcast_aleph_bft(data).await;
     }
 
     /// Synchronize blockchain from peers
