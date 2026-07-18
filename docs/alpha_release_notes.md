@@ -2,16 +2,16 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.4.24-alpha — EXPLORER APIS & TX HASH FIX (2026-07-18)**
+> **v2.4.25-alpha — BFT CPU SPIKE & NETWORK SPAM ISOLATION (2026-07-18)**
 > **MANDATORY UPDATE**. 
-> - **Explorer APIs**: Added `/api/richlist`, Network TPS, total staked, circulating supply, and mempool fees.
-> - **Transaction Visibility**: Fixed a bug where transactions lacked `tx_hash` wrappers and System transactions were dropped by the indexer.
-> - **Protocol version 24 & Magic QT24**: Bumps network identifiers to explicitly isolate upgraded nodes.
+> - **Perf**: Fixed a 300%+ CPU spike by throttling the `maintain_peers` reconnect loop from 10s to 30s and limiting concurrent TLS tasks.
+> - **Protocol version 25 & Magic QT25**: Bumps network identifiers to explicitly isolate from old nodes stuck in BFT spam loops.
 
+> **v2.4.24-alpha** — Explorer APIs & tx_hash fix (Protocol v24 / QT24).
 > **v2.4.23-alpha** — Mid-session unstake hotfix (Protocol v23 / QT23).
 > **v2.4.22-alpha** — Unicast routing hotfix (Protocol v22 / QT22).
 > **v2.4.21-alpha** — AlephBFT CPU spike filter removal.
-> **v2.4.20-alpha** — Network isolation (Protocol v21 / QT21) to fix v18/v19 magic byte collisions.
+> **v2.4.20-alpha** — Network isolation (Protocol v21 / QT21) to fix collisions.
 > **v2.4.19-alpha** — DAG corruption recovery (Hard Fork Session 1362).
 
 > **v2.4.5-alpha** \u2014 CPU/RAM DOS fix (Protocol v18 / QT18): header buffer OOM, Tokio starvation, BFT message limit.

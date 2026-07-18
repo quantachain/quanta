@@ -1,5 +1,11 @@
 # Changelog
 
+## [v2.4.25-alpha] - 2026-07-18
+
+### Fixed
+- **Network Performance**: Fixed a 300%+ CPU spike by throttling the `maintain_peers` reconnect loop from 10s to 30s and limiting concurrent TLS connection tasks to prevent overwhelming the node on startup.
+- **Protocol Isolation**: Bumped `PROTOCOL_VERSION` to 25 and `TESTNET_MAGIC` to `QT25` to cleanly isolate upgraded nodes from older nodes stuck in AlephBFT consensus loops (which were spamming hundreds of units per second and contributing to the CPU exhaustion).
+
 ## [v2.4.24-alpha] - 2026-07-18
 
 ### Added
