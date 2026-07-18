@@ -912,6 +912,20 @@ impl AccountState {
         self.accounts.get(address)
     }
 
+    /// Returns the top N accounts sorted by total balance (spendable + locked)
+    pub fn get_top_accounts(&self, limit: usize) -> Vec<(String, u64)> {
+        let mut all_accounts: Vec<(String, u64)> = self.accounts
+            .values()
+            .map(|acc| {
+                let locked_sum: u64 = acc.locked_balances.iter().map(|lb| lb.amount).sum();
+                (acc.address.clone(), acc.balance + locked_sum)
+            })
+            .collect();
+            
+        all_accounts.sort_by(|a, b| b.1.cmp(&a.1));
+        all_accounts.into_iter().take(limit).collect()
+    }
+
     /// Register a new BFT validator.
     ///
     pub fn register_validator(

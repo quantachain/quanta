@@ -1,5 +1,19 @@
 # Changelog
 
+## [v2.4.24-alpha] - 2026-07-18
+
+### Added
+- **Explorer APIs**: Added several new endpoints and fields to power professional-grade block explorers:
+  - Added `GET /api/richlist?limit=100` to retrieve top accounts by total balance.
+  - Added `tps` (Transactions Per Second) to `/api/stats`, dynamically calculated from the last 10 blocks.
+  - Added `active_validator_count` and `total_staked` (locked QUA) to `/api/stats`.
+  - Added `circulating_supply` to `/api/stats` to differentiate minted coins from the max limit.
+  - Added `total_fees_pending` to `/api/mempool` to measure network congestion in terms of QUA.
+
+### Fixed
+- **Transaction Visibility**: Fixed an issue where Quascan reported transactions as "Not Found" because they lacked the `tx_hash` wrapper. Refactored Node API (`/api/blocks/latest` and `/api/block/:height`) to automatically inject `tx_hash` into response objects.
+- **System Transactions**: Modified the database indexer to correctly index System and Treasury transactions so they are fully queryable by the Node API and indexer.
+
 ## [v2.4.23-alpha] - 2026-07-18
 ### Fixed
 - **BFT Consensus**: Fixed a critical bug where proposers would crash if they received BFT signatures from validators who unstaked mid-session. The certificate verification now correctly ignores these signatures instead of rejecting the entire block.

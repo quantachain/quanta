@@ -166,6 +166,42 @@ async fn get_balance_by_path(
     })
 }
 
+// [v2.4.24-alpha] 2026-07-18
+// WHY: Added rich list endpoint to power explorer's Top Accounts page.
+#[derive(Serialize)]
+pub struct RichListEntry {
+    pub address: String,
+    pub total_balance_microunits: u64,
+    pub total_balance_qua: f64,
+}
+
+#[derive(Serialize)]
+pub struct RichListResponse {
+    pub count: usize,
+    pub accounts: Vec<RichListEntry>,
+}
+
+/// GET /api/richlist?limit=100
+async fn get_richlist(
+    State(state): State<Arc<ApiState>>,
+    Query(params): Query<crate::api::handlers::LatestBlocksQuery>, // Reuse query struct for limit
+) -> Json<RichListResponse> {
+    let limit = params.count.unwrap_or(100).min(500);
+    let blockchain = state.blockchain.read().await;
+    let accounts = blockchain.get_account_state_read().get_top_accounts(limit);
+    
+    let entries: Vec<RichListEntry> = accounts.into_iter().map(|(addr, bal)| RichListEntry {
+        address: addr,
+        total_balance_microunits: bal,
+        total_balance_qua: bal as f64 / 1_000_000.0,
+    }).collect();
+
+    Json(RichListResponse {
+        count: entries.len(),
+        accounts: entries,
+    })
+}
+
 /// Query parameters for address tx history
 #[derive(Deserialize)]
 pub struct AddressTxsQuery {
@@ -263,6 +299,57 @@ pub struct LatestBlocksQuery {
 /// GET /api/blocks/latest?count=N
 /// Returns the N most recent blocks (newest first), including all transactions.
 /// Useful for the block explorer live feed. Count is capped at 100.
+#[derive(Serialize)]
+pub struct TxResponse {
+    pub tx_hash: String,
+    #[serde(flatten)]
+    pub transaction: Transaction,
+}
+
+#[derive(Serialize)]
+pub struct BlockResponse {
+    pub index: u64,
+    pub timestamp: i64,
+    pub previous_hash: String,
+    pub hash: String,
+    pub merkle_root: String,
+    pub state_root: String,
+    pub epoch: u64,
+    pub bft_round: u32,
+    pub proposer: String,
+    pub bft_signatures: Vec<Vec<u8>>,
+    pub bft_signers: Vec<String>,
+    pub transactions: Vec<TxResponse>,
+}
+
+impl From<Block> for BlockResponse {
+    fn from(block: Block) -> Self {
+        BlockResponse {
+            index: block.index,
+            timestamp: block.timestamp,
+            previous_hash: block.previous_hash.clone(),
+            hash: block.hash.clone(),
+            merkle_root: block.merkle_root.clone(),
+            state_root: block.state_root.clone(),
+            epoch: block.epoch,
+            bft_round: block.bft_round,
+            proposer: block.proposer.clone(),
+            bft_signatures: block.bft_signatures.clone(),
+            bft_signers: block.bft_signers.clone(),
+            transactions: block.transactions.into_iter().map(|tx| TxResponse {
+                tx_hash: tx.hash(),
+                transaction: tx,
+            }).collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+pub struct LatestBlocksResponse {
+    pub block_count: usize,
+    pub blocks: Vec<BlockResponse>,
+}
+
 async fn get_latest_blocks(
     State(state): State<Arc<ApiState>>,
     Query(params): Query<LatestBlocksQuery>,
@@ -273,14 +360,8 @@ async fn get_latest_blocks(
     let block_count = blocks.len();
     Json(LatestBlocksResponse {
         block_count,
-        blocks,
+        blocks: blocks.into_iter().map(BlockResponse::from).collect(),
     })
-}
-
-#[derive(Serialize)]
-pub struct LatestBlocksResponse {
-    pub block_count: usize,
-    pub blocks: Vec<Block>,
 }
 
 // -----------------------------------------------------------------------
@@ -692,10 +773,10 @@ async fn get_metrics(State(state): State<Arc<ApiState>>) -> impl IntoResponse {
 async fn get_block(
     State(state): State<Arc<ApiState>>,
     Path(height): Path<u64>,
-) -> Result<Json<Block>, StatusCode> {
+) -> Result<Json<BlockResponse>, StatusCode> {
     let blockchain = state.blockchain.read().await;
     match blockchain.load_block_from_storage(height) {
-        Some(block) => Ok(Json(block)),
+        Some(block) => Ok(Json(BlockResponse::from(block))),
         None => Err(StatusCode::NOT_FOUND),
     }
 }
@@ -704,16 +785,20 @@ async fn get_block(
 #[derive(Serialize)]
 pub struct MempoolResponse {
     pub transaction_count: usize,
-    pub transactions: Vec<Transaction>,
+    pub total_fees_pending: u64,
+    pub transactions: Vec<TxResponse>,
 }
 
 async fn get_mempool(State(state): State<Arc<ApiState>>) -> Json<MempoolResponse> {
     let blockchain = state.blockchain.read().await;
     let transactions = blockchain.get_pending_transactions().clone();
+    
+    let total_fees_pending = transactions.iter().map(|tx| tx.fee).sum();
 
     Json(MempoolResponse {
         transaction_count: transactions.len(),
-        transactions,
+        total_fees_pending,
+        transactions: transactions.into_iter().map(|tx| TxResponse { tx_hash: tx.hash(), transaction: tx }).collect(),
     })
 }
 
@@ -861,6 +946,7 @@ pub fn create_router(
         .route("/api/balance/:address", get(get_balance_by_path))
         .route("/api/address/:address", get(get_address_info))
         .route("/api/address/:address/txs", get(get_address_transactions))
+        .route("/api/richlist", get(get_richlist))
         // ── AI Contracts ────────────────────────────────────────────────
         .route("/api/contracts/:address", get(get_contract))
         .route("/api/contracts/:address/events", get(get_contract_events))
@@ -1065,4 +1151,3 @@ mod tests {
         assert_eq!(q_cap.count.unwrap_or(10).min(100), 100, "Must be capped at 100");
     }
 }
-

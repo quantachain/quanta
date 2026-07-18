@@ -111,17 +111,18 @@ impl BlockchainStorage {
         self.db.insert(block_key.as_bytes(), data.clone())?;
 
         // 4. Index transactions (for O(1) lookup)
+        // [v2.4.24-alpha] 2026-07-18
+        // WHY: We no longer skip system/treasury transactions via `tx.is_system()` here.
+        // This ensures they get indexed in Sled so the Quascan indexer can pull them by hash!
         for (tx_index, tx) in block.transactions.iter().enumerate() {
-            if !tx.is_coinbase() && tx.sender != "TREASURY" {
-                let tx_key = format!("tx:{}", tx.hash());
-                let location = TxLocation {
-                    block_index: block.index,
-                    tx_index,
-                };
-                let location_data = bincode::serialize(&location)
-                    .map_err(|e| StorageError::Serialization(e.to_string()))?;
-                self.db.insert(tx_key.as_bytes(), location_data)?;
-            }
+            let tx_key = format!("tx:{}", tx.hash());
+            let location = TxLocation {
+                block_index: block.index,
+                tx_index,
+            };
+            let location_data = bincode::serialize(&location)
+                .map_err(|e| StorageError::Serialization(e.to_string()))?;
+            self.db.insert(tx_key.as_bytes(), location_data)?;
         }
 
         // 5. Update cache (flush is deferred to sled's background thread or explicit call).

@@ -2,25 +2,17 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.4.23-alpha — MID-SESSION UNSTAKE HOTFIX (2026-07-18)**
+> **v2.4.24-alpha — EXPLORER APIS & TX HASH FIX (2026-07-18)**
 > **MANDATORY UPDATE**. 
-> - **Unstake logic fix**: Addresses a mid-session staking withdrawal race condition that prevented validators from exiting gracefully.
-> - **Protocol version 23 & Magic QT23**: Bumps network identifiers to explicitly isolate upgraded nodes and force the network to resume consensus correctly.
+> - **Explorer APIs**: Added `/api/richlist`, Network TPS, total staked, circulating supply, and mempool fees.
+> - **Transaction Visibility**: Fixed a bug where transactions lacked `tx_hash` wrappers and System transactions were dropped by the indexer.
+> - **Protocol version 24 & Magic QT24**: Bumps network identifiers to explicitly isolate upgraded nodes.
 
+> **v2.4.23-alpha** — Mid-session unstake hotfix (Protocol v23 / QT23).
 > **v2.4.22-alpha** — Unicast routing hotfix (Protocol v22 / QT22).
 > **v2.4.21-alpha** — AlephBFT CPU spike filter removal.
 > **v2.4.20-alpha** — Network isolation (Protocol v21 / QT21) to fix v18/v19 magic byte collisions.
 > **v2.4.19-alpha** — DAG corruption recovery (Hard Fork Session 1362).
-> **v2.4.16-alpha** — AlephBFT startup crash hotfix.
-> **v2.4.15-alpha** — Network protocol hard fork (Protocol v20 / QT20).
-> **v2.4.14-alpha** — Automatic CPU/OOM recovery (Wipes bloated DAG backups on start).
-> **v2.4.13-alpha** — Unicast broadcast storm hotfix.
-> **v2.4.12-alpha** — AlephBFT memory leak hotfix.
-> **v2.4.11-alpha** — AlephBFT progressive DAG unit delay backoff.
-> **v2.4.10-alpha** — Session watchdog (10-minute timeout for stuck consensus).. No chain reset required.
-
-> **v2.4.9-alpha — EPOCH POOL REWARD MODEL (2026-07-17)**
-> * Reward distribution switches from single-proposer-wins-all to uptime-proportional pooling at block 100,000. No chain reset required.
 
 > **v2.4.5-alpha** \u2014 CPU/RAM DOS fix (Protocol v18 / QT18): header buffer OOM, Tokio starvation, BFT message limit.
 > **v2.4.4-alpha** \u2014 Memory leak and zip bomb fix (Protocol v17 / QT17).

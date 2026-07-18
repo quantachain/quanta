@@ -2106,6 +2106,37 @@ impl Blockchain {
         let total_transactions = 0;
         let pending = self.pending_transactions.read();
 
+        let (active_validator_count, total_staked) = {
+            let acc_state = self.account_state.read();
+            let validators = acc_state.get_validators();
+            let staked: u64 = validators.values().map(|v| v.stake).sum();
+            (validators.len(), staked)
+        };
+
+        let tps = if height >= 10 {
+            if let (Some(latest), Some(oldest)) = (
+                self.load_block_from_storage(height - 1),
+                self.load_block_from_storage(height - 10)
+            ) {
+                let elapsed = latest.timestamp - oldest.timestamp;
+                if elapsed > 0 {
+                    let mut tx_count = 0;
+                    for i in (height - 10)..=(height - 1) {
+                        if let Some(b) = self.load_block_from_storage(i) {
+                            tx_count += b.transactions.len();
+                        }
+                    }
+                    tx_count as f64 / elapsed as f64
+                } else {
+                    0.0
+                }
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+
         BlockchainStats {
             chain_length: height as usize,
             total_transactions,
@@ -2113,8 +2144,12 @@ impl Blockchain {
             current_session,
             blocks_until_next_session,
             mining_reward: self.get_block_reward(),
-            total_supply: self.calculate_total_supply(),
+            total_supply: 200_000_000_000_000, // 200m Max Supply
+            circulating_supply: self.calculate_total_supply(),
             pending_transactions: pending.len(),
+            active_validator_count,
+            total_staked,
+            tps,
         }
     }
 
@@ -3305,8 +3340,12 @@ pub struct BlockchainStats {
     /// How many blocks until the next session boundary (validator activation point).
     pub blocks_until_next_session: u64,
     pub mining_reward: u64, // microunits
-    pub total_supply: u64,  // microunits
+    pub total_supply: u64,  // microunits (max limit)
+    pub circulating_supply: u64, // microunits (currently mined)
     pub pending_transactions: usize,
+    pub active_validator_count: usize,
+    pub total_staked: u64,
+    pub tps: f64,
 }
 
 #[cfg(test)]
