@@ -1419,7 +1419,11 @@ impl Network {
 
     /// Maintain peer connections
     async fn maintain_peers(self: Arc<Self>) {
-        let mut ticker = interval(Duration::from_secs(10));
+        // CPU-FIX v2.4.25: Slowed from 10s to 30s — with many known peers in the
+        // discovery table the old 10s interval spawned 17+ concurrent TCP+TLS
+        // handshake tasks every cycle, causing 300%+ CPU on the VPS.
+        // DATE: 2026-07-18 | VERSION: v2.4.25-alpha
+        let mut ticker = interval(Duration::from_secs(30));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         loop {
@@ -1455,7 +1459,17 @@ impl Network {
                 target_peers.sort_unstable();
                 target_peers.dedup();
 
+                // CPU-FIX v2.4.25: Limit concurrent reconnect attempts to 3 per maintenance
+                // cycle. Before this cap, every cycle would spawn `needed` (up to 125) tasks
+                // simultaneously, creating a storm of TCP+TLS handshakes that saturated CPU.
+                // DATE: 2026-07-18 | VERSION: v2.4.25-alpha
+                let max_reconnects_per_cycle: usize = 3;
+                let mut reconnect_count = 0;
+
                 for addr in target_peers {
+                    if reconnect_count >= max_reconnects_per_cycle {
+                        break;
+                    }
                     // FLAP-FIX: Check if already connected AND LIVE before skipping.
                     // The old check only tested by IP, not liveness — a dead peer with
                     // the same IP would block reconnect attempts indefinitely.
@@ -1476,6 +1490,7 @@ impl Network {
                         continue;
                     }
 
+                    reconnect_count += 1;
                     let network = Arc::clone(&self);
                     tokio::spawn(async move {
                         match network.connect_to_peer(addr).await {
