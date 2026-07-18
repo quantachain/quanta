@@ -55,6 +55,12 @@ If you want to participate in AlephBFT consensus and produce blocks, you must ru
    ./quanta start -c quanta.toml --validator-wallet validator.qua
    ```
 
+4. **Unstake and Deregister**
+   *If you want to gracefully leave the network and begin the unbonding process to retrieve your stake:*
+   ```bash
+   quanta-wallet unstake --wallet validator.qua
+   ```
+
 ## Configuration (`quanta.toml`)
 
 You can override default ports and settings in `quanta.toml`:
