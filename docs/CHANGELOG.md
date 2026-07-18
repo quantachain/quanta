@@ -1,5 +1,9 @@
 # Changelog
 
+## [v2.4.23-alpha] - 2026-07-18
+### Fixed
+- **BFT Consensus**: Fixed a critical bug where proposers would crash if they received BFT signatures from validators who unstaked mid-session. The certificate verification now correctly ignores these signatures instead of rejecting the entire block.
+
 ## [v2.4.22-alpha] - 2026-07-18
 ### Fixed
 - **Unicast Routing**: Restored `broadcast_aleph_bft` fallback for Unicast messages in `send_aleph_bft_to_validator`. In a hub-and-spoke topology, community nodes (spokes) cannot communicate point-to-point. Without this fallback, Unicast AlephBFT Fetch Requests were permanently dropped, causing the DAG to stall and hit the Watchdog.

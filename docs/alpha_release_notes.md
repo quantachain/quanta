@@ -1,12 +1,13 @@
-# QuantaChain Testnet — V2 Release (v2.4.22-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.23-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.4.22-alpha — UNICAST ROUTING HOTFIX (2026-07-18)**
-> **MANDATORY UPDATE.** 
-> - **AlephBFT Unicast Routing**: Restored the `broadcast_aleph_bft` fallback for Unicast messages. In a hub-and-spoke topology, community nodes (spokes) cannot communicate point-to-point. Without this fallback, Unicast AlephBFT Fetch Requests were permanently dropped, causing the DAG to stall and hit the Watchdog.
-> - **Protocol version 22 & Magic QT22**: Bumps network identifiers to explicitly isolate upgraded nodes and force the network to resume consensus correctly.
+> **v2.4.23-alpha — MID-SESSION UNSTAKE HOTFIX (2026-07-18)**
+> **MANDATORY UPDATE**. 
+> - **Unstake logic fix**: Addresses a mid-session staking withdrawal race condition that prevented validators from exiting gracefully.
+> - **Protocol version 23 & Magic QT23**: Bumps network identifiers to explicitly isolate upgraded nodes and force the network to resume consensus correctly.
 
+> **v2.4.22-alpha** — Unicast routing hotfix (Protocol v22 / QT22).
 > **v2.4.21-alpha** — AlephBFT CPU spike filter removal.
 > **v2.4.20-alpha** — Network isolation (Protocol v21 / QT21) to fix v18/v19 magic byte collisions.
 > **v2.4.19-alpha** — DAG corruption recovery (Hard Fork Session 1362).

@@ -109,11 +109,11 @@ pub fn verify_bft_certificate(block: &Block, committee: &[String], state: &Accou
         // Signer must be in the committee.
         if !committee.contains(signer) {
             tracing::warn!(
-                "BFT verify block {}: signer {} not in committee",
+                "BFT verify block {}: signer {} not in committee (likely unstaked mid-session). Ignoring signature.",
                 block.index,
                 signer
             );
-            return false;
+            continue;
         }
 
         // Look up the Falcon public key.
@@ -125,7 +125,7 @@ pub fn verify_bft_certificate(block: &Block, committee: &[String], state: &Accou
                     block.index,
                     signer
                 );
-                return false;
+                continue;
             }
         };
 
