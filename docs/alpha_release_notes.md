@@ -1,12 +1,12 @@
-# QuantaChain Testnet — V2 Release (v2.4.27-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.28-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.4.27-alpha — BFT CPU SPIKE HOTFIX (2026-07-20)**
+> **v2.4.28-alpha — STATE ROOT EXEMPTION WINDOW EXTENDED (2026-07-20)**
 > **MANDATORY UPDATE**. 
-> - **Perf**: Fixed a massive CPU memory leak when block production stalls. Replaced the constant 500ms BFT unit creation delay with a linear backoff capped at 10s. This prevents the DAG from exploding and overloading CPU when 2/3 quorum is lost.
+> - **Consensus**: Extended soft-fork exemption to blocks 100,000–102,000. The epoch pool HashMap bug affected ALL blocks produced by old nodes since 100,000, not just 101,017. This ensures nodes can fully sync past the fork.
 
-> **v2.4.26-alpha** — Epoch pool state root divergence fix.
+> **v2.4.27-alpha** — BFT CPU spike hotfix (linear backoff).
 > **v2.4.25-alpha** — BFT CPU spike & network spam isolation.
 > **v2.4.23-alpha** — Mid-session unstake hotfix (Protocol v23 / QT23).
 > **v2.4.22-alpha** — Unicast routing hotfix (Protocol v22 / QT22).

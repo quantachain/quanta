@@ -1842,11 +1842,15 @@ impl Blockchain {
             && block.state_root != computed_state_root
             && !is_checkpointed
             && block.index != 12615
-            // FIX DATE: 2026-07-20 | VERSION: v2.4.26-alpha
-            // REASON: Exemption for blocks 101000-101017 which suffered from non-deterministic
-            // HashMap iteration in the epoch pool distribution, causing state root splits.
-            && !(block.index >= 100_000 && block.index <= 101_017)
-        // SOFT UPDATE: Exemption for consensus bug block
+            // FIX DATE: 2026-07-20 | VERSION: v2.4.28-alpha
+            // REASON: Extended exemption window. The non-deterministic HashMap iteration bug
+            // in the epoch pool distribution affects ALL blocks produced by old nodes since
+            // height 100,000. The divergence is not bounded at 101,017 — every block produced
+            // by an old (pre-v2.4.26) node has a wrong state root. We exempt the entire
+            // range 100,000-102,000 to give the fixed nodes time to take over block production
+            // and re-establish a canonical, deterministic state root.
+            && !(block.index >= 100_000 && block.index <= 102_000)
+        // SOFT UPDATE: Exemption for epoch pool consensus bug blocks
         {
             tracing::warn!(
                 "Invalid state root at block {}: computed={}, block={}",

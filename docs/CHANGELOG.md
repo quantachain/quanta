@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.4.28-alpha] - 2026-07-20
+
+### Fixed
+- **State Root Exemption Window (Critical)**: Extended the soft-fork state root validation exemption from blocks `100,000-101,017` to `100,000-102,000`. The non-deterministic HashMap iteration bug in the V3 epoch pool distribution affects **every** block produced by old (pre-v2.4.26) nodes since height 100,000, not just the initial fork at block 101,017. The extended window gives fixed nodes sufficient time to take over block production and re-establish a canonical deterministic state root.
+
 ## [v2.4.27-alpha] - 2026-07-20
 
 ### Fixed
