@@ -1842,6 +1842,10 @@ impl Blockchain {
             && block.state_root != computed_state_root
             && !is_checkpointed
             && block.index != 12615
+            // FIX DATE: 2026-07-20 | VERSION: v2.4.26-alpha
+            // REASON: Exemption for blocks 101000-101017 which suffered from non-deterministic
+            // HashMap iteration in the epoch pool distribution, causing state root splits.
+            && !(block.index >= 100_000 && block.index <= 101_017)
         // SOFT UPDATE: Exemption for consensus bug block
         {
             tracing::warn!(
@@ -2772,7 +2776,14 @@ impl Blockchain {
                     if total_counted > 0 {
                         let mut distributed: u64 = 0;
                         let mut last_proposer: Option<String> = None;
-                        for (proposer, count) in &proposer_counts {
+                        
+                        // FIX DATE: 2026-07-20 | VERSION: v2.4.26-alpha
+                        // REASON: proposer_counts is a HashMap, which iterates non-deterministically.
+                        // We must sort it alphabetically to ensure deterministic rounding dust distribution!
+                        let mut sorted_proposers: Vec<(&String, &u64)> = proposer_counts.iter().collect();
+                        sorted_proposers.sort_by(|a, b| a.0.cmp(b.0));
+
+                        for (proposer, count) in sorted_proposers {
                             let share = (pool_balance * count) / total_counted;
                             if share > 0 {
                                 new_state.credit_account_direct(proposer, share);

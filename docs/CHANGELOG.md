@@ -1,5 +1,11 @@
 # Changelog
 
+## [v2.4.26-alpha] - 2026-07-20
+
+### Fixed
+- **State Root Non-Determinism**: Fixed a critical bug in `blockchain.rs` where the `EPOCH_POOL_ADDRESS` remainder dust was distributed using a non-deterministic `HashMap` iteration, causing nodes to diverge and log "Invalid state root" starting at block 101,017. The validator tally is now explicitly sorted alphabetically before distribution.
+- **Consensus Hotfix**: Added a soft-fork exemption for blocks `101000` through `101017` to allow nodes to sync seamlessly past the bugged sequence.
+
 ## [v2.4.25-alpha] - 2026-07-18
 
 ### Fixed

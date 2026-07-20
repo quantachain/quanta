@@ -1,13 +1,13 @@
-# QuantaChain Testnet — V2 Release (v2.4.25-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.26-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.4.25-alpha — BFT CPU SPIKE & NETWORK SPAM ISOLATION (2026-07-18)**
+> **v2.4.26-alpha — EPOCH POOL STATE ROOT FIX (2026-07-20)**
 > **MANDATORY UPDATE**. 
-> - **Perf**: Fixed a 300%+ CPU spike by throttling the `maintain_peers` reconnect loop from 10s to 30s and limiting concurrent TLS tasks.
-> - **Protocol version 25 & Magic QT25**: Bumps network identifiers to explicitly isolate from old nodes stuck in BFT spam loops.
+> - **Consensus**: Fixed a non-deterministic `HashMap` iteration bug in the V3 Epoch Pool distribution that caused state root divergence and chain halts at block 101,017.
+> - **Soft Fork**: Added validation exemption for blocks 101,000-101,017 to safely replay past the fork.
 
-> **v2.4.24-alpha** — Explorer APIs & tx_hash fix (Protocol v24 / QT24).
+> **v2.4.25-alpha** — BFT CPU spike & network spam isolation.
 > **v2.4.23-alpha** — Mid-session unstake hotfix (Protocol v23 / QT23).
 > **v2.4.22-alpha** — Unicast routing hotfix (Protocol v22 / QT22).
 > **v2.4.21-alpha** — AlephBFT CPU spike filter removal.
