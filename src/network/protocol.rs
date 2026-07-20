@@ -102,13 +102,13 @@ impl From<&Block> for BlockHeader {
 
 /// Protocol constants
 /// IMPORTANT: Ensure this matches across the cluster during testing!
-pub const PROTOCOL_VERSION: u32 = 26; // v2.4.26-alpha: Network isolation and epoch pool state root fix
+pub const PROTOCOL_VERSION: u32 = 27; // v2.4.27-alpha: BFT CPU Spike Hotfix
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"QT26"; // Quanta V2 Testnet (v2.4.26-alpha)
+pub const TESTNET_MAGIC: [u8; 4] = *b"QT27"; // Quanta V2 Testnet (v2.4.27-alpha)
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;

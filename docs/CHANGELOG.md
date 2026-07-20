@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.4.27-alpha] - 2026-07-20
+
+### Fixed
+- **BFT CPU Spike (Consensus Stall)**: Fixed an issue where the node's CPU usage would slowly climb to 300%+ when blocks were failing to finalize for several minutes. The root cause was an aggressive `500ms` constant delay in the `unit_creation_delay` configuration, which caused the DAG to explode in size (thousands of empty units) and overload the AlephBFT graph processing engine. Implemented a linear backoff capped at 10 seconds to drastically reduce CPU pressure during network partitions, while keeping recovery fast.
+
 ## [v2.4.26-alpha] - 2026-07-20
 
 ### Fixed

@@ -398,8 +398,12 @@ pub async fn run_bft_proposer(
         delay_config.unit_creation_delay = std::sync::Arc::new(|t| {
             if t == 0 {
                 std::time::Duration::from_millis(5000)
-            } else {
+            } else if t < 10 {
                 std::time::Duration::from_millis(500)
+            } else {
+                // Linear backoff up to 10s to prevent DAG explosion and CPU spikes during network halts
+                let delay = 500_u64.saturating_add((t as u64 - 10).saturating_mul(250));
+                std::time::Duration::from_millis(delay.min(10000))
             }
         });
 
