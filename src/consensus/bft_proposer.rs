@@ -389,22 +389,23 @@ pub async fn run_bft_proposer(
         // delay config uses an exponential that grows with round number, so an
         // ever-increasing round counter causes ever-increasing block times.
         // Rotating sessions resets the round counter to 0.
-        // FIX: Override AlephBFT's exponential delay schedule.
+        // CHANGED 2026-07-20 v2.4.29: Revert v2.4.27 linear backoff.
+        // The v2.4.27 backoff (t=0 → 5000ms, then linear up to 10s) caused block
+        // finalization to inflate from ~6s to 30s+ in normal operation. AlephBFT
+        // needs multiple DAG rounds per block, and delaying each round's first unit
+        // by 5s compounded across rounds. The session watchdog (600s) already
+        // handles runaway CPU during genuine network partitions — the backoff here
+        // is not needed and actively harms throughput.
+        // FIX: Override AlephBFT's exponential delay schedule with a constant 500ms.
         // The default AlephBFT config applies an exponential backoff after round 3000.
         // If a network partition causes the DAG to reach round 5000, the block delay
         // becomes ~3 hours! By overriding this to a constant 500ms, the network
         // immediately recovers at full speed once the partition resolves.
         let mut delay_config = default_delay_config();
-        delay_config.unit_creation_delay = std::sync::Arc::new(|t| {
-            if t == 0 {
-                std::time::Duration::from_millis(5000)
-            } else if t < 10 {
-                std::time::Duration::from_millis(500)
-            } else {
-                // Linear backoff up to 10s to prevent DAG explosion and CPU spikes during network halts
-                let delay = 500_u64.saturating_add((t as u64 - 10).saturating_mul(250));
-                std::time::Duration::from_millis(delay.min(10000))
-            }
+        delay_config.unit_creation_delay = std::sync::Arc::new(|_t| {
+            // Constant 500ms — keeps DAG unit production steady and block times near 6s.
+            // CPU spike protection is handled by the 600s session watchdog above.
+            std::time::Duration::from_millis(500)
         });
 
         let config = create_config(

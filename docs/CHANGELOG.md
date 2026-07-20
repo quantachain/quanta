@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.4.29-alpha] - 2026-07-20
+
+### Fixed
+- **BFT Block Time Regression (Reverted v2.4.27 Backoff)**: Reverted the `unit_creation_delay` linear backoff introduced in v2.4.27. The backoff (5000ms at `t=0`, then linear up to 10s) caused block finalization time to balloon from ~6s to 30s+ in normal operation. Root cause: AlephBFT requires multiple DAG rounds per block, and delaying the first unit in each round by 5s compounded across rounds. CPU spike protection during genuine network partitions is already handled by the 600s session watchdog — the per-round backoff was unnecessary and actively harmed throughput. Restored a constant 500ms `unit_creation_delay`.
+
 ## [v2.4.28-alpha] - 2026-07-20
 
 ### Fixed
