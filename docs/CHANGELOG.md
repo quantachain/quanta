@@ -1,5 +1,10 @@
 # Changelog
 
+## [v2.4.30-alpha] - 2026-07-20
+
+### Changed
+- **Network Isolation (Protocol v29 / QT29)**: Bumped `PROTOCOL_VERSION` to `29` and `TESTNET_MAGIC` to `QT29` to cleanly isolate nodes running the v2.4.29 constant-500ms `unit_creation_delay` fix from any nodes still running the v2.4.27 linear backoff (5s at `t=0`). Consensus timing behaviour changed — network isolation required to prevent mixed-speed DAG unit creation across validators, which can degrade finalization for the whole committee.
+
 ## [v2.4.29-alpha] - 2026-07-20
 
 ### Fixed

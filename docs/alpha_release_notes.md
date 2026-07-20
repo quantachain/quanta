@@ -1,11 +1,12 @@
-# QuantaChain Testnet — V2 Release (v2.4.29-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.30-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.4.29-alpha — BFT BLOCK TIME REGRESSION FIX (2026-07-20)**
+> **v2.4.30-alpha — NETWORK ISOLATION: Protocol v29 / QT29 (2026-07-20)**
 > **MANDATORY UPDATE**.
-> - **Consensus**: Reverted the v2.4.27 `unit_creation_delay` linear backoff that caused block finalization to regress from ~6s to 30s+. The 5000ms delay at `t=0` compounded across multiple DAG rounds per block. CPU spike protection is already covered by the 600s session watchdog. Constant 500ms delay restored.
+> - **Network**: Bumped `PROTOCOL_VERSION` to `29` and `TESTNET_MAGIC` to `QT29`. Nodes still running the v2.4.27 linear backoff (30s+ block times) are now cleanly rejected from the committee. All validators must upgrade.
 
+> **v2.4.29-alpha** — Reverted v2.4.27 `unit_creation_delay` backoff (30s block time fix).
 > **v2.4.28-alpha** — State root exemption window extended to 100,000–102,000 (MANDATORY).
 > **v2.4.27-alpha** — BFT CPU spike hotfix (linear backoff — **REVERTED in v2.4.29**).
 > **v2.4.25-alpha** — BFT CPU spike & network spam isolation.
