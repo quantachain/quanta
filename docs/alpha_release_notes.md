@@ -1,14 +1,12 @@
-# QuantaChain Testnet — V2 Release (v2.4.31-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.32-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.4.31-alpha — STATE CONVERGENCE FIX & REWARD VISIBILITY: Protocol v30 / QT30 (2026-07-21)**
+> **v2.4.32-alpha — BFT BLOCK TIME REGRESSION FIX: (2026-07-21)**
 > **MANDATORY UPDATE**.
-> - **State Convergence**: Fixed the deterministic `load_block` behavior in epoch pool distribution which caused permanent state divergence at epoch boundaries.
-> - **Reward Visibility**: Emits `EpochRewardDistributed` contract events to allow QuaScan to track implicit distributions.
-> - **BFT CPU Spike**: Targeted linear backoff introduced to `unit_creation_delay` to protect CPU (>300%) during network stalls without inflating normal block times.
-> - **Exemption Window**: Bumped state root exemption up to block 105,000 to keep the network alive during upgrade.
-> - **Network**: Bumped `PROTOCOL_VERSION` to `30` and `TESTNET_MAGIC` to `QT30` to cleanly isolate upgraded nodes.
+> - **BFT Block Time Fix**: Reverted the v2.4.31 `unit_creation_delay` targeted backoff which caused block times to inflate from ~6s to 30s+. Restored a strict constant 500ms for all rounds — the 600s session watchdog handles partition CPU spikes.
+
+> **v2.4.31-alpha** — State convergence fix, reward visibility events, state root exemption to 105,000, Protocol v30 / QT30.
 
 > **v2.4.30-alpha** — Network Isolation (Protocol v29 / QT29) to remove nodes with v2.4.27 backoff.
 > **v2.4.29-alpha** — Reverted v2.4.27 `unit_creation_delay` backoff (30s block time fix).

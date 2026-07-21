@@ -102,15 +102,16 @@ impl From<&Block> for BlockHeader {
 
 /// Protocol constants
 /// IMPORTANT: Ensure this matches across the cluster during testing!
-// CHANGED 2026-07-21 v2.4.31: Bumped from 29 → 30 to isolate nodes with the true
-// deterministic epoch pool distribution fix and the extended state root exemption.
-pub const PROTOCOL_VERSION: u32 = 30; // v2.4.31-alpha
+// CHANGED 2026-07-21 v2.4.32-alpha: Bumped from 30 → 31 to isolate nodes with the
+// constant 500ms unit_creation_delay revert from v2.4.31 nodes running the broken
+// targeted backoff (t<100 → 500ms, then linear up to 10s) which inflated block times to 30s+.
+pub const PROTOCOL_VERSION: u32 = 31; // v2.4.32-alpha
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"QT30"; // Quanta V2 Testnet (v2.4.31-alpha)
+pub const TESTNET_MAGIC: [u8; 4] = *b"QT31"; // Quanta V2 Testnet (v2.4.32-alpha)
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;
