@@ -402,10 +402,19 @@ pub async fn run_bft_proposer(
         // becomes ~3 hours! By overriding this to a constant 500ms, the network
         // immediately recovers at full speed once the partition resolves.
         let mut delay_config = default_delay_config();
-        delay_config.unit_creation_delay = std::sync::Arc::new(|_t| {
-            // Constant 500ms — keeps DAG unit production steady and block times near 6s.
-            // CPU spike protection is handled by the 600s session watchdog above.
-            std::time::Duration::from_millis(500)
+        delay_config.unit_creation_delay = std::sync::Arc::new(|t| {
+            // FIX DATE: 2026-07-21 | VERSION: v2.4.31-alpha
+            // REASON: A constant 500ms delay causes the DAG to explode (and CPU to spike >300%)
+            // during network partitions or consensus stalls. However, a naive linear backoff
+            // (like in v2.4.27) inflated normal block times to 30s+.
+            // We fix both by keeping it 500ms for the first 100 rounds (normal operation),
+            // and ONLY applying a linear backoff if the round count gets unusually high (stalled).
+            if t < 100 {
+                std::time::Duration::from_millis(500)
+            } else {
+                let additional = (t - 100) as u64 * 100; // +100ms per round over 100
+                std::time::Duration::from_millis(500 + additional).min(std::time::Duration::from_millis(10_000))
+            }
         });
 
         let config = create_config(

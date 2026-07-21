@@ -1,11 +1,16 @@
-# QuantaChain Testnet — V2 Release (v2.4.30-alpha)
+# QuantaChain Testnet — V2 Release (v2.4.31-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.4.30-alpha — NETWORK ISOLATION: Protocol v29 / QT29 (2026-07-20)**
+> **v2.4.31-alpha — STATE CONVERGENCE FIX & REWARD VISIBILITY: Protocol v30 / QT30 (2026-07-21)**
 > **MANDATORY UPDATE**.
-> - **Network**: Bumped `PROTOCOL_VERSION` to `29` and `TESTNET_MAGIC` to `QT29`. Nodes still running the v2.4.27 linear backoff (30s+ block times) are now cleanly rejected from the committee. All validators must upgrade.
+> - **State Convergence**: Fixed the deterministic `load_block` behavior in epoch pool distribution which caused permanent state divergence at epoch boundaries.
+> - **Reward Visibility**: Emits `EpochRewardDistributed` contract events to allow QuaScan to track implicit distributions.
+> - **BFT CPU Spike**: Targeted linear backoff introduced to `unit_creation_delay` to protect CPU (>300%) during network stalls without inflating normal block times.
+> - **Exemption Window**: Bumped state root exemption up to block 105,000 to keep the network alive during upgrade.
+> - **Network**: Bumped `PROTOCOL_VERSION` to `30` and `TESTNET_MAGIC` to `QT30` to cleanly isolate upgraded nodes.
 
+> **v2.4.30-alpha** — Network Isolation (Protocol v29 / QT29) to remove nodes with v2.4.27 backoff.
 > **v2.4.29-alpha** — Reverted v2.4.27 `unit_creation_delay` backoff (30s block time fix).
 > **v2.4.28-alpha** — State root exemption window extended to 100,000–102,000 (MANDATORY).
 > **v2.4.27-alpha** — BFT CPU spike hotfix (linear backoff — **REVERTED in v2.4.29**).

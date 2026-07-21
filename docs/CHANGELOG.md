@@ -1,5 +1,14 @@
 # Changelog
 
+## [v2.4.31-alpha] - 2026-07-21
+
+### Fixed
+- **BFT CPU Spike & Block Time Fix**: Fixed the 300%+ CPU spike during consensus stalls without inflating normal block times. Instead of a constant 500ms delay (which explodes the DAG during partitions) or a naive linear backoff (which inflated normal block times to 30s), the `unit_creation_delay` now uses a targeted backoff: it stays at a constant 500ms for the first 100 rounds of a session, and then applies a linear backoff up to 10 seconds only if the consensus stalls.
+- **State Root Convergence Fix**: Fixed the non-deterministic `load_block` behavior in epoch pool distribution. The previous implementation skipped the current block during live processing but included it during replay, causing permanent state divergence at epoch boundaries. The logic now handles the current block deterministically without relying on local storage latency.
+- **Reward Visibility**: Added the `EpochRewardDistributed` contract event so that block explorers like QuaScan can index and display epoch pool distributions.
+- **Extended Exemption**: Bumped the state root exemption window to block 105,000 to allow nodes to survive the past state divergence and continue forming consensus while upgrading to the fix.
+- **Network Isolation**: Bumped `PROTOCOL_VERSION` to `30` and `TESTNET_MAGIC` to `QT30` to cleanly isolate upgraded nodes.
+
 ## [v2.4.30-alpha] - 2026-07-20
 
 ### Changed

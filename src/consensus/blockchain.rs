@@ -1842,14 +1842,13 @@ impl Blockchain {
             && block.state_root != computed_state_root
             && !is_checkpointed
             && block.index != 12615
-            // FIX DATE: 2026-07-20 | VERSION: v2.4.28-alpha
-            // REASON: Extended exemption window. The non-deterministic HashMap iteration bug
+            // FIX DATE: 2026-07-21 | VERSION: v2.4.31-alpha
+            // REASON: Extended exemption window again. The non-deterministic HashMap iteration bug
             // in the epoch pool distribution affects ALL blocks produced by old nodes since
-            // height 100,000. The divergence is not bounded at 101,017 — every block produced
-            // by an old (pre-v2.4.26) node has a wrong state root. We exempt the entire
-            // range 100,000-102,000 to give the fixed nodes time to take over block production
-            // and re-establish a canonical, deterministic state root.
-            && !(block.index >= 100_000 && block.index <= 102_000)
+            // height 100,000. Fixing the bug stops future divergence, but does not heal the
+            // past divergence since the state root hashes the entire divergent AccountState.
+            // We extend the exemption to 105,000 to keep the network alive while nodes upgrade.
+            && !(block.index >= 100_000 && block.index <= 105_000)
         // SOFT UPDATE: Exemption for epoch pool consensus bug blocks
         {
             tracing::warn!(
@@ -2769,11 +2768,14 @@ impl Blockchain {
                     let mut proposer_counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
                     let mut total_counted: u64 = 0;
                     for h in epoch_start..=block.index {
-                        if let Some(b) = self.storage.load_block(h).ok() {
-                            if !b.proposer.is_empty() {
-                                *proposer_counts.entry(b.proposer.clone()).or_insert(0) += 1;
-                                total_counted += 1;
-                            }
+                        let proposer = if h == block.index {
+                            block.proposer.clone()
+                        } else {
+                            self.storage.load_block(h).ok().map(|b| b.proposer).unwrap_or_default()
+                        };
+                        if !proposer.is_empty() {
+                            *proposer_counts.entry(proposer).or_insert(0) += 1;
+                            total_counted += 1;
                         }
                     }
 
@@ -2793,6 +2795,25 @@ impl Blockchain {
                                 new_state.credit_account_direct(proposer, share);
                                 distributed = distributed.saturating_add(share);
                                 last_proposer = Some(proposer.clone());
+                                
+                                // Emit a contract event so block explorers can index the distribution
+                                let contract = new_state.contracts.entry(EPOCH_POOL_ADDRESS.to_string()).or_insert_with(|| crate::core::transaction::ContractState {
+                                    owner: EPOCH_POOL_ADDRESS.to_string(),
+                                    template_id: 0,
+                                    deployed_at: 0,
+                                    storage: std::collections::HashMap::new(),
+                                    events: vec![],
+                                });
+                                let mut event_data = std::collections::HashMap::new();
+                                event_data.insert("validator".to_string(), proposer.clone());
+                                event_data.insert("share".to_string(), share.to_string());
+                                event_data.insert("blocks".to_string(), count.to_string());
+                                contract.events.push(crate::core::transaction::ContractEvent {
+                                    height: block.index,
+                                    name: "EpochRewardDistributed".to_string(),
+                                    data: event_data,
+                                });
+                                
                                 tracing::info!(
                                     "Epoch {} reward: {} gets {} microunits ({}/{} blocks, {:.1}% uptime)",
                                     epoch, proposer, share, count, total_counted,
