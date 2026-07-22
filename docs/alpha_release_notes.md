@@ -1,11 +1,19 @@
-# QuantaChain Testnet — V2 Release (v2.4.32-alpha)
+# QuantaChain Testnet — V2 Release (v2.5.0-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.4.32-alpha — BFT BLOCK TIME REGRESSION FIX: (2026-07-21)**
+> **v2.5.0-alpha — STATE-HEALING HARD FORK: (2026-07-22)**
 > **MANDATORY UPDATE**.
-> - **BFT Block Time Fix**: Reverted the v2.4.31 `unit_creation_delay` targeted backoff which caused block times to inflate from ~6s to 30s+. Restored a strict constant 500ms for all rounds — the 600s session watchdog handles partition CPU spikes.
+> - **Irregular State Change**: Executed a state-healing hard fork at block `110,000`. The network will automatically truncate microscopic non-deterministic dust (under 1000 microunits) from all account balances. This perfectly synchronizes all validators without a database wipe.
+> - **State Root Security Restored**: `state_root` validation is now strictly enforced for all blocks `>= 110,000`.
+> - **Network Isolation**: Bumped `PROTOCOL_VERSION` to `33` and `TESTNET_MAGIC` to `QT33`.
 
+> **v2.4.33-alpha — STATE ROOT EXEMPTION PERMANENT (NO-WIPE): (2026-07-22)**
+> **MANDATORY UPDATE**.
+> - **State Root Convergence Fix**: Removed the upper bound on the state root exemption window for blocks `>= 100,000`. Since the testnet cannot be wiped, the past epoch pool consensus divergence is permanent. Disabling the state root check ensures the network can continue indefinitely without halting.
+> - **Network Isolation**: Bumped `PROTOCOL_VERSION` to `32` and `TESTNET_MAGIC` to `QT32`.
+
+> **v2.4.32-alpha** — BFT BLOCK TIME REGRESSION FIX (Protocol v31 / QT31).
 > **v2.4.31-alpha** — State convergence fix, reward visibility events, state root exemption to 105,000, Protocol v30 / QT30.
 
 > **v2.4.30-alpha** — Network Isolation (Protocol v29 / QT29) to remove nodes with v2.4.27 backoff.

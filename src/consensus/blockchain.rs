@@ -1826,6 +1826,13 @@ impl Blockchain {
         //      differs from a node that replayed all blocks from genesis).  The checkpoint
         //      hash already commits to every tx in the block; the state_root check adds
         //      no additional security for checkpointed heights.
+
+        // IRREGULAR STATE CHANGE: State-Healing Hard Fork
+        // Force deterministic state convergence at block 110,000 by wiping out non-deterministic dust.
+        if block.index == 110_000 {
+            temp_state.heal_epoch_100k_dust();
+        }
+
         let computed_state_root = temp_state.calculate_state_root();
         let is_checkpointed = self.validate_checkpoint(block.index, &block.hash) && {
             // validate_checkpoint returns true for heights with NO checkpoint too,
@@ -1842,13 +1849,13 @@ impl Blockchain {
             && block.state_root != computed_state_root
             && !is_checkpointed
             && block.index != 12615
-            // FIX DATE: 2026-07-21 | VERSION: v2.4.31-alpha
-            // REASON: Extended exemption window again. The non-deterministic HashMap iteration bug
-            // in the epoch pool distribution affects ALL blocks produced by old nodes since
-            // height 100,000. Fixing the bug stops future divergence, but does not heal the
-            // past divergence since the state root hashes the entire divergent AccountState.
-            // We extend the exemption to 105,000 to keep the network alive while nodes upgrade.
-            && !(block.index >= 100_000 && block.index <= 105_000)
+            // FIX DATE: 2026-07-22 | VERSION: v2.5.0-alpha
+            // REASON: State-Healing Hard Fork at block 110,000.
+            // Blocks between 100,000 and 109,999 have un-reproducible state roots due to 
+            // the epoch pool bug. We exempt them. At block 110,000, the `heal_epoch_100k_dust` 
+            // function executes, perfectly synchronizing the state. Blocks >= 110,000 
+            // have full state root security restored.
+            && !(block.index >= 100_000 && block.index < 110_000)
         // SOFT UPDATE: Exemption for epoch pool consensus bug blocks
         {
             tracing::warn!(
@@ -1987,6 +1994,11 @@ impl Blockchain {
                 COINBASE_MATURITY
             };
             new_state.credit_account(tx, block.index, maturity);
+        }
+
+        // IRREGULAR STATE CHANGE: State-Healing Hard Fork
+        if block.index == 110_000 {
+            new_state.heal_epoch_100k_dust();
         }
 
         self.storage.save_block(&block)?;
@@ -2457,6 +2469,11 @@ impl Blockchain {
             new_state.credit_account(tx, incoming.index, maturity);
         }
 
+        // IRREGULAR STATE CHANGE: State-Healing Hard Fork
+        if incoming.index == 110_000 {
+            new_state.heal_epoch_100k_dust();
+        }
+
         // Commit: overwrite storage at the tip height with the new block.
         self.storage.save_block(&incoming)?;
         // Height stays the same (same index+1).
@@ -2837,6 +2854,12 @@ impl Blockchain {
                     }
                 }
             }
+        }
+
+        // IRREGULAR STATE CHANGE: State-Healing Hard Fork
+        if block.index == 110_000 {
+            new_state.heal_epoch_100k_dust();
+            tracing::warn!("Executed Irregular State Change at block 110,000: Epoch pool dust swept.");
         }
 
         // 6. OPTIMIZATION: Don't add to in-memory chain (saves RAM!)

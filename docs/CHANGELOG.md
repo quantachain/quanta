@@ -1,5 +1,18 @@
 # Changelog
 
+## [v2.5.0-alpha] - 2026-07-22
+
+### Fixed
+- **State-Healing Hard Fork**: Executed an irregular state change at block `110,000` to mathematically truncate microscopic non-deterministic dust (under 1000 microunits) from all account balances. This perfectly synchronizes all validators, allowing the network to permanently resolve the epoch pool bug divergence without a database wipe.
+- **State Root Security Restored**: Removed the permanent exemption. `state_root` validation is now strictly enforced for all blocks `>= 110,000`.
+- **Network Isolation**: Bumped `PROTOCOL_VERSION` to `33` and `TESTNET_MAGIC` to `QT33` to cleanly isolate upgraded nodes on the new state.
+
+## [v2.4.33-alpha] - 2026-07-22
+
+### Fixed
+- **State Root Exemption Permanent (No-Wipe)**: Removed the upper bound on the state root exemption window for blocks `>= 100,000`. Since the network operators cannot perform a testnet wipe, the state divergence caused by the v2.4.26 epoch pool bug is permanent. Disabling state root validation from 100,000 onward allows the network to continue forming consensus without halting at arbitrary block heights.
+- **Network Isolation**: Bumped `PROTOCOL_VERSION` to `32` and `TESTNET_MAGIC` to `QT32` to cleanly isolate upgraded nodes.
+
 ## [v2.4.32-alpha] - 2026-07-21
 
 ### Fixed

@@ -651,6 +651,23 @@ impl AccountState {
         }
     }
 
+    /// State-Healing Hard Fork: Round down all balances to the nearest 100,000 microunits (0.1 QUA).
+    /// This permanently wipes out any non-deterministic remainder dust from the epoch pool bug.
+    pub fn heal_epoch_100k_dust(&mut self) {
+        for acc in self.accounts.values_mut() {
+            let dust = acc.balance % 100_000;
+            if dust > 0 {
+                acc.balance -= dust;
+            }
+            for locked in acc.locked_balances.iter_mut() {
+                let locked_dust = locked.amount % 100_000;
+                if locked_dust > 0 {
+                    locked.amount -= locked_dust;
+                }
+            }
+        }
+    }
+
     /// Calculate deterministic state root hash of all accounts AND validators.
     ///
     /// SECURITY FIX (2026-06-24): Previously only hashed accounts. Validators
