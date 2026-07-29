@@ -1085,6 +1085,20 @@ impl Blockchain {
                 temp_state.increment_nonce(&tx.sender);
             }
         }
+
+        // FIX DATE: 2026-07-29 | VERSION: v2.5.1-alpha
+        // REASON: Mirror the IRREGULAR STATE CHANGE applied in validate_block_consensus.
+        // create_block_template was computing the state root WITHOUT calling
+        // heal_epoch_100k_dust() first, while validate_block_consensus DOES call it
+        // (line ~1833). This caused every proposed block 110,000 to embed a pre-heal
+        // state root; validators recomputed with a post-heal root → mismatch →
+        // InvalidBlock → chain permanently stuck at 109,999. Fix: apply the same
+        // heal before calculate_state_root() so the proposer's embedded root always
+        // matches what validators independently compute.
+        if index == 110_000 {
+            temp_state.heal_epoch_100k_dust();
+        }
+
         let state_root = temp_state.calculate_state_root();
 
         // Create new block (unmined)

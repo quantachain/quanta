@@ -1,5 +1,11 @@
 # Changelog
 
+## [v2.5.1-alpha] - 2026-07-29
+
+### Fixed
+- **Chain-Stall Hotfix (Block 110,000)**: `create_block_template` was computing the `state_root` for block `110,000` without first calling `heal_epoch_100k_dust()`, while `validate_block_consensus` correctly applied it before computing the root. Every proposed block `110,000` therefore embedded a pre-heal state root that all validators rejected as `InvalidBlock`, permanently stalling the chain at `109,999`. Fixed by mirroring the `if index == 110_000 { temp_state.heal_epoch_100k_dust(); }` call in `create_block_template` immediately before `calculate_state_root()`. **No wipe required — pure implementation bug.**
+- **Network Isolation**: Bumped `PROTOCOL_VERSION` to `34` and `TESTNET_MAGIC` to `QT34` to cleanly evict v2.5.0 proposers still broadcasting the incorrectly-rooted block template.
+
 ## [v2.5.0-alpha] - 2026-07-22
 
 ### Fixed
