@@ -6,8 +6,8 @@ use chrono::Utc;
 use clap::{Parser, Subcommand};
 use quanta::core::contracts::{
     AgentBidInitArgs, AgentBidSelectArgs, AgentBidSubmitArgs, AgentJobClaimArgs, AgentJobInitArgs,
-    EscrowClaimArgs, EscrowInitArgs, NativeContracts, TEMPLATE_AGENT_BID, TEMPLATE_AGENT_JOB,
-    TEMPLATE_ESCROW,
+    EscrowClaimArgs, EscrowInitArgs, NativeContracts, StreamInitArgs, TEMPLATE_AGENT_BID, TEMPLATE_AGENT_JOB,
+    TEMPLATE_ESCROW, TEMPLATE_STREAM,
 };
 use quanta::core::transaction::{SignatureScheme, Transaction, TransactionType};
 #[allow(deprecated)]
@@ -244,6 +244,37 @@ enum Commands {
         node: Option<String>,
     },
 
+    /// Delegate QUA to an active BFT validator.
+    /// The validator's voting weight increases by your delegated amount.
+    Delegate {
+        #[arg(short, long)]
+        wallet: Option<String>,
+        /// The validator's address
+        #[arg(long)]
+        validator: String,
+        /// Amount of QUA to delegate
+        #[arg(long)]
+        amount: f64,
+        #[arg(long, default_value = "0.01")]
+        fee: f64,
+        #[arg(short, long)]
+        node: Option<String>,
+    },
+
+    /// Undelegate QUA from a BFT validator.
+    /// The delegated amount will be locked for the unbonding period before becoming spendable.
+    Undelegate {
+        #[arg(short, long)]
+        wallet: Option<String>,
+        /// The validator's address
+        #[arg(long)]
+        validator: String,
+        #[arg(long, default_value = "0.01")]
+        fee: f64,
+        #[arg(short, long)]
+        node: Option<String>,
+    },
+
     // ── Native Smart Contracts ─────────────────────────────────────────────
     /// Deploy a trustless Escrow contract.
     ///
@@ -406,12 +437,54 @@ enum Commands {
         #[arg(long, default_value = "{}")]
         args: String,
         #[arg(long, default_value = "0.001")]
+},
+
+    /// Deploy a Stream contract for pay-per-block subscriptions.
+    DeployStream {
+        #[arg(short, long)]
+        wallet: Option<String>,
+        /// The recipient address
+        #[arg(long)]
+        recipient: String,
+        /// Payment rate per block in QUA
+        #[arg(long)]
+        rate_per_block: f64,
+        /// Initial deposit amount in QUA
+        #[arg(long)]
+        amount: f64,
+        #[arg(long, default_value = "0.01")]
         fee: f64,
         #[arg(short, long)]
         node: Option<String>,
     },
 
-    // ── Treasury Multisig ──────────────────────────────────────────────────
+    /// Withdraw accumulated funds from an active Stream contract (recipient only).
+    WithdrawStream {
+        #[arg(short, long)]
+        wallet: Option<String>,
+        /// The stream contract address
+        #[arg(long)]
+        contract: String,
+        #[arg(long, default_value = "0.001")]
+        fee: f64,
+        #[arg(short, long)]
+        node: Option<String>,
+    },
+
+    /// Cancel a Stream contract and refund the remaining balance to the owner.
+    CancelStream {
+        #[arg(short, long)]
+        wallet: Option<String>,
+        /// The stream contract address
+        #[arg(long)]
+        contract: String,
+        #[arg(long, default_value = "0.001")]
+        fee: f64,
+        #[arg(short, long)]
+        node: Option<String>,
+    },
+
+    // ── Treasury Management (Multisig) ──────────────────────────────────────────────────
     /// Initialize a 3-of-N treasury multisig (generates N Falcon-512 keys).
     TreasuryInit {
         #[arg(long, default_value = "treasury_setup.json")]
@@ -1165,6 +1238,108 @@ async fn main() {
             }
         }
 
+        Commands::DeployStream {
+            wallet,
+            recipient,
+            rate_per_block,
+            amount,
+            fee,
+            node,
+        } => {
+            let node = resolve_node(node);
+            let kp = load_keypair_for_signing(&resolve_wallet(wallet));
+            let nonce = fetch_nonce(&node, &kp.address).await + 1;
+
+            let args = StreamInitArgs {
+                recipient: recipient.clone(),
+                rate_per_block: qua_to_u(rate_per_block),
+            };
+            let payload = serde_json::to_vec(&args).expect("Failed to serialize args");
+            let tx = build_transfer(&kp, &kp.address, amount, fee, nonce, vec![]);
+            let mut deploy = tx.clone();
+            deploy.tx_type = TransactionType::ContractDeploy {
+                template_id: TEMPLATE_STREAM,
+                init_args: payload,
+            };
+            let sig_bytes = deploy.get_signing_bytes();
+            deploy.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
+
+            broadcast_and_print(
+                &node,
+                &deploy,
+                "Stream Deployed",
+                &kp.address,
+                "CONTRACT",
+                amount,
+                fee,
+            )
+            .await;
+        }
+
+        Commands::WithdrawStream {
+            wallet,
+            contract,
+            fee,
+            node,
+        } => {
+            let node = resolve_node(node);
+            let kp = load_keypair_for_signing(&resolve_wallet(wallet));
+            let nonce = fetch_nonce(&node, &kp.address).await + 1;
+
+            let tx = build_transfer(&kp, &kp.address, 0.0, fee, nonce, vec![]);
+            let mut call = tx.clone();
+            call.tx_type = TransactionType::ContractCall {
+                contract_address: contract.clone(),
+                method: "withdraw".to_string(),
+                args: vec![],
+            };
+            let sig_bytes = call.get_signing_bytes();
+            call.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
+
+            broadcast_and_print(
+                &node,
+                &call,
+                "Stream Withdraw",
+                &kp.address,
+                &contract,
+                0.0,
+                fee,
+            )
+            .await;
+        }
+
+        Commands::CancelStream {
+            wallet,
+            contract,
+            fee,
+            node,
+        } => {
+            let node = resolve_node(node);
+            let kp = load_keypair_for_signing(&resolve_wallet(wallet));
+            let nonce = fetch_nonce(&node, &kp.address).await + 1;
+
+            let tx = build_transfer(&kp, &kp.address, 0.0, fee, nonce, vec![]);
+            let mut call = tx.clone();
+            call.tx_type = TransactionType::ContractCall {
+                contract_address: contract.clone(),
+                method: "cancel".to_string(),
+                args: vec![],
+            };
+            let sig_bytes = call.get_signing_bytes();
+            call.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
+
+            broadcast_and_print(
+                &node,
+                &call,
+                "Stream Cancelled",
+                &kp.address,
+                &contract,
+                0.0,
+                fee,
+            )
+            .await;
+        }
+
         Commands::ContractCall {
             wallet,
             contract,
@@ -1346,7 +1521,7 @@ async fn main() {
 
         Commands::TreasuryBroadcast { proposal, node } => {
             let node = resolve_node(node);
-            let json = std::fs::read_to_string(&proposal).expect("Could not read proposal");
+            let json = std::fs::read_to_string(&proposal).expect("Could not read treasury setup");
             let prop = MultiSigTransaction::from_json(&json).expect("Invalid proposal JSON");
             let (col, req) = prop.signature_progress();
             if !prop.is_complete() {

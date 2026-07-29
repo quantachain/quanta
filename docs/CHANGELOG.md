@@ -1,5 +1,15 @@
 # Changelog
 
+## [v3.0.0-alpha] - 2026-07-29
+
+### Added
+- **Delegated Proof of Stake (DPoS)**: Implemented native delegation, allowing QUA holders to lock their tokens behind a trusted BFT validator. Includes `Delegate` and `Undelegate` transaction types.
+- **DPoS State Transitions & Rewards**: Updated epoch boundary logic to split block rewards proportionally between validators (with a standard 10% commission) and their delegators. Updated committee selection to rank validators by total stake (self + delegated).
+- **CLI Commands**: Added `delegate`, `undelegate`, `deploy-stream`, `withdraw-stream`, and `cancel-stream` commands to `quanta-wallet`.
+
+### Changed
+- **Network Isolation**: Bumped `PROTOCOL_VERSION` to `35` and `TESTNET_MAGIC` to `QT35` for the Katenet V3 launch.
+
 ## [v2.5.1-alpha] - 2026-07-29
 
 ### Fixed

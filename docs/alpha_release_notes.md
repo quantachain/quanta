@@ -1,14 +1,17 @@
-# QuantaChain Testnet — V2 Release (v2.5.0-alpha)
+# QuantaChain Testnet — V3 Katenet (v3.0.0-alpha)
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v2.5.1-alpha — CHAIN-STALL HOTFIX: MANDATORY UPDATE (2026-07-29)**
-> - **Root Cause Fixed**: `create_block_template` was computing the `state_root` for block `110,000` WITHOUT first applying `heal_epoch_100k_dust()`, while `validate_block_consensus` correctly DID apply it. This caused every proposed block `110,000` to embed a pre-heal state root that all validators rejected → chain permanently stuck at block `109,999`. **No wipe needed — pure implementation bug.**
-> - **Network Isolation**: Bumped `PROTOCOL_VERSION` to `34` and `TESTNET_MAGIC` to `QT34` to evict v2.5.0 proposers still broadcasting the wrong state root.
+> **v3.0.0-alpha — KATENET LAUNCH: MANDATORY UPDATE (2026-07-29)**
+> - **Delegated Proof of Stake (DPoS)**: Consensus is no longer just for whales. Native delegation allows any QUA holder to lock their tokens behind a trusted BFT validator to secure the network and earn a share of block rewards.
+> - **Network Isolation**: Bumped `PROTOCOL_VERSION` to `35` and `TESTNET_MAGIC` to `QT35` to cleanly evict all V2 nodes.
 
-> **v2.5.0-alpha — STATE-HEALING HARD FORK (2026-07-22)** *(broken — upgrade to v2.5.1)*
+> **v2.5.1-alpha — CHAIN-STALL HOTFIX (2026-07-29)** *(legacy V2)*
+> - **Root Cause Fixed**: `create_block_template` was computing the `state_root` for block `110,000` WITHOUT first applying `heal_epoch_100k_dust()`, while `validate_block_consensus` correctly DID apply it. This caused every proposed block `110,000` to embed a pre-heal state root that all validators rejected → chain permanently stuck at block `109,999`. **No wipe needed — pure implementation bug.**
+> - Bumped `PROTOCOL_VERSION` to `34` and `TESTNET_MAGIC` to `QT34`.
+
+> **v2.5.0-alpha — STATE-HEALING HARD FORK (2026-07-22)** *(broken)*
 > - Executed a state-healing hard fork at block `110,000`. Introduced the `heal_epoch_100k_dust()` call in validators but missed it in the proposer template — see v2.5.1 fix above.
-> - Bumped `PROTOCOL_VERSION` to `33` and `TESTNET_MAGIC` to `QT33`.
 
 > **v2.4.33-alpha — STATE ROOT EXEMPTION PERMANENT (NO-WIPE): (2026-07-22)**
 > **MANDATORY UPDATE**.

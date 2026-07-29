@@ -1077,6 +1077,15 @@ impl Blockchain {
                 }
             } else if tx.is_unstake() {
                 temp_state.deregister_validator(&tx.sender, epoch);
+            } else if let crate::core::transaction::TransactionType::Delegate { validator_address } = &tx.tx_type {
+                if let Err(e) = temp_state.delegate_stake(&tx.sender, validator_address, tx.amount) {
+                    tracing::warn!("Delegate failed in template: {}", e);
+                }
+            } else if let crate::core::transaction::TransactionType::Undelegate { validator_address } = &tx.tx_type {
+                if let Ok(amount) = temp_state.undelegate_stake(&tx.sender, validator_address) {
+                    let unlock_height = index + (crate::consensus::authorities::UNBONDING_EPOCHS * crate::consensus::authorities::EPOCH_SIZE);
+                    temp_state.lock_unbonding_stake(&tx.sender, amount, unlock_height);
+                }
             }
 
             temp_state.credit_account(tx, index, COINBASE_MATURITY);
@@ -1753,6 +1762,23 @@ impl Blockchain {
                     tx.sender,
                     epoch
                 );
+            }
+
+            if let crate::core::transaction::TransactionType::Delegate { validator_address } = &tx.tx_type {
+                if let Err(e) = temp_state.delegate_stake(&tx.sender, validator_address, tx.amount) {
+                    tracing::warn!("Delegate rejected in validation: {}", e);
+                    return Err(BlockchainError::InvalidBlock);
+                }
+            }
+
+            if let crate::core::transaction::TransactionType::Undelegate { validator_address } = &tx.tx_type {
+                if let Ok(amount) = temp_state.undelegate_stake(&tx.sender, validator_address) {
+                    let unlock_height = block.index + (crate::consensus::authorities::UNBONDING_EPOCHS * crate::consensus::authorities::EPOCH_SIZE);
+                    temp_state.lock_unbonding_stake(&tx.sender, amount, unlock_height);
+                } else {
+                    tracing::warn!("Undelegate rejected: no delegation found or validator missing");
+                    return Err(BlockchainError::InvalidBlock);
+                }
             }
 
             temp_state.credit_account(tx, block.index, COINBASE_MATURITY);
@@ -2711,6 +2737,19 @@ impl Blockchain {
                     new_state.deregister_validator(&tx.sender, epoch);
                 }
 
+                // Apply Delegate
+                if let crate::core::transaction::TransactionType::Delegate { validator_address } = &tx.tx_type {
+                    let _ = new_state.delegate_stake(&tx.sender, validator_address, tx.amount);
+                }
+
+                // Apply Undelegate
+                if let crate::core::transaction::TransactionType::Undelegate { validator_address } = &tx.tx_type {
+                    if let Ok(amount) = new_state.undelegate_stake(&tx.sender, validator_address) {
+                        let unlock_height = block.index + (crate::consensus::authorities::UNBONDING_EPOCHS * crate::consensus::authorities::EPOCH_SIZE);
+                        new_state.lock_unbonding_stake(&tx.sender, amount, unlock_height);
+                    }
+                }
+
                 // Apply Stake: register validator
                 if let crate::core::transaction::TransactionType::Stake { validator_pubkey } =
                     &tx.tx_type
@@ -2821,10 +2860,45 @@ impl Blockchain {
                         sorted_proposers.sort_by(|a, b| a.0.cmp(b.0));
 
                         for (proposer, count) in sorted_proposers {
-                            let share = (pool_balance * count) / total_counted;
-                            if share > 0 {
-                                new_state.credit_account_direct(proposer, share);
-                                distributed = distributed.saturating_add(share);
+                            let total_share = (pool_balance * count) / total_counted;
+                            if total_share > 0 {
+                                let mut validator_share = total_share;
+                                let mut validator_dust = 0;
+                                
+                                // DPoS Reward Split: if validator is still registered, distribute proportionally to delegators
+                                if let Some(info) = new_state.get_validator_info(proposer) {
+                                    let self_stake = info.stake;
+                                    let delegated_stake = info.delegated_stake;
+                                    let total_stake = self_stake.saturating_add(delegated_stake);
+                                    
+                                    if total_stake > 0 && delegated_stake > 0 {
+                                        // Validator gets minimum 10% commission + their proportional self_stake share of the remaining 90%
+                                        let commission = total_share / 10;
+                                        let distributable = total_share.saturating_sub(commission);
+                                        
+                                        validator_share = commission + (distributable as u128 * self_stake as u128 / total_stake as u128) as u64;
+                                        let mut distributed_to_delegators = 0;
+                                        
+                                        // Sort delegators to ensure deterministic dust rounding
+                                        let mut sorted_delegators: Vec<(&String, &u64)> = info.delegators.iter().collect();
+                                        sorted_delegators.sort_by(|a, b| a.0.cmp(b.0));
+                                        
+                                        for (delegator, amount) in sorted_delegators {
+                                            let delegator_share = (distributable as u128 * (*amount) as u128 / total_stake as u128) as u64;
+                                            if delegator_share > 0 {
+                                                new_state.credit_account_direct(delegator, delegator_share);
+                                                distributed_to_delegators += delegator_share;
+                                            }
+                                        }
+                                        
+                                        // Any dust from rounding goes to the validator
+                                        validator_dust = distributable.saturating_sub(distributed_to_delegators).saturating_sub(validator_share.saturating_sub(commission));
+                                        validator_share += validator_dust;
+                                    }
+                                }
+
+                                new_state.credit_account_direct(proposer, validator_share);
+                                distributed = distributed.saturating_add(total_share);
                                 last_proposer = Some(proposer.clone());
                                 
                                 // Emit a contract event so block explorers can index the distribution
@@ -2837,7 +2911,8 @@ impl Blockchain {
                                 });
                                 let mut event_data = std::collections::HashMap::new();
                                 event_data.insert("validator".to_string(), proposer.clone());
-                                event_data.insert("share".to_string(), share.to_string());
+                                event_data.insert("total_share".to_string(), total_share.to_string());
+                                event_data.insert("validator_share".to_string(), validator_share.to_string());
                                 event_data.insert("blocks".to_string(), count.to_string());
                                 contract.events.push(crate::core::transaction::ContractEvent {
                                     height: block.index,
@@ -2846,9 +2921,8 @@ impl Blockchain {
                                 });
                                 
                                 tracing::info!(
-                                    "Epoch {} reward: {} gets {} microunits ({}/{} blocks, {:.1}% uptime)",
-                                    epoch, proposer, share, count, total_counted,
-                                    (*count as f64 / total_counted as f64) * 100.0
+                                    "Epoch {} reward: {} gets {} microunits (total {}, {} blocks)",
+                                    epoch, proposer, validator_share, total_share, count
                                 );
                             }
                         }

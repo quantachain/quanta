@@ -138,6 +138,10 @@ pub enum TransactionType {
     /// v2: Deregister as validator and begin the unbonding period.
     /// Staked QUA is locked for UNBONDING_EPOCHS epochs before release.
     Unstake,
+    /// v3: Delegate QUA stake to a specific BFT validator to increase their committee weight.
+    Delegate { validator_address: String },
+    /// v3: Undelegate QUA stake from a specific BFT validator, beginning the unbonding period.
+    Undelegate { validator_address: String },
     /// v2: Deploy a named smart contract template.
     /// `template_id` identifies which built-in template to instantiate.
     /// `init_args` is a JSON-encoded initialisation argument map.
@@ -306,6 +310,14 @@ impl Transaction {
                 buf.extend_from_slice(validator_pubkey);
             }
             TransactionType::Unstake => buf.push(4u8),
+            TransactionType::Delegate { validator_address } => {
+                buf.push(8u8);
+                buf.extend_from_slice(validator_address.as_bytes());
+            }
+            TransactionType::Undelegate { validator_address } => {
+                buf.push(9u8);
+                buf.extend_from_slice(validator_address.as_bytes());
+            }
             TransactionType::ContractDeploy {
                 template_id,
                 init_args,
@@ -401,6 +413,14 @@ impl Transaction {
                 hasher.update(validator_pubkey);
             }
             TransactionType::Unstake => hasher.update([4u8]),
+            TransactionType::Delegate { validator_address } => {
+                hasher.update([8u8]);
+                hasher.update(validator_address.as_bytes());
+            }
+            TransactionType::Undelegate { validator_address } => {
+                hasher.update([9u8]);
+                hasher.update(validator_address.as_bytes());
+            }
             TransactionType::ContractDeploy {
                 template_id,
                 init_args,
@@ -525,6 +545,16 @@ impl Transaction {
         matches!(self.tx_type, TransactionType::Unstake)
     }
 
+    /// Returns `true` if this is a v3 `Delegate` transaction.
+    pub fn is_delegate(&self) -> bool {
+        matches!(self.tx_type, TransactionType::Delegate { .. })
+    }
+
+    /// Returns `true` if this is a v3 `Undelegate` transaction.
+    pub fn is_undelegate(&self) -> bool {
+        matches!(self.tx_type, TransactionType::Undelegate { .. })
+    }
+
     /// Returns `true` if this is a v2 `ContractDeploy` transaction.
     pub fn is_contract_deploy(&self) -> bool {
         matches!(self.tx_type, TransactionType::ContractDeploy { .. })
@@ -572,6 +602,12 @@ pub struct ValidatorInfo {
     pub stake: u64,
     /// Block height at which this validator registered.
     pub registered_height: u64,
+    /// Total delegated stake (microunits) attributed to this validator.
+    #[serde(default)]
+    pub delegated_stake: u64,
+    /// List of delegators and their delegated amounts.
+    #[serde(default)]
+    pub delegators: HashMap<String, u64>,
     /// Whether this validator is in the active set for the current epoch.
     pub active: bool,
     /// Epoch at which unbonding began (set when Unstake tx is processed).
@@ -958,6 +994,8 @@ impl AccountState {
                 falcon_pk,
                 stake,
                 registered_height,
+                delegated_stake: 0,
+                delegators: HashMap::new(),
                 active: true,
                 unbonding_epoch: 0,
                 slash_cooldown_until_epoch: 0,
@@ -977,6 +1015,49 @@ impl AccountState {
             info.active = false;
             info.unbonding_epoch = current_epoch;
         }
+    }
+
+    /// Delegate stake to an active validator.
+    ///
+    /// Adds `amount` to the validator's `delegated_stake` and records the delegator.
+    pub fn delegate_stake(&mut self, delegator: &str, validator: &str, amount: u64) -> Result<(), String> {
+        let info = self.validators.get_mut(validator).ok_or("Validator not found")?;
+        if !info.active {
+            return Err("Cannot delegate to inactive validator".to_string());
+        }
+        info.delegated_stake = info.delegated_stake.saturating_add(amount);
+        let current = info.delegators.entry(delegator.to_string()).or_insert(0);
+        *current = current.saturating_add(amount);
+        Ok(())
+    }
+
+    /// Undelegate stake from a validator.
+    ///
+    /// Subtracts the delegated amount. Returns the amount undelegated so it can be 
+    /// locked in the delegator's `AccountBalance` via `lock_unbonding_stake`.
+    pub fn undelegate_stake(&mut self, delegator: &str, validator: &str) -> Result<u64, String> {
+        let info = self.validators.get_mut(validator).ok_or("Validator not found")?;
+        
+        let current = info.delegators.get(delegator).copied().unwrap_or(0);
+        if current == 0 {
+            return Err("No delegation found".to_string());
+        }
+        
+        info.delegated_stake = info.delegated_stake.saturating_sub(current);
+        info.delegators.remove(delegator);
+        
+        Ok(current)
+    }
+
+    /// Helper to lock unbonding stake in the delegator's account.
+    pub fn lock_unbonding_stake(&mut self, delegator: &str, amount: u64, unlock_height: u64) {
+        let acc = self.accounts.entry(delegator.to_string()).or_insert_with(|| AccountBalance {
+            address: delegator.to_string(),
+            balance: 0,
+            nonce: 0,
+            locked_balances: Vec::new(),
+        });
+        acc.locked_balances.push(LockedBalance { amount, unlock_height });
     }
 
     /// Record that a validator produced a block at `height`.
@@ -1021,6 +1102,15 @@ impl AccountState {
                     );
                     stake_returns.push((address.clone(), info.stake));
                     info.stake = 0;
+                    
+                    // Also forcibly return any remaining delegations (in case they didn't manually undelegate)
+                    for (delegator, amount) in &info.delegators {
+                        stake_returns.push((delegator.clone(), *amount));
+                        tracing::info!("Force-returning {} delegated microunits to {}", amount, delegator);
+                    }
+                    info.delegated_stake = 0;
+                    info.delegators.clear();
+                    
                     to_remove.push(address.clone());
                 }
             }
@@ -1128,11 +1218,12 @@ impl AccountState {
             })
             .collect();
 
-        // Primary sort: stake descending. Secondary sort: address ascending (tie-break).
+        // Primary sort: total stake (self + delegated) descending. Secondary sort: address ascending (tie-break).
         active.sort_by(|(addr_a, info_a), (addr_b, info_b)| {
-            info_b
-                .stake
-                .cmp(&info_a.stake)
+            let total_b = info_b.stake.saturating_add(info_b.delegated_stake);
+            let total_a = info_a.stake.saturating_add(info_a.delegated_stake);
+            total_b
+                .cmp(&total_a)
                 .then_with(|| addr_a.cmp(addr_b))
         });
 
