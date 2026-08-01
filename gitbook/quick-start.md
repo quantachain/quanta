@@ -17,7 +17,8 @@ docker run -d \
   --restart always \
   -p 3000:3000 -p 8333:8333 -p 7782:7782 -p 9090:9090 \
   -v quanta-data:/home/quanta/quanta_data \
-  xd637/quanta-node:latest
+  xd637/quanta-node:latest \
+  quanta start --bootstrap node1.quantachain.org:8333
 ```
 
 ### Starting as a Validator
@@ -38,11 +39,11 @@ docker run -d \
   -v quanta-data:/home/quanta/quanta_data \
   -v /absolute/path/to/validator.qua:/home/quanta/validator.qua \
   xd637/quanta-node:latest \
-  quanta start --validator-wallet /home/quanta/validator.qua
+  quanta start --validator-wallet /home/quanta/validator.qua --bootstrap node1.quantachain.org:8333
 ```
 
 ## 3. Verify Sync
-The V2 network uses magic bytes `Q2T2` to prevent old nodes from connecting.
+The V3 network uses magic bytes `QT35` to prevent old nodes from connecting.
 ```bash
 curl http://localhost:3000/api/blocks/latest
 ```

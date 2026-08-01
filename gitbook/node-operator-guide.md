@@ -32,7 +32,7 @@ A light node only downloads block headers and validates the BFT signatures. It h
 To run a standard node (non-validator) to serve the REST API and support the network:
 
 ```bash
-./quanta start -c quanta.toml
+./quanta start -c quanta.toml --bootstrap node1.quantachain.org:8333
 ```
 
 ## Running a Validator
@@ -52,7 +52,7 @@ If you want to participate in AlephBFT consensus and produce blocks, you must ru
 
 3. **Start Node as Validator**
    ```bash
-   ./quanta start -c quanta.toml --validator-wallet validator.qua
+   ./quanta start -c quanta.toml --validator-wallet validator.qua --bootstrap node1.quantachain.org:8333
    ```
 
 4. **Unstake and Deregister**
@@ -76,4 +76,4 @@ network_port = 8333
 max_peers = 125
 ```
 
-*Note: The V2 network magic bytes are `Q2T9` for the current testnet phase.*
+*Note: The V3 network magic bytes are `QT35` for the current testnet phase.*
