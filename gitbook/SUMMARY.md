@@ -7,6 +7,7 @@
 
 ## Running a Node
 * [Node Operator Guide](node-operator-guide.md)
+* [Katenet Validator Program](katenet-validator-program.md)
 
 ## Wallets & Ecosystem
 * [Wallet CLI](wallet-cli.md)
