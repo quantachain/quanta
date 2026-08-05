@@ -372,15 +372,19 @@ impl BlockchainStorage {
                     
                     // Legacy structs for V2 to V3 AccountState migration
                     #[derive(serde::Deserialize)]
+                    // Changed: 2026-08-05, v3.0.0-alpha — must include ALL 7 fields in
+                    // the exact order they were written to disk by v2. Bincode is a strict
+                    // binary format and ignores #[serde(default)]; every field must be present.
                     struct ValidatorInfoV2 {
                         pub falcon_pk: Vec<u8>,
                         pub stake: u64,
                         pub registered_height: u64,
                         pub active: bool,
-                        #[serde(default)]
                         pub unbonding_epoch: u64,
-                        #[serde(default)]
                         pub slash_cooldown_until_epoch: u64,
+                        pub last_proposed_height: u64,
+                        pub epoch_slots_assigned: u64,
+                        pub epoch_slots_produced: u64,
                     }
 
                     #[derive(serde::Deserialize)]
@@ -406,9 +410,9 @@ impl BlockchainStorage {
                             active: v.active,
                             unbonding_epoch: v.unbonding_epoch,
                             slash_cooldown_until_epoch: v.slash_cooldown_until_epoch,
-                            epoch_slots_assigned: 0,
-                            epoch_slots_produced: 0,
-                            last_proposed_height: 0,
+                            epoch_slots_assigned: v.epoch_slots_assigned,
+                            epoch_slots_produced: v.epoch_slots_produced,
+                            last_proposed_height: v.last_proposed_height,
                         });
                     }
 
