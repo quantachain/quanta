@@ -138,10 +138,6 @@ pub enum TransactionType {
     /// v2: Deregister as validator and begin the unbonding period.
     /// Staked QUA is locked for UNBONDING_EPOCHS epochs before release.
     Unstake,
-    /// v3: Delegate QUA stake to a specific BFT validator to increase their committee weight.
-    Delegate { validator_address: String },
-    /// v3: Undelegate QUA stake from a specific BFT validator, beginning the unbonding period.
-    Undelegate { validator_address: String },
     /// v2: Deploy a named smart contract template.
     /// `template_id` identifies which built-in template to instantiate.
     /// `init_args` is a JSON-encoded initialisation argument map.
@@ -176,6 +172,10 @@ pub enum TransactionType {
         /// Block hash that sig_b signed (must differ from hash_a).
         hash_b: String,
     },
+    /// v3: Delegate QUA stake to a specific BFT validator to increase their committee weight.
+    Delegate { validator_address: String },
+    /// v3: Undelegate QUA stake from a specific BFT validator, beginning the unbonding period.
+    Undelegate { validator_address: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -663,10 +663,10 @@ pub struct ContractState {
 /// In-memory global state — accounts, validators, contracts.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AccountState {
-    accounts: HashMap<String, AccountBalance>,
+    pub accounts: HashMap<String, AccountBalance>,
     /// Registered BFT validators (address → ValidatorInfo).
     #[serde(default)]
-    validators: HashMap<String, ValidatorInfo>,
+    pub validators: HashMap<String, ValidatorInfo>,
     /// Deployed smart contracts (contract address → ContractState).
     #[serde(default)]
     pub contracts: HashMap<String, ContractState>,

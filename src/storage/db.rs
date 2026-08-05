@@ -364,9 +364,62 @@ impl BlockchainStorage {
                 compressed.to_vec()
             };
 
-            // Deserialize with bincode
-            let account_state: AccountState = bincode::deserialize(&serialized)
-                .map_err(|e| StorageError::Serialization(e.to_string()))?;
+            // Deserialize with bincode (try v3 first)
+            let account_state: AccountState = match bincode::deserialize(&serialized) {
+                Ok(state) => state,
+                Err(e) => {
+                    tracing::warn!("Failed to load v3 AccountState: {}. Attempting v2 migration...", e);
+                    
+                    // Legacy structs for V2 to V3 AccountState migration
+                    #[derive(serde::Deserialize)]
+                    struct ValidatorInfoV2 {
+                        pub falcon_pk: Vec<u8>,
+                        pub stake: u64,
+                        pub registered_height: u64,
+                        pub active: bool,
+                        #[serde(default)]
+                        pub unbonding_epoch: u64,
+                        #[serde(default)]
+                        pub slash_cooldown_until_epoch: u64,
+                    }
+
+                    #[derive(serde::Deserialize)]
+                    struct AccountStateV2 {
+                        accounts: std::collections::HashMap<String, crate::core::transaction::AccountBalance>,
+                        #[serde(default)]
+                        validators: std::collections::HashMap<String, ValidatorInfoV2>,
+                        #[serde(default)]
+                        pub contracts: std::collections::HashMap<String, crate::core::transaction::ContractState>,
+                    }
+
+                    let state_v2: AccountStateV2 = bincode::deserialize(&serialized)
+                        .map_err(|e2| StorageError::Serialization(format!("v2 fallback also failed: {}", e2)))?;
+
+                    let mut validators = std::collections::HashMap::new();
+                    for (k, v) in state_v2.validators {
+                        validators.insert(k, crate::core::transaction::ValidatorInfo {
+                            falcon_pk: v.falcon_pk,
+                            stake: v.stake,
+                            registered_height: v.registered_height,
+                            delegated_stake: 0,
+                            delegators: std::collections::HashMap::new(),
+                            active: v.active,
+                            unbonding_epoch: v.unbonding_epoch,
+                            slash_cooldown_until_epoch: v.slash_cooldown_until_epoch,
+                            epoch_slots_assigned: 0,
+                            epoch_slots_produced: 0,
+                            last_proposed_height: 0,
+                        });
+                    }
+
+                    tracing::info!("Successfully migrated AccountState from v2 to v3 in-memory.");
+                    AccountState {
+                        accounts: state_v2.accounts,
+                        validators,
+                        contracts: state_v2.contracts,
+                    }
+                }
+            };
 
             Ok(Some(account_state))
         } else {
