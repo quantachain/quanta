@@ -2,44 +2,9 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
-> **v3.0.0-alpha — KATENET LAUNCH: MANDATORY UPDATE (2026-07-29)**
+> **v3.0.0-alpha — KATENET LAUNCH: MANDATORY UPDATE (2026-08-05)**
 > - **Delegated Proof of Stake (DPoS)**: Consensus is no longer just for whales. Native delegation allows any QUA holder to lock their tokens behind a trusted BFT validator to secure the network and earn a share of block rewards.
 > - **Network Isolation**: Bumped `PROTOCOL_VERSION` to `35` and `TESTNET_MAGIC` to `QT35` to cleanly evict all V2 nodes.
-
-> **v2.5.1-alpha — CHAIN-STALL HOTFIX (2026-07-29)** *(legacy V2)*
-> - **Root Cause Fixed**: `create_block_template` was computing the `state_root` for block `110,000` WITHOUT first applying `heal_epoch_100k_dust()`, while `validate_block_consensus` correctly DID apply it. This caused every proposed block `110,000` to embed a pre-heal state root that all validators rejected → chain permanently stuck at block `109,999`. **No wipe needed — pure implementation bug.**
-> - Bumped `PROTOCOL_VERSION` to `34` and `TESTNET_MAGIC` to `QT34`.
-
-> **v2.5.0-alpha — STATE-HEALING HARD FORK (2026-07-22)** *(broken)*
-> - Executed a state-healing hard fork at block `110,000`. Introduced the `heal_epoch_100k_dust()` call in validators but missed it in the proposer template — see v2.5.1 fix above.
-
-> **v2.4.33-alpha — STATE ROOT EXEMPTION PERMANENT (NO-WIPE): (2026-07-22)**
-> **MANDATORY UPDATE**.
-> - **State Root Convergence Fix**: Removed the upper bound on the state root exemption window for blocks `>= 100,000`. Since the testnet cannot be wiped, the past epoch pool consensus divergence is permanent. Disabling the state root check ensures the network can continue indefinitely without halting.
-> - **Network Isolation**: Bumped `PROTOCOL_VERSION` to `32` and `TESTNET_MAGIC` to `QT32`.
-
-> **v2.4.32-alpha** — BFT BLOCK TIME REGRESSION FIX (Protocol v31 / QT31).
-> **v2.4.31-alpha** — State convergence fix, reward visibility events, state root exemption to 105,000, Protocol v30 / QT30.
-
-> **v2.4.30-alpha** — Network Isolation (Protocol v29 / QT29) to remove nodes with v2.4.27 backoff.
-> **v2.4.29-alpha** — Reverted v2.4.27 `unit_creation_delay` backoff (30s block time fix).
-> **v2.4.28-alpha** — State root exemption window extended to 100,000–102,000 (MANDATORY).
-> **v2.4.27-alpha** — BFT CPU spike hotfix (linear backoff — **REVERTED in v2.4.29**).
-> **v2.4.25-alpha** — BFT CPU spike & network spam isolation.
-> **v2.4.23-alpha** — Mid-session unstake hotfix (Protocol v23 / QT23).
-> **v2.4.22-alpha** — Unicast routing hotfix (Protocol v22 / QT22).
-> **v2.4.21-alpha** — AlephBFT CPU spike filter removal.
-> **v2.4.20-alpha** — Network isolation (Protocol v21 / QT21) to fix collisions.
-> **v2.4.19-alpha** — DAG corruption recovery (Hard Fork Session 1362).
-
-> **v2.4.5-alpha** \u2014 CPU/RAM DOS fix (Protocol v18 / QT18): header buffer OOM, Tokio starvation, BFT message limit.
-> **v2.4.4-alpha** \u2014 Memory leak and zip bomb fix (Protocol v17 / QT17).
-> **v2.4.3-alpha** \u2014 TOCTOU race condition fix (Protocol v16 / QT16).
-> **v2.4.2-alpha** \u2014 Network stability and IP flapping fix (Protocol v15 / QT15).
-> **v2.4.1-alpha** \u2014 Peer ban/flapping fix: dead streams no longer trigger bans.
-> **v2.4.0-alpha** \u2014 BFT session restart timing fix, locking optimisation.
-> **v2.3.x-alpha** \u2014 Protocol v14/QT14, stream framing fix, log spam cleanup, BFT gossip relay fix.
-
 
 This is a pre-release testnet build. Do not use real funds. APIs and chain parameters may change between alpha releases.
 

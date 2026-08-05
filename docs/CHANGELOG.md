@@ -1,6 +1,6 @@
 # Changelog
 
-## [v3.0.0-alpha] - 2026-07-29
+## [v3.0.0-alpha] - 2026-08-05
 
 ### Added
 - **Delegated Proof of Stake (DPoS)**: Implemented native delegation, allowing QUA holders to lock their tokens behind a trusted BFT validator. Includes `Delegate` and `Undelegate` transaction types.

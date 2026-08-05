@@ -72,7 +72,19 @@ quanta-wallet stake --wallet validator.qua --amount 100000.0
 quanta-wallet unstake --wallet validator.qua
 ```
 
-## AI Smart Contracts (Escrow)
+## DPoS Delegation
+
+Any QUA holder can lock their tokens behind a trusted BFT validator to secure the network and earn block rewards.
+
+```bash
+# Delegate QUA to a validator (minimum may apply)
+quanta-wallet delegate --validator <VALIDATOR_ADDR> --amount 5000.0
+
+# Undelegate QUA (funds will enter an unbonding period)
+quanta-wallet undelegate --validator <VALIDATOR_ADDR> --amount 5000.0
+```
+
+## AI Smart Contracts (Escrow & Streams)
 
 ```bash
 # Deploy a trustless Escrow contract
@@ -82,6 +94,15 @@ quanta-wallet deploy-escrow --beneficiary <WORKER_ADDR> --secret-hash <HASH> --a
 
 # Claim funds from an escrow contract
 quanta-wallet claim-escrow --contract <ADDR> --preimage <HEX>
+
+# Deploy a pay-per-block stream contract
+quanta-wallet deploy-stream --beneficiary <WORKER_ADDR> --amount-per-block 0.1 --total-amount 100.0
+
+# Withdraw unlocked funds from a stream
+quanta-wallet withdraw-stream --contract <ADDR>
+
+# Cancel a stream and refund the remaining balance to the sender
+quanta-wallet cancel-stream --contract <ADDR>
 ```
 
 ## AI Agent Headless Mode

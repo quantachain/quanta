@@ -2863,12 +2863,13 @@ impl Blockchain {
                             let total_share = (pool_balance * count) / total_counted;
                             if total_share > 0 {
                                 let mut validator_share = total_share;
-                                let mut validator_dust = 0;
                                 
                                 // DPoS Reward Split: if validator is still registered, distribute proportionally to delegators
-                                if let Some(info) = new_state.get_validator_info(proposer) {
-                                    let self_stake = info.stake;
-                                    let delegated_stake = info.delegated_stake;
+                                let info_opt = new_state.get_validator_info(proposer).map(|info| {
+                                    (info.stake, info.delegated_stake, info.delegators.clone())
+                                });
+                                
+                                if let Some((self_stake, delegated_stake, delegators)) = info_opt {
                                     let total_stake = self_stake.saturating_add(delegated_stake);
                                     
                                     if total_stake > 0 && delegated_stake > 0 {
@@ -2880,7 +2881,7 @@ impl Blockchain {
                                         let mut distributed_to_delegators = 0;
                                         
                                         // Sort delegators to ensure deterministic dust rounding
-                                        let mut sorted_delegators: Vec<(&String, &u64)> = info.delegators.iter().collect();
+                                        let mut sorted_delegators: Vec<(&String, &u64)> = delegators.iter().collect();
                                         sorted_delegators.sort_by(|a, b| a.0.cmp(b.0));
                                         
                                         for (delegator, amount) in sorted_delegators {
@@ -2892,7 +2893,7 @@ impl Blockchain {
                                         }
                                         
                                         // Any dust from rounding goes to the validator
-                                        validator_dust = distributable.saturating_sub(distributed_to_delegators).saturating_sub(validator_share.saturating_sub(commission));
+                                        let validator_dust = distributable.saturating_sub(distributed_to_delegators).saturating_sub(validator_share.saturating_sub(commission));
                                         validator_share += validator_dust;
                                     }
                                 }

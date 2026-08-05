@@ -1040,8 +1040,6 @@ impl Network {
         let peers = self.peer_manager.get_peers().await;
         for peer in &peers {
             if peer.get_info().await.node_id == validator_address {
-                // Clone before move so we can fall back to broadcast on send failure.
-                let data_clone = data.clone();
                 if let Err(e) = peer.send_message(P2PMessage::AlephBFTMessage(data)).await {
                     tracing::debug!(
                         "Unicast AlephBFT to {} failed: {} — dropping",

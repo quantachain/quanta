@@ -437,7 +437,10 @@ enum Commands {
         #[arg(long, default_value = "{}")]
         args: String,
         #[arg(long, default_value = "0.001")]
-},
+        fee: f64,
+        #[arg(short, long)]
+        node: Option<String>,
+    },
 
     /// Deploy a Stream contract for pay-per-block subscriptions.
     DeployStream {
@@ -1291,7 +1294,7 @@ async fn main() {
             call.tx_type = TransactionType::ContractCall {
                 contract_address: contract.clone(),
                 method: "withdraw".to_string(),
-                args: vec![],
+                call_args: vec![],
             };
             let sig_bytes = call.get_signing_bytes();
             call.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
@@ -1323,7 +1326,7 @@ async fn main() {
             call.tx_type = TransactionType::ContractCall {
                 contract_address: contract.clone(),
                 method: "cancel".to_string(),
-                args: vec![],
+                call_args: vec![],
             };
             let sig_bytes = call.get_signing_bytes();
             call.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
@@ -1542,6 +1545,61 @@ async fn main() {
                 }
                 Err(e) => die(&format!("Broadcast failed: {}", e)),
             }
+        }
+
+        Commands::Delegate {
+            wallet,
+            validator,
+            amount,
+            fee,
+            node,
+        } => {
+            let node = resolve_node(node);
+            let kp = load_keypair_for_signing(&resolve_wallet(wallet));
+            let nonce = fetch_nonce(&node, &kp.address).await + 1;
+
+            let mut tx = build_transfer(&kp, &validator, amount, fee, nonce, vec![]);
+            tx.tx_type = TransactionType::Delegate { validator_address: validator.clone() };
+            let sig_bytes = tx.get_signing_bytes();
+            tx.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
+
+            broadcast_and_print(
+                &node,
+                &tx,
+                "Delegate",
+                &kp.address,
+                &validator,
+                amount,
+                fee,
+            )
+            .await;
+        }
+
+        Commands::Undelegate {
+            wallet,
+            validator,
+            fee,
+            node,
+        } => {
+            let node = resolve_node(node);
+            let kp = load_keypair_for_signing(&resolve_wallet(wallet));
+            let nonce = fetch_nonce(&node, &kp.address).await + 1;
+
+            let mut tx = build_transfer(&kp, &validator, 0.0, fee, nonce, vec![]);
+            tx.tx_type = TransactionType::Undelegate { validator_address: validator.clone() };
+            let sig_bytes = tx.get_signing_bytes();
+            tx.signature = kp.keypair.sign_transaction_canonical(&sig_bytes);
+
+            broadcast_and_print(
+                &node,
+                &tx,
+                "Undelegate",
+                &kp.address,
+                &validator,
+                0.0,
+                fee,
+            )
+            .await;
         }
     }
 }
