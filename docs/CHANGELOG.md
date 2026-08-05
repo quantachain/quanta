@@ -1,5 +1,15 @@
 # Changelog
 
+## [v3.0.0-alpha] - 2026-08-05 (hotfix 2)
+
+### Fixed
+- **V2→V3 Database Backward Compatibility**: The node panicked on startup with `Storage(Serialization("io error: "))` when loading a V2 testnet database under V3. Root causes:
+  1. `TransactionType` enum: `Delegate`, `Undelegate`, and `SlashEvidence` variants were inserted before `ContractDeploy`/`ContractCall`, shifting their bincode discriminants and breaking deserialization of any old block containing those tx types. Fixed by moving all three V3-only variants to the end of the enum.
+  2. `AccountState` migration: Added a V2 fallback deserializer (`AccountStateV2` / `ValidatorInfoV2`) that exactly mirrors the 9-field on-disk `ValidatorInfo` layout from V2 (including `last_proposed_height`, `epoch_slots_assigned`, `epoch_slots_produced`). If V3 deserialization fails, the node silently migrates to V3 in-memory and overwrites the file on next save. **No database wipe required.**
+- **`AccountState` visibility**: Made `accounts` and `validators` fields `pub` to support the cross-module migration path.
+
+---
+
 ## [v3.0.0-alpha] - 2026-08-05
 
 ### Added

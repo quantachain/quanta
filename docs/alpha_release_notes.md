@@ -2,6 +2,9 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
+> **v3.0.0-alpha (hotfix 2) — DATABASE MIGRATION FIX (2026-08-05)**
+> - **No wipe required.** The node now seamlessly migrates your existing V2 database to the V3 format on first boot. Old blocks and account state are fully preserved.
+>
 > **v3.0.0-alpha — KATENET LAUNCH: MANDATORY UPDATE (2026-08-05)**
 > - **Delegated Proof of Stake (DPoS)**: Consensus is no longer just for whales. Native delegation allows any QUA holder to lock their tokens behind a trusted BFT validator to secure the network and earn a share of block rewards.
 > - **Network Isolation**: Bumped `PROTOCOL_VERSION` to `35` and `TESTNET_MAGIC` to `QT35` to cleanly evict all V2 nodes.
