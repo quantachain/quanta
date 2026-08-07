@@ -2839,7 +2839,16 @@ impl Blockchain {
                     let mut total_counted: u64 = 0;
                     for h in epoch_start..=block.index {
                         let proposer = if h == block.index {
-                            block.proposer.clone()
+                            if block.index < 105_000 {
+                                // FIX DATE: 2026-08-07 | VERSION: v3.0.1-alpha
+                                // REASON: Historical Bug Replication. Live nodes failed to load the current block from storage,
+                                // causing them to divide the epoch pool by 999 blocks instead of 1000.
+                                // We must replicate this for blocks < 105,000 so fresh nodes 
+                                // converge on the same canonical state before the 110,000 state-heal.
+                                "".to_string()
+                            } else {
+                                block.proposer.clone()
+                            }
                         } else {
                             self.storage.load_block(h).ok().map(|b| b.proposer).unwrap_or_default()
                         };

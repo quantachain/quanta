@@ -1,5 +1,10 @@
 # Changelog
 
+## [v3.0.1-alpha] - 2026-08-07
+
+### Fixed
+- **Sync State Root Divergence (Block 110,000)**: Fixed a critical bug where nodes syncing from scratch failed validation at block 110,000 with an `Invalid state root` error. The divergence was caused by a past fix (v2.4.31-alpha) which corrected the epoch pool to divide by 1000 blocks instead of 999. Because the live network historically divided by 999 for blocks under 105,000, new nodes replaying the chain with the fixed code calculated different base rewards, creating a cumulative state difference that `heal_epoch_100k_dust()` could not mathematically truncate. The fix temporarily reinstates the historical 999-divisor bug explicitly for blocks `< 105,000` during sync, perfectly aligning the state of fresh nodes with the canonical live network before the 110,000 hard-fork. No database wipe required and state root validation remains fully strictly enforced.
+
 ## [v3.0.0-alpha] - 2026-08-05 (hotfix 2)
 
 ### Fixed

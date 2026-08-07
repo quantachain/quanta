@@ -2,6 +2,9 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
+> **v3.0.1-alpha — SYNC BUG FIX (2026-08-07)**
+> - **Sync State Root Fix (Block 110,000)**: Fixed a critical sync issue where new nodes replaying the blockchain from scratch failed to validate block 110,000. Reinstated a historical pool distribution bug for blocks `< 105,000` to allow new nodes to perfectly converge with the live network's canonical state without a database wipe or disabling state root validation.
+
 > **v3.0.0-alpha (hotfix 2) — DATABASE MIGRATION FIX (2026-08-05)**
 > - **No wipe required.** The node now seamlessly migrates your existing V2 database to the V3 format on first boot. Old blocks and account state are fully preserved.
 >
