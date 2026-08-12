@@ -1,5 +1,11 @@
 # Changelog
 
+## [v3.0.2-alpha] - 2026-08-12
+
+### Fixed
+- **Sync State Root Divergence Hotfix (Block 110,000)**: Fixed an incomplete sync patch from v3.0.1-alpha. The historical 999-divisor epoch bug was active on the live network up to the state-heal hard fork, not just block 105,000. Extended the historical sync replication of the 999-divisor up to block 110,000 so nodes syncing from scratch can converge successfully and pass the strict state_root validation at block 110,000. No database wipe required for existing nodes.
+- **Network Isolation**: Bumped `PROTOCOL_VERSION` to `37` and `TESTNET_MAGIC` to `QT37` to isolate the updated nodes.
+
 ## [v3.0.1-alpha] - 2026-08-07
 
 ### Fixed
