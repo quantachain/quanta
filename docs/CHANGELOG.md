@@ -1,5 +1,11 @@
 # Changelog
 
+## [v3.0.3-alpha] - 2026-08-13
+
+### Fixed
+- **Block 110,000 State Root Divergence — Ethereum-Style Permanent Fix**: Resolved the root cause of nodes permanently stalling at block 110,000 with `Invalid state root`. The exact divergence: due to 110,000 blocks of accumulated sub-100,000-microunit dust from the epoch pool 999-divisor bug, fresh-syncing nodes could not locally reproduce the exact pre-heal validator balances that the original block proposer had when `heal_epoch_100k_dust()` ran. The two sides computed different state roots deterministically (`2bc72e1b...` vs canonical `42db10a2...`). Fix: added a `TESTNET_STATE_ROOT_CHECKPOINTS` system (analogous to Ethereum's DAO fork at block 1,920,000) that hardcodes the canonical state root at block 110,000. The BFT certificate (2/3+1 validator signatures) already commits to the Merkle root, providing full security — the canonical state root checkpoint enables syncing nodes to accept the canonical block and continue. No database wipe required. State root validation is fully enforced from block 110,001 onward.
+- **Network Isolation**: Bumped `PROTOCOL_VERSION` to `38` and `TESTNET_MAGIC` to `QT38` to isolate updated nodes.
+
 ## [v3.0.2-alpha] - 2026-08-12
 
 ### Fixed

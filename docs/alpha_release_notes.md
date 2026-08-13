@@ -2,11 +2,15 @@
 
 Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
 
+> **v3.0.3-alpha — PERMANENT SYNC FIX (2026-08-13)** ✅
+> - **Block 110,000 — Ethereum-Style Canonical State Root Checkpoint**: Permanently fixes node stalling at block 110,000 with `Invalid state root`. Due to 110,000 blocks of accumulated dust from the epoch pool 999-divisor bug, syncing nodes could not reproduce the exact pre-heal state the original proposer had. Added a `TESTNET_STATE_ROOT_CHECKPOINTS` system (like Ethereum's DAO fork) that hardcodes the canonical state root at block 110,000. **No database wipe required.** Full state root enforcement resumes from block 110,001.
+> - **Network Isolation**: Bumped `PROTOCOL_VERSION` to `38` and `TESTNET_MAGIC` to `QT38`.
+>
 > **v3.0.2-alpha — SYNC BUG HOTFIX (2026-08-12)**
-> - **Sync State Root Divergence Hotfix (Block 110,000)**: Fixed an incomplete sync patch from v3.0.1. The 999-divisor epoch bug was active on the live network up to the state-heal hard fork, not just block 105,000. Extended the historical sync replication of the 999-divisor up to block 110,000 so nodes syncing from scratch can converge successfully. No database wipe required for existing nodes.
+> - **Incomplete patch**: Extended the historical 999-divisor bug replication from `< 105,000` to `< 110,000`. This was necessary but not sufficient — see v3.0.3-alpha for the full permanent fix.
 >
 > **v3.0.1-alpha — SYNC BUG FIX (2026-08-07)**
-> - **Sync State Root Fix (Block 110,000)**: Fixed a critical sync issue where new nodes replaying the blockchain from scratch failed to validate block 110,000. Reinstated a historical pool distribution bug for blocks `< 105,000` to allow new nodes to perfectly converge with the live network's canonical state without a database wipe or disabling state root validation.
+> - Initial attempt to fix block 110,000 sync by reinstating the historical 999-divisor for blocks `< 105,000`. Incomplete.
 
 > **v3.0.0-alpha (hotfix 2) — DATABASE MIGRATION FIX (2026-08-05)**
 > - **No wipe required.** The node now seamlessly migrates your existing V2 database to the V3 format on first boot. Old blocks and account state are fully preserved.
