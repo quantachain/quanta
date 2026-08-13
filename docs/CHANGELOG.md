@@ -1,5 +1,11 @@
 # Changelog
 
+## [v3.0.4-alpha] - 2026-08-13
+
+### Fixed
+- **Ethereum-style Snap Sync for State-Healing Hard Fork**: Resolved the continuous stalling of peer nodes at block 110,000. When a node detects a local state divergence during a hard-fork checkpoint, it now automatically sends a `GetStateSnapshot` P2P message to a peer, verifies the canonical `StateSnapshot` response against the checkpoint's state root, and replaces its local account state before continuing.
+- **Protocol Bump (v39)**: Network isolated from nodes running v38.
+
 ## [v3.0.3-alpha] - 2026-08-13
 
 ### Fixed

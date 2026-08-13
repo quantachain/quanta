@@ -54,6 +54,29 @@ pub enum P2PMessage {
     // Error handling
     Error(String),
     Disconnect,
+
+    // STATE SYNC (v3.0.4-alpha)
+    // FIX DATE: 2026-08-13 | VERSION: v3.0.4-alpha
+    // REASON: When a node accepts a hard-fork block via canonical state root checkpoint,
+    // its locally derived account state may differ from the canonical state (because it
+    // was derived from a diverged base state). To allow block 110,001+ to validate
+    // correctly, the node must fetch the canonical account state at height 110,000 from
+    // a peer, verify it produces the canonical state root, and replace its local state.
+    // This is identical in principle to Ethereum's snap sync / state sync.
+    GetStateSnapshot {
+        /// The block height whose post-state snapshot is requested.
+        height: u64,
+        /// The canonical state root hash the requester expects (used for server-side validation).
+        expected_state_root: String,
+    },
+    StateSnapshot {
+        /// The block height this snapshot corresponds to.
+        height: u64,
+        /// Bincode-serialized AccountState (compressed by the storage layer before P2P send).
+        state_bytes: Vec<u8>,
+        /// The state root of this snapshot so the receiver can verify it matches canonical.
+        state_root: String,
+    },
 }
 
 /// Network message wrapper with magic bytes for network identification
@@ -105,13 +128,13 @@ impl From<&Block> for BlockHeader {
 // CHANGED 2026-07-22 v2.5.0-alpha: Bumped from 32 -> 33 for State-Healing Hard Fork.
 // CHANGED 2026-07-29 v2.5.1-alpha: Bumped from 33 -> 34 to isolate nodes with the
 // create_block_template state root fix from v2.5.0 proposers that embed a wrong root.
-pub const PROTOCOL_VERSION: u32 = 38; // v3.0.3-alpha
+pub const PROTOCOL_VERSION: u32 = 39; // v3.0.4-alpha
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"QT38"; // Quanta V3 Testnet (Katenet)
+pub const TESTNET_MAGIC: [u8; 4] = *b"QT39"; // Quanta V3 Testnet (Katenet)
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;

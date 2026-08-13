@@ -2362,6 +2362,43 @@ impl Blockchain {
         }
     }
 
+    // STATE SYNC ACCESSORS (v3.0.4-alpha)
+
+    /// Retrieves the serialized account state snapshot at a specific height
+    pub fn load_account_state_at_height(&self, height: u64) -> Option<AccountState> {
+        self.storage.load_account_state_at_height(height).unwrap_or(None)
+    }
+
+    /// Checks if the given state root is the canonical hard-fork checkpoint for the given height
+    pub fn is_canonical_state_root(&self, height: u64, state_root: &str) -> bool {
+        let canonical_checkpoints = match self.network {
+            crate::core::ChainNetwork::Testnet => TESTNET_STATE_ROOT_CHECKPOINTS,
+            _ => &[],
+        };
+        canonical_checkpoints.iter().any(|(h, sr)| *h == height && *sr == state_root)
+    }
+
+    /// Returns the currently computed state root from the local account state
+    pub fn current_state_root(&self) -> String {
+        self.account_state.read().calculate_state_root()
+    }
+
+    /// Replaces the local account state with a peer-provided canonical snapshot,
+    /// saving it to primary storage and the checkpoint archive.
+    pub fn apply_canonical_state_snapshot(&self, height: u64, state: AccountState) -> Result<(), BlockchainError> {
+        *self.account_state.write() = state.clone();
+        
+        // Save the canonical state to disk
+        if let Err(e) = self.storage.save_account_state(&state) {
+            tracing::error!("Failed to save canonical account state to disk: {}", e);
+        }
+        if let Err(e) = self.storage.save_account_state_at_height(height, &state) {
+            tracing::error!("Failed to save canonical account state checkpoint to disk: {}", e);
+        }
+        
+        Ok(())
+    }
+
     /// Add a block received from the network (WITH FULL VALIDATION AND FORK RESOLUTION)
     pub fn add_network_block(&self, block: Block) -> Result<(), BlockchainError> {
         let latest = self.get_latest_block();

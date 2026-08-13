@@ -1,6 +1,43 @@
-# QuantaChain Testnet — V3 Katenet (v3.0.0-alpha)
+# QuantaChain Alpha Testnet Release Notes
 
-Post-quantum secure blockchain using Falcon-512 signatures and **Asynchronous Byzantine Fault Tolerance (AlephBFT)**.
+## Current Release: v3.0.4-alpha (2026-08-13)
+
+### The "State Sync" Release
+This release introduces a fully-automated P2P state snapshot synchronization mechanism to resolve the persistent syncing stalls at block 110,000 (The State-Healing Hard Fork). 
+
+In previous versions, a new node syncing from genesis would accept block 110,000 via a canonical state root checkpoint, but its underlying account state would remain permanently diverged from the network, causing block 110,001 to fail validation. Now, nodes detect this divergence, pause their block sync, and issue a `GetStateSnapshot` request to their peers to download the canonical state for block 110,000, identical in concept to Ethereum's "snap sync."
+
+**Network compatibility**: This release bumps the protocol version to **39** (`QT39`), isolating it from v38 nodes. All node operators MUST update.
+
+### Upgrade Instructions (For Validators & Full Nodes)
+
+If your node was stuck at block 110,000, **you must wipe your old data and sync fresh**.
+```bash
+# 1. Stop your existing node container
+docker stop quanta-node
+
+# 2. Delete the corrupted local chain data (IMPORTANT: Do NOT delete your validator.qua wallet!)
+rm -rf /root/quanta_data/blocks /root/quanta_data/db
+
+# 3. Pull the new version
+docker pull xd637/quanta-node:v3.0.4-alpha
+
+# 4. Restart the node
+docker run -d \
+  --memory=3.5g \
+  --memory-swap=3.5g \
+  --name "quanta-node" \
+  --restart always \
+  --network host \
+  -v "/root/quanta_data:/home/quanta/quanta_data" \
+  -e QUANTA_WALLET_PASSWORD="your-wallet-password" \
+  xd637/quanta-node:v3.0.4-alpha \
+  quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap node1.quantachain.org:8333 --port 3002 --rpc-port 7783
+```
+
+---
+
+## Past Releases
 
 > **v3.0.3-alpha — PERMANENT SYNC FIX (2026-08-13)** ✅
 > - **Block 110,000 — Ethereum-Style Canonical State Root Checkpoint**: Permanently fixes node stalling at block 110,000 with `Invalid state root`. Due to 110,000 blocks of accumulated dust from the epoch pool 999-divisor bug, syncing nodes could not reproduce the exact pre-heal state the original proposer had. Added a `TESTNET_STATE_ROOT_CHECKPOINTS` system (like Ethereum's DAO fork) that hardcodes the canonical state root at block 110,000. **No database wipe required.** Full state root enforcement resumes from block 110,001.

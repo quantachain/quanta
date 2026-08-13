@@ -463,6 +463,8 @@ impl Network {
                         P2PMessage::AlephBFTMessage(d) => format!("AlephBFT({} bytes)", d.len()),
                         P2PMessage::Block(b) => format!("Block(#{})", b.index),
                         P2PMessage::NewTx(tx) => format!("NewTx({})", &tx.hash()[..8]),
+                        P2PMessage::GetStateSnapshot { height, .. } => format!("GetStateSnapshot({})", height),
+                        P2PMessage::StateSnapshot { height, .. } => format!("StateSnapshot({})", height),
                         other => format!("{:?}", other),
                     };
                     error!("Error handling {} from {}: {}", label, addr, e);
@@ -521,6 +523,12 @@ impl Network {
                 for tx in txs {
                     let _ = self.handle_new_transaction(tx, peer.clone()).await;
                 }
+            }
+            P2PMessage::GetStateSnapshot { height, expected_state_root } => {
+                self.handle_get_state_snapshot(addr, height, expected_state_root, peer).await?;
+            }
+            P2PMessage::StateSnapshot { height, state_bytes, state_root } => {
+                self.handle_state_snapshot(addr, height, state_bytes, state_root).await?;
             }
             P2PMessage::Ping(nonce) => {
                 self.send_to_peer(addr, P2PMessage::Pong(nonce)).await?;
@@ -681,7 +689,93 @@ impl Network {
         Ok(())
     }
 
-    /// Handle new block (WITH HARDENED VALIDATION + RE-BROADCAST FIX)
+    async fn handle_get_state_snapshot(
+        &self,
+        addr: SocketAddr,
+        height: u64,
+        expected_state_root: String,
+        peer: Option<Arc<Peer>>,
+    ) -> Result<(), String> {
+        debug!("Peer {} requested state snapshot for height {}", addr, height);
+        let blockchain = self.blockchain.read().await;
+        
+        // Ensure we actually have this block and the requested state root matches our own
+        let block_opt = blockchain.get_block_by_height(height);
+        if let Some(block) = block_opt {
+            if block.state_root != expected_state_root {
+                warn!("Peer {} requested state snapshot with expected root {} but we have {} for height {}", addr, expected_state_root, block.state_root, height);
+                return Ok(()); // Silently ignore to avoid serving wrong state
+            }
+            
+            // Load the snapshot from disk
+            if let Some(state) = blockchain.load_account_state_at_height(height) {
+                // Serialize it
+                if let Ok(state_bytes) = bincode::serialize(&state) {
+                    if let Some(p) = peer {
+                        let _ = p.send_message(P2PMessage::StateSnapshot {
+                            height,
+                            state_bytes,
+                            state_root: block.state_root,
+                        }).await;
+                    }
+                }
+            } else {
+                warn!("Peer {} requested state snapshot for height {} but we don't have it on disk", addr, height);
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_state_snapshot(
+        &self,
+        addr: SocketAddr,
+        height: u64,
+        state_bytes: Vec<u8>,
+        state_root: String,
+    ) -> Result<(), String> {
+        info!("Received state snapshot for height {} from peer {} ({} bytes)", height, addr, state_bytes.len());
+        
+        let mut blockchain = self.blockchain.write().await;
+        
+        // Basic sanity check — only apply snapshot if we are waiting for it
+        let current_height = blockchain.get_height();
+        if height != current_height {
+            warn!("Received unprompted state snapshot for height {} from {}, but we are at height {}", height, addr, current_height);
+            return Ok(());
+        }
+        
+        // Deserialize and calculate state root to verify
+        let state: crate::core::transaction::AccountState = match bincode::deserialize(&state_bytes) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("Failed to deserialize state snapshot from {}: {}", addr, e);
+                return Ok(());
+            }
+        };
+        
+        let computed_root = state.calculate_state_root();
+        if computed_root != state_root {
+            warn!("State snapshot from {} failed validation! Computed: {}, Expected: {}", addr, computed_root, state_root);
+            return Ok(());
+        }
+        
+        // Validate against hardcoded canonical checkpoint
+        let is_canonical = blockchain.is_canonical_state_root(height, &state_root);
+            
+        if !is_canonical {
+            warn!("State snapshot from {} for height {} does not match any canonical hard-fork checkpoint. Rejecting.", addr, height);
+            return Ok(());
+        }
+        
+        info!("State snapshot for height {} verified successfully. Replacing local account state.", height);
+        if let Err(e) = blockchain.apply_canonical_state_snapshot(height, state) {
+            warn!("Failed to apply state snapshot: {}", e);
+        }
+        
+        Ok(())
+    }
+
+    /// Handle a new block from the networkHARDENED VALIDATION + RE-BROADCAST FIX)
     ///
     /// SYNC FIX: During an active sync, blocks that are "too far ahead" are
     /// silently dropped instead of triggering additional GetBlocks requests.
@@ -754,6 +848,23 @@ impl Network {
         let bc = self.blockchain.write().await;
         match bc.add_network_block(block.clone()) {
             Ok(_) => {
+                // STATE SYNC FIX (v3.0.4-alpha)
+                if block.index == 110_000 {
+                    let needs_sync = {
+                        let current_root = bc.current_state_root();
+                        current_root != block.state_root
+                    };
+                    if needs_sync {
+                        tracing::warn!("Local state root diverged at hard-fork block 110,000. Requesting canonical state snapshot from peer...");
+                        if let Some(p) = peer {
+                            let _ = p.send_message(P2PMessage::GetStateSnapshot {
+                                height: 110_000,
+                                expected_state_root: block.state_root.clone(),
+                            }).await;
+                        }
+                    }
+                }
+
                 info!(
                     "Block {} accepted at height {} — re-broadcasting to peers",
                     &block.hash[..8],
@@ -1393,9 +1504,27 @@ impl Network {
                 // Normal extension
                 let bc = self.blockchain.write().await;
                 for b in blocks {
-                    if let Err(e) = bc.add_network_block(b) {
+                    if let Err(e) = bc.add_network_block(b.clone()) {
                         warn!("Failed to add block: {}", e);
                         break;
+                    }
+                    
+                    // STATE SYNC FIX (v3.0.4-alpha)
+                    if b.index == 110_000 {
+                        let needs_sync = {
+                            let current_root = bc.current_state_root();
+                            current_root != b.state_root
+                        };
+                        if needs_sync {
+                            tracing::warn!("Local state root diverged at hard-fork block 110,000. Requesting canonical state snapshot from peer...");
+                            let _ = peer.send_message(P2PMessage::GetStateSnapshot {
+                                height: 110_000,
+                                expected_state_root: b.state_root.clone(),
+                            }).await;
+                            // Pause the sync batch so we don't try to validate block 110,001 
+                            // with the wrong state before the snapshot arrives!
+                            break;
+                        }
                     }
                 }
             }
