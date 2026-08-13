@@ -1,13 +1,15 @@
 # QuantaChain Alpha Testnet Release Notes
 
-## Current Release: v3.0.4-alpha (2026-08-13)
+## Current Release: v3.0.5-alpha (2026-08-13)
 
-### The "State Sync" Release
+### The "State Sync" Release (Hotfix)
 This release introduces a fully-automated P2P state snapshot synchronization mechanism to resolve the persistent syncing stalls at block 110,000 (The State-Healing Hard Fork). 
 
 In previous versions, a new node syncing from genesis would accept block 110,000 via a canonical state root checkpoint, but its underlying account state would remain permanently diverged from the network, causing block 110,001 to fail validation. Now, nodes detect this divergence, pause their block sync, and issue a `GetStateSnapshot` request to their peers to download the canonical state for block 110,000, identical in concept to Ethereum's "snap sync."
 
-**Network compatibility**: This release bumps the protocol version to **39** (`QT39`), isolating it from v38 nodes. All node operators MUST update.
+*Hotfix (v3.0.5-alpha): Fixed an edge-case bug where the state sync was bypassed if a node stopped exactly at height 110,000 and resumed sync starting from 110,001.*
+
+**Network compatibility**: This release bumps the protocol version to **40** (`QT40`), isolating it from v39 nodes. All node operators MUST update.
 
 ### Upgrade Instructions (For Validators & Full Nodes)
 
@@ -20,7 +22,7 @@ docker stop quanta-node
 rm -rf /root/quanta_data/blocks /root/quanta_data/db
 
 # 3. Pull the new version
-docker pull xd637/quanta-node:v3.0.4-alpha
+docker pull xd637/quanta-node:v3.0.5-alpha
 
 # 4. Restart the node
 docker run -d \
@@ -31,7 +33,7 @@ docker run -d \
   --network host \
   -v "/root/quanta_data:/home/quanta/quanta_data" \
   -e QUANTA_WALLET_PASSWORD="your-wallet-password" \
-  xd637/quanta-node:v3.0.4-alpha \
+  xd637/quanta-node:v3.0.5-alpha \
   quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap node1.quantachain.org:8333 --port 3002 --rpc-port 7783
 ```
 

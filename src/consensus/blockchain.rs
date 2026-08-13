@@ -2369,6 +2369,15 @@ impl Blockchain {
         self.storage.load_account_state_at_height(height).unwrap_or(None)
     }
 
+    /// Retrieves the expected canonical state root if one exists for the given height
+    pub fn get_canonical_state_root(&self, height: u64) -> Option<String> {
+        let canonical_checkpoints = match self.network {
+            crate::core::ChainNetwork::Testnet => TESTNET_STATE_ROOT_CHECKPOINTS,
+            _ => &[],
+        };
+        canonical_checkpoints.iter().find(|(h, _)| *h == height).map(|(_, sr)| sr.to_string())
+    }
+
     /// Checks if the given state root is the canonical hard-fork checkpoint for the given height
     pub fn is_canonical_state_root(&self, height: u64, state_root: &str) -> bool {
         let canonical_checkpoints = match self.network {

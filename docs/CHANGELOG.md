@@ -1,5 +1,10 @@
 # Changelog
 
+## [v3.0.5-alpha] - 2026-08-13
+### Fixed
+- **State Sync Edge Case Bug (Hotfix)**: Fixed a bug where a syncing node that was stopped exactly at block 110,000 would bypass the state snap-sync trigger when it restarted and resumed sync from 110,001. Now, `sync_blockchain` actively checks for state divergence at the start of the loop and fully aborts the block-sync cycle until the `StateSnapshot` arrives and is applied.
+- **Protocol Bump (v40)**: Network isolated from nodes running v39 due to bug.
+
 ## [v3.0.4-alpha] - 2026-08-13
 
 ### Fixed

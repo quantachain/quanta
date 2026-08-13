@@ -1254,6 +1254,36 @@ impl Network {
         loop {
             // Always re-read the actual chain height — it changes after every reorg/apply.
             let current_sync_height = self.blockchain.read().await.get_height();
+            
+            // STATE SYNC HEAL FIX (v3.0.4-alpha)
+            // Catch nodes that already have block 110,000 on disk but haven't healed the state yet
+            if current_sync_height == 110_000 {
+                let (needs_sync, expected_root) = {
+                    let bc = self.blockchain.read().await;
+                    let current_root = bc.current_state_root();
+                    if let Some(expected) = bc.get_canonical_state_root(110_000) {
+                        (current_root != expected, Some(expected))
+                    } else {
+                        (false, None)
+                    }
+                };
+                
+                if needs_sync {
+                    if let Some(expected_root) = expected_root {
+                        tracing::warn!("Local state root diverged at hard-fork block 110,000. Requesting canonical state snapshot from peer...");
+                        let _ = peer.send_message(P2PMessage::GetStateSnapshot {
+                            height: 110_000,
+                            expected_state_root: expected_root,
+                        }).await;
+                        
+                        // Abort this sync cycle so we wait for the snapshot to arrive!
+                        self.syncing.store(false, Ordering::SeqCst);
+                        *self.sync_request_range.lock().await = None;
+                        return Ok(());
+                    }
+                }
+            }
+            
             if current_sync_height >= target_height {
                 break;
             }
@@ -1521,9 +1551,12 @@ impl Network {
                                 height: 110_000,
                                 expected_state_root: b.state_root.clone(),
                             }).await;
-                            // Pause the sync batch so we don't try to validate block 110,001 
+                            // Abort the entire sync cycle so we don't try to validate block 110,001 
                             // with the wrong state before the snapshot arrives!
-                            break;
+                            // The next periodic sync will resume from 110,001 after the state is healed.
+                            self.syncing.store(false, Ordering::SeqCst);
+                            *self.sync_request_range.lock().await = None;
+                            return Ok(());
                         }
                     }
                 }

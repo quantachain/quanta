@@ -128,7 +128,7 @@ impl From<&Block> for BlockHeader {
 // CHANGED 2026-07-22 v2.5.0-alpha: Bumped from 32 -> 33 for State-Healing Hard Fork.
 // CHANGED 2026-07-29 v2.5.1-alpha: Bumped from 33 -> 34 to isolate nodes with the
 // create_block_template state root fix from v2.5.0 proposers that embed a wrong root.
-pub const PROTOCOL_VERSION: u32 = 39; // v3.0.4-alpha
+pub const PROTOCOL_VERSION: u32 = 40; // v3.0.4-alpha
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
