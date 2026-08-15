@@ -1256,8 +1256,10 @@ impl Network {
             let current_sync_height = self.blockchain.read().await.get_height();
             
             // STATE SYNC HEAL FIX (v3.0.4-alpha)
-            // Catch nodes that already have block 110,000 on disk but haven't healed the state yet
-            if current_sync_height == 110_000 {
+            // FIX DATE: 2026-08-15 | VERSION: v3.0.6-alpha
+            // REASON: When max block index is 110,000, chain height is 110,001.
+            // We must catch nodes that already have block 110,000 on disk but haven't healed the state yet.
+            if current_sync_height == 110_001 {
                 let (needs_sync, expected_root) = {
                     let bc = self.blockchain.read().await;
                     let current_root = bc.current_state_root();

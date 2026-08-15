@@ -1,5 +1,10 @@
 # Changelog
 
+## [v3.0.6-alpha] - 2026-08-15
+### Fixed
+- **Block 110,001 Sync Failure Fix**: Fixed a subtle boundary logic bug introduced in v3.0.4. The node was failing to abort and fetch the state snapshot because it checked `current_sync_height == 110_000`. However, when block 110,000 is on disk, the chain height is actually `110,001`. This caused the node to attempt to validate block 110,001 using a locally diverged state root, leading to an infinite retry loop of `Invalid state root at block 110001` and blocking block production. Fixed the trigger height to `110,001` to correctly initiate snap-sync.
+- **Protocol Bump (v41)**: Network isolated from nodes running v40.
+
 ## [v3.0.5-alpha] - 2026-08-13
 ### Fixed
 - **State Sync Edge Case Bug (Hotfix)**: Fixed a bug where a syncing node that was stopped exactly at block 110,000 would bypass the state snap-sync trigger when it restarted and resumed sync from 110,001. Now, `sync_blockchain` actively checks for state divergence at the start of the loop and fully aborts the block-sync cycle until the `StateSnapshot` arrives and is applied.
