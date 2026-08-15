@@ -1,15 +1,15 @@
 # QuantaChain Alpha Testnet Release Notes
 
-## Current Release: v3.0.6-alpha (2026-08-15)
+## Current Release: v3.0.7-alpha (2026-08-15)
 
-### The "State Sync" Release (Hotfix 2)
+### The "State Sync" Release (Hotfix 3)
 This release introduces a fully-automated P2P state snapshot synchronization mechanism to resolve the persistent syncing stalls at block 110,000 (The State-Healing Hard Fork). 
 
 In previous versions, a new node syncing from genesis would accept block 110,000 via a canonical state root checkpoint, but its underlying account state would remain permanently diverged from the network, causing block 110,001 to fail validation. Now, nodes detect this divergence, pause their block sync, and issue a `GetStateSnapshot` request to their peers to download the canonical state for block 110,000, identical in concept to Ethereum's "snap sync."
 
-*Hotfix 2 (v3.0.6-alpha): Fixed an edge-case bug where the state sync was bypassed if a node stopped exactly at height 110,000 and resumed sync starting from 110,001 because the chain height property was misinterpreted as block index.*
+*Hotfix 3 (v3.0.7-alpha): Fixed a secondary bug where the local node rejected the incoming StateSnapshot from a peer because it compared the snapshot's block index (110,000) directly to the chain height (110,001) instead of `chain_height - 1`.*
 
-**Network compatibility**: This release bumps the protocol version to **41** (`QT41`), isolating it from v40 nodes. All node operators MUST update.
+**Network compatibility**: This release bumps the protocol version to **42** (`QT42`), isolating it from v41 nodes. All node operators MUST update.
 
 ### Upgrade Instructions (For Validators & Full Nodes)
 

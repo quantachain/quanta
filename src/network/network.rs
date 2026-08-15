@@ -739,8 +739,9 @@ impl Network {
         
         // Basic sanity check — only apply snapshot if we are waiting for it
         let current_height = blockchain.get_height();
-        if height != current_height {
-            warn!("Received unprompted state snapshot for height {} from {}, but we are at height {}", height, addr, current_height);
+        // current_height is the number of blocks (max_index + 1), so for block 110,000 it is 110,001.
+        if height != current_height.saturating_sub(1) {
+            warn!("Received unprompted state snapshot for height {} from {}, but our chain height is {}", height, addr, current_height);
             return Ok(());
         }
         

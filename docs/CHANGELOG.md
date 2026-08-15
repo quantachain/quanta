@@ -1,5 +1,9 @@
 # Changelog
 
+## [v3.0.7-alpha] - 2026-08-15
+### Fixed
+- **Block 110,001 Snapshot Reception Bug**: Fixed a secondary bug in the snap-sync process. When a peer successfully delivered the requested `StateSnapshot` for block 110,000, the local node would reject it as "unprompted" because it incorrectly compared the snapshot's block index (110,000) directly against the local chain height (110,001). This caused the node to endlessly loop requesting and rejecting the snapshot. The validation logic now properly uses `chain_height.saturating_sub(1)`.
+- **Protocol Bump (v42)**: Network isolated from nodes running v41.
 ## [v3.0.6-alpha] - 2026-08-15
 ### Fixed
 - **Block 110,001 Sync Failure Fix**: Fixed a subtle boundary logic bug introduced in v3.0.4. The node was failing to abort and fetch the state snapshot because it checked `current_sync_height == 110_000`. However, when block 110,000 is on disk, the chain height is actually `110,001`. This caused the node to attempt to validate block 110,001 using a locally diverged state root, leading to an infinite retry loop of `Invalid state root at block 110001` and blocking block production. Fixed the trigger height to `110,001` to correctly initiate snap-sync.
