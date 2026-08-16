@@ -1,8 +1,8 @@
 # ============================================================
 # Dockerfile — QUANTA Blockchain Node
 # ============================================================
-# V3 Release for testnet testing (v3.0.9-alpha)
-# Image : xd637/quanta-node:v3.0.9-alpha
+# V3 Release for testnet testing (v3.0.10-alpha)
+# Image : xd637/quanta-node:v3.0.10-alpha
 # Repo  : https://hub.docker.com/r/xd637/quanta-node
 #
 # Quick start (single node):
@@ -18,11 +18,11 @@
 FROM rust:latest AS builder
 
 # Version metadata
-LABEL version="3.0.9-alpha"
-LABEL org.quanta.network.protocol="44"
+LABEL version="3.0.10-alpha"
+LABEL org.quanta.network.protocol="45"
 LABEL org.opencontainers.image.title="quanta-node" \
-      org.opencontainers.image.description="QuantaChain V3 node — post-quantum BFT, Falcon-512 signatures, zero-mining. v3.0.9-alpha." \
-      org.opencontainers.image.version="v3.0.9-alpha" \
+      org.opencontainers.image.description="QuantaChain V3 node — post-quantum BFT, Falcon-512 signatures, zero-mining. v3.0.10-alpha." \
+      org.opencontainers.image.version="v3.0.10-alpha" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="Apache-2.0"

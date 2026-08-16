@@ -1,15 +1,15 @@
 # QuantaChain Alpha Testnet Release Notes
 
-## Current Release: v3.0.9-alpha (2026-08-16)
+## Current Release: v3.0.10-alpha (2026-08-16)
 
 ### The "State Sync" Release — Final Fix
 This release closes the last known issue in the block 110,000 snap-sync chain.
 
-v3.0.8-alpha fixed the root cause (snapshots are now served and accepted), but nodes were still stuck in an **infinite retry loop** because the divergence check compared the local state root against a hardcoded canonical root that no peer can ever produce. After the snapshot was applied, the check kept re-triggering.
+v3.0.8-alpha fixed the root cause (snapshots are now served and accepted), but nodes were still stuck in an **infinite retry loop**. v3.0.9-alpha attempted to fix this loop using forward-verification, but the simulation logic incorrectly omitted regular transaction processing and coinbase unlocking, causing the loop to persist.
 
-**v3.0.9-alpha** fixes the divergence check to use the same forward-verification as the receiver: it simulates block 110,001 against the current state, and only triggers snap-sync if THAT check fails. Since block 110,001 is BFT-signed, this is fully secure.
+**v3.0.10-alpha** corrects the forward-verification simulation to perfectly match the node's standard transaction processor. Nodes will now successfully verify the snapshot and continue syncing the chain.
 
-**Network compatibility**: This release bumps the protocol version to **44** (`QT44`), isolating it from v43 nodes. All node operators MUST update.
+**Network compatibility**: This release bumps the protocol version to **45** (`QT45`), isolating it from v44 nodes. All node operators MUST update.
 
 ### Upgrade Instructions (For Validators & Full Nodes)
 
@@ -22,7 +22,7 @@ docker stop quanta-node
 rm -rf /root/quanta_data/blocks /root/quanta_data/db
 
 # 3. Pull the new version
-docker pull xd637/quanta-node:v3.0.9-alpha
+docker pull xd637/quanta-node:v3.0.10-alpha
 
 # 4. Restart the node
 docker run -d \
@@ -33,7 +33,7 @@ docker run -d \
   --network host \
   -v "/root/quanta_data:/home/quanta/quanta_data" \
   -e QUANTA_WALLET_PASSWORD="your-wallet-password" \
-  xd637/quanta-node:v3.0.9-alpha \
+  xd637/quanta-node:v3.0.10-alpha \
   quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap node1.quantachain.org:8333 --port 3002 --rpc-port 7783
 ```
 

@@ -1309,12 +1309,15 @@ impl Network {
                         if !block_110001.state_root.is_empty() {
                             // Simulate block 110,001 against current in-memory state
                             let mut test_state = bc.get_account_state_clone();
+                            test_state.unlock_mature_coinbase(block_110001.index);
                             for tx in &block_110001.transactions {
-                                if tx.is_coinbase() || tx.sender == "TREASURY" {
-                                    test_state.credit_account(tx, block_110001.index, 500); // COINBASE_MATURITY
-                                } else if tx.is_genesis_premine() {
-                                    test_state.credit_account(tx, block_110001.index, 0);
+                                if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
+                                    let total = tx.amount.saturating_add(tx.fee);
+                                    test_state.debit_account(&tx.sender, total);
+                                    test_state.increment_nonce(&tx.sender);
                                 }
+                                let maturity = if tx.is_genesis_premine() { 0 } else { 500 }; // COINBASE_MATURITY
+                                test_state.credit_account(tx, block_110001.index, maturity);
                             }
                             let test_root = test_state.calculate_state_root();
                             // If our state correctly produces 110,001's root, no snap-sync needed

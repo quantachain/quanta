@@ -1,5 +1,9 @@
 # Changelog
 
+## [v3.0.10-alpha] - 2026-08-16
+### Fixed
+- **Infinite snap-sync retry loop (final)**: The forward-verification divergence check introduced in `v3.0.9-alpha` was flawed. It failed to apply regular transactions and failed to unlock mature coinbases from block `110,001` during the simulation, resulting in an incorrect test state root that always triggered the divergence check. The state simulation logic now perfectly mirrors the `Blockchain::reorg_to_block` standard transaction processor.
+- **Protocol Bump (v45)**: Network isolated from nodes running v44.
 ## [v3.0.9-alpha] - 2026-08-16
 ### Fixed
 - **Infinite snap-sync retry loop**: After the snapshot was received and applied (root `2ee3073...`), the divergence check in `sync_blockchain` kept re-firing because it compared `current_state_root()` against the hardcoded canonical root `42db10a2...` — which no peer can reproduce. Fix: the divergence check now uses the same forward-verification approach as the receiver — it simulates block 110,001 transactions against the current state and only triggers snap-sync if the resulting root does not match block 110,001's BFT-certified state root.
