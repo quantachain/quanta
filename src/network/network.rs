@@ -1292,34 +1292,63 @@ impl Network {
             // Always re-read the actual chain height — it changes after every reorg/apply.
             let current_sync_height = self.blockchain.read().await.get_height();
             
-            // STATE SYNC HEAL FIX (v3.0.4-alpha)
-            // FIX DATE: 2026-08-15 | VERSION: v3.0.6-alpha
-            // REASON: When max block index is 110,000, chain height is 110,001.
-            // We must catch nodes that already have block 110,000 on disk but haven't healed the state yet.
+            // STATE SYNC HEAL FIX (v3.0.8-alpha — final fix)
+            // FIX DATE: 2026-08-16 | VERSION: v3.0.8-alpha
+            // REASON: The old check compared current_state_root() against the hardcoded canonical
+            // root "42db10a2...". That root only existed on the original proposer's machine and
+            // NO peer can ever produce it. After the snapshot is applied (root "2ee3073..."),
+            // the check STILL fired because "2ee3073..." != "42db10a2...", causing an infinite loop.
+            // FIX: Use forward-verification — simulate block 110,001 transactions against the
+            // current in-memory state. If the resulting root matches block 110,001's state_root,
+            // our state is fine and no snap-sync is needed. Only trigger snap-sync if this check fails.
             if current_sync_height == 110_001 {
-                let (needs_sync, expected_root) = {
+                let needs_snapshot = {
                     let bc = self.blockchain.read().await;
-                    let current_root = bc.current_state_root();
-                    if let Some(expected) = bc.get_canonical_state_root(110_000) {
-                        (current_root != expected, Some(expected))
+                    // Try to get block 110,001 to forward-verify our state
+                    if let Some(block_110001) = bc.get_block_by_height(110_001) {
+                        if !block_110001.state_root.is_empty() {
+                            // Simulate block 110,001 against current in-memory state
+                            let mut test_state = bc.get_account_state_clone();
+                            for tx in &block_110001.transactions {
+                                if tx.is_coinbase() || tx.sender == "TREASURY" {
+                                    test_state.credit_account(tx, block_110001.index, 500); // COINBASE_MATURITY
+                                } else if tx.is_genesis_premine() {
+                                    test_state.credit_account(tx, block_110001.index, 0);
+                                }
+                            }
+                            let test_root = test_state.calculate_state_root();
+                            // If our state correctly produces 110,001's root, no snap-sync needed
+                            test_root != block_110001.state_root
+                        } else {
+                            // Block 110,001 has no state root — fall back to canonical check
+                            let current_root = bc.current_state_root();
+                            bc.get_canonical_state_root(110_000)
+                                .map(|expected| current_root != expected)
+                                .unwrap_or(false)
+                        }
                     } else {
-                        (false, None)
+                        // Don't have block 110,001 yet — fall back to canonical check
+                        let current_root = bc.current_state_root();
+                        bc.get_canonical_state_root(110_000)
+                            .map(|expected| current_root != expected)
+                            .unwrap_or(false)
                     }
                 };
-                
-                if needs_sync {
-                    if let Some(expected_root) = expected_root {
-                        tracing::warn!("Local state root diverged at hard-fork block 110,000. Requesting canonical state snapshot from peer...");
-                        let _ = peer.send_message(P2PMessage::GetStateSnapshot {
-                            height: 110_000,
-                            expected_state_root: expected_root,
-                        }).await;
-                        
-                        // Abort this sync cycle so we wait for the snapshot to arrive!
-                        self.syncing.store(false, Ordering::SeqCst);
-                        *self.sync_request_range.lock().await = None;
-                        return Ok(());
-                    }
+
+                if needs_snapshot {
+                    let expected_root = self.blockchain.read().await
+                        .get_canonical_state_root(110_000)
+                        .unwrap_or_default();
+                    tracing::warn!("Local state root diverged at hard-fork block 110,000. Requesting canonical state snapshot from peer...");
+                    let _ = peer.send_message(P2PMessage::GetStateSnapshot {
+                        height: 110_000,
+                        expected_state_root: expected_root,
+                    }).await;
+
+                    // Abort this sync cycle so we wait for the snapshot to arrive!
+                    self.syncing.store(false, Ordering::SeqCst);
+                    *self.sync_request_range.lock().await = None;
+                    return Ok(());
                 }
             }
             

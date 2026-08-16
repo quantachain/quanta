@@ -2392,6 +2392,13 @@ impl Blockchain {
         self.account_state.read().calculate_state_root()
     }
 
+    /// Returns a clone of the current in-memory account state.
+    /// Used by network snap-sync forward-verification.
+    // FIX DATE: 2026-08-16 | VERSION: v3.0.9-alpha
+    pub fn get_account_state_clone(&self) -> AccountState {
+        self.account_state.read().clone()
+    }
+
     /// Replaces the local account state with a peer-provided canonical snapshot,
     /// saving it to primary storage and the checkpoint archive.
     pub fn apply_canonical_state_snapshot(&self, height: u64, state: AccountState) -> Result<(), BlockchainError> {

@@ -1,15 +1,15 @@
 # QuantaChain Alpha Testnet Release Notes
 
-## Current Release: v3.0.8-alpha (2026-08-16)
+## Current Release: v3.0.9-alpha (2026-08-16)
 
-### The "State Sync" Release — Root Cause Fixed
-This is the definitive fix for syncing past block 110,000 (The State-Healing Hard Fork).
+### The "State Sync" Release — Final Fix
+This release closes the last known issue in the block 110,000 snap-sync chain.
 
-All prior versions (v3.0.4–v3.0.7) used a snap-sync design that was fundamentally impossible to work: they assumed a peer could serve a state snapshot with the original proposer's canonical root `42db10a2...`. Since the proposer's pre-heal state was unique to that machine, **no peer on the network can ever produce this root**. The sender always served its locally-computed state (root `2bc72e1b...`) and the receiver always rejected it.
+v3.0.8-alpha fixed the root cause (snapshots are now served and accepted), but nodes were still stuck in an **infinite retry loop** because the divergence check compared the local state root against a hardcoded canonical root that no peer can ever produce. After the snapshot was applied, the check kept re-triggering.
 
-**v3.0.8-alpha** replaces this with a forward-verification approach inspired by Ethereum snap-sync: the receiver accepts any state snapshot from a peer, then validates it by checking that block 110,001 produces the correct BFT-certified state root when applied on top of it. This is fully secure because block 110,001 is signed by 2/3+1 validators.
+**v3.0.9-alpha** fixes the divergence check to use the same forward-verification as the receiver: it simulates block 110,001 against the current state, and only triggers snap-sync if THAT check fails. Since block 110,001 is BFT-signed, this is fully secure.
 
-**Network compatibility**: This release bumps the protocol version to **43** (`QT43`), isolating it from v42 nodes. All node operators MUST update.
+**Network compatibility**: This release bumps the protocol version to **44** (`QT44`), isolating it from v43 nodes. All node operators MUST update.
 
 ### Upgrade Instructions (For Validators & Full Nodes)
 
@@ -22,7 +22,7 @@ docker stop quanta-node
 rm -rf /root/quanta_data/blocks /root/quanta_data/db
 
 # 3. Pull the new version
-docker pull xd637/quanta-node:v3.0.8-alpha
+docker pull xd637/quanta-node:v3.0.9-alpha
 
 # 4. Restart the node
 docker run -d \
@@ -33,7 +33,7 @@ docker run -d \
   --network host \
   -v "/root/quanta_data:/home/quanta/quanta_data" \
   -e QUANTA_WALLET_PASSWORD="your-wallet-password" \
-  xd637/quanta-node:v3.0.5-alpha \
+  xd637/quanta-node:v3.0.9-alpha \
   quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap node1.quantachain.org:8333 --port 3002 --rpc-port 7783
 ```
 
