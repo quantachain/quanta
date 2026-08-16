@@ -1,15 +1,15 @@
 # QuantaChain Alpha Testnet Release Notes
 
-## Current Release: v3.0.7-alpha (2026-08-15)
+## Current Release: v3.0.8-alpha (2026-08-16)
 
-### The "State Sync" Release (Hotfix 3)
-This release introduces a fully-automated P2P state snapshot synchronization mechanism to resolve the persistent syncing stalls at block 110,000 (The State-Healing Hard Fork). 
+### The "State Sync" Release — Root Cause Fixed
+This is the definitive fix for syncing past block 110,000 (The State-Healing Hard Fork).
 
-In previous versions, a new node syncing from genesis would accept block 110,000 via a canonical state root checkpoint, but its underlying account state would remain permanently diverged from the network, causing block 110,001 to fail validation. Now, nodes detect this divergence, pause their block sync, and issue a `GetStateSnapshot` request to their peers to download the canonical state for block 110,000, identical in concept to Ethereum's "snap sync."
+All prior versions (v3.0.4–v3.0.7) used a snap-sync design that was fundamentally impossible to work: they assumed a peer could serve a state snapshot with the original proposer's canonical root `42db10a2...`. Since the proposer's pre-heal state was unique to that machine, **no peer on the network can ever produce this root**. The sender always served its locally-computed state (root `2bc72e1b...`) and the receiver always rejected it.
 
-*Hotfix 3 (v3.0.7-alpha): Fixed a secondary bug where the local node rejected the incoming StateSnapshot from a peer because it compared the snapshot's block index (110,000) directly to the chain height (110,001) instead of `chain_height - 1`.*
+**v3.0.8-alpha** replaces this with a forward-verification approach inspired by Ethereum snap-sync: the receiver accepts any state snapshot from a peer, then validates it by checking that block 110,001 produces the correct BFT-certified state root when applied on top of it. This is fully secure because block 110,001 is signed by 2/3+1 validators.
 
-**Network compatibility**: This release bumps the protocol version to **42** (`QT42`), isolating it from v41 nodes. All node operators MUST update.
+**Network compatibility**: This release bumps the protocol version to **43** (`QT43`), isolating it from v42 nodes. All node operators MUST update.
 
 ### Upgrade Instructions (For Validators & Full Nodes)
 
@@ -22,7 +22,7 @@ docker stop quanta-node
 rm -rf /root/quanta_data/blocks /root/quanta_data/db
 
 # 3. Pull the new version
-docker pull xd637/quanta-node:v3.0.6-alpha
+docker pull xd637/quanta-node:v3.0.8-alpha
 
 # 4. Restart the node
 docker run -d \

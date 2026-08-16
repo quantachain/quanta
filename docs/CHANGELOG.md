@@ -1,5 +1,11 @@
 # Changelog
 
+## [v3.0.8-alpha] - 2026-08-16
+### Fixed
+- **Root cause fix for snap-sync failure at block 110,000**: All previous versions (v3.0.4–v3.0.7) failed because the snap-sync was designed around an impossible assumption — that a peer could serve a state snapshot with the canonical root `42db10a2...`. This root was produced only by the original block proposer (whose pre-heal validator balances were unique) and cannot be reproduced by any other node. The snapshot sender would serve its on-disk checkpoint (root `2bc72e1b...`) and the receiver would reject it for not matching the canonical `42db10a2...`. **Fix**: Replaced the impossible root-matching validation with a forward-verification approach: the receiver accepts any snapshot state from a trusted peer and validates it by checking that the next block (110,001) produces the correct state root when applied on top of it. This is analogous to Ethereum's snap-sync pivot verification and is cryptographically sound because block 110,001 is BFT-signed.
+- **Sender simplification**: The snapshot sender now simply serves its on-disk checkpoint state without any root cross-checking, since the forward-verification on the receiver side provides full security.
+- **Protocol Bump (v43)**: Network isolated from nodes running v42.
+
 ## [v3.0.7-alpha] - 2026-08-15
 ### Fixed
 - **Block 110,001 Snapshot Reception Bug**: Fixed a secondary bug in the snap-sync process. When a peer successfully delivered the requested `StateSnapshot` for block 110,000, the local node would reject it as "unprompted" because it incorrectly compared the snapshot's block index (110,000) directly against the local chain height (110,001). This caused the node to endlessly loop requesting and rejecting the snapshot. The validation logic now properly uses `chain_height.saturating_sub(1)`.
