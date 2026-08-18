@@ -1,15 +1,11 @@
 # QuantaChain Alpha Testnet Release Notes
 
-## Current Release: v3.0.10-alpha (2026-08-16)
+## Current Release: v3.0.11-alpha (2026-08-18)
 
-### The "State Sync" Release — Final Fix
-This release closes the last known issue in the block 110,000 snap-sync chain.
+### The "State Sync" Release — Infinite Loop Fix
+This release closes an infinite loop bug that occurred at block 110,001. A syncing node that successfully applied the canonical post-heal snapshot (root `2ee3073...`) would incorrectly compare its local state to the block's hardcoded expected state root (`42db10a2...`), causing it to falsely detect divergence and continuously request the same snapshot. The sync logic now correctly validates the `2ee3...` healed state.
 
-v3.0.8-alpha fixed the root cause (snapshots are now served and accepted), but nodes were still stuck in an **infinite retry loop**. v3.0.9-alpha attempted to fix this loop using forward-verification, but the simulation logic incorrectly omitted regular transaction processing and coinbase unlocking, causing the loop to persist.
-
-**v3.0.10-alpha** corrects the forward-verification simulation to perfectly match the node's standard transaction processor. Nodes will now successfully verify the snapshot and continue syncing the chain.
-
-**Network compatibility**: This release bumps the protocol version to **45** (`QT45`), isolating it from v44 nodes. All node operators MUST update.
+**Network compatibility**: This release bumps the protocol version to **46** (`QT46`), isolating it from v45 nodes. All node operators MUST update.
 
 ### Upgrade Instructions (For Validators & Full Nodes)
 
@@ -22,7 +18,7 @@ docker stop quanta-node
 rm -rf /root/quanta_data/blocks /root/quanta_data/db
 
 # 3. Pull the new version
-docker pull xd637/quanta-node:v3.0.10-alpha
+docker pull xd637/quanta-node:v3.0.11-alpha
 
 # 4. Restart the node
 docker run -d \
@@ -33,7 +29,7 @@ docker run -d \
   --network host \
   -v "/root/quanta_data:/home/quanta/quanta_data" \
   -e QUANTA_WALLET_PASSWORD="your-wallet-password" \
-  xd637/quanta-node:v3.0.10-alpha \
+  xd637/quanta-node:v3.0.11-alpha \
   quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap node1.quantachain.org:8333 --port 3002 --rpc-port 7783
 ```
 
@@ -41,6 +37,10 @@ docker run -d \
 
 ## Past Releases
 
+> **v3.0.10-alpha — SYNC BUG HOTFIX (2026-08-16)**
+> - **Simulation logic fix**: Corrected forward-verification to perfectly match standard block application.
+> - **Protocol Bump (v45)**: Network isolated.
+>
 > **v3.0.3-alpha — PERMANENT SYNC FIX (2026-08-13)** ✅
 > - **Block 110,000 — Ethereum-Style Canonical State Root Checkpoint**: Permanently fixes node stalling at block 110,000 with `Invalid state root`. Due to 110,000 blocks of accumulated dust from the epoch pool 999-divisor bug, syncing nodes could not reproduce the exact pre-heal state the original proposer had. Added a `TESTNET_STATE_ROOT_CHECKPOINTS` system (like Ethereum's DAO fork) that hardcodes the canonical state root at block 110,000. **No database wipe required.** Full state root enforcement resumes from block 110,001.
 > - **Network Isolation**: Bumped `PROTOCOL_VERSION` to `38` and `TESTNET_MAGIC` to `QT38`.

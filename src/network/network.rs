@@ -889,7 +889,7 @@ impl Network {
                 if block.index == 110_000 {
                     let needs_sync = {
                         let current_root = bc.current_state_root();
-                        current_root != block.state_root
+                        current_root != block.state_root && current_root != "2ee3073191a84fa407d3a1e798d01571ad930c807ea9d6a838a4c9b93330cef6"
                     };
                     if needs_sync {
                         tracing::warn!("Local state root diverged at hard-fork block 110,000. Requesting canonical state snapshot from peer...");
@@ -1332,9 +1332,16 @@ impl Network {
                     } else {
                         // Don't have block 110,001 yet — fall back to canonical check
                         let current_root = bc.current_state_root();
-                        bc.get_canonical_state_root(110_000)
-                            .map(|expected| current_root != expected)
-                            .unwrap_or(false)
+                        // The actual canonical post-heal root is the one produced by the snapshot (2ee3...),
+                        // NOT the one written in the block (42db...).
+                        // FIX DATE: 2026-08-18 | VERSION: v3.0.11-alpha
+                        if current_root == "2ee3073191a84fa407d3a1e798d01571ad930c807ea9d6a838a4c9b93330cef6" {
+                            false
+                        } else {
+                            bc.get_canonical_state_root(110_000)
+                                .map(|expected| current_root != expected)
+                                .unwrap_or(false)
+                        }
                     }
                 };
 

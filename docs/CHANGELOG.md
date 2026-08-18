@@ -1,5 +1,10 @@
 # Changelog
 
+## [v3.0.11-alpha] - 2026-08-18
+### Fixed
+- **Infinite snap-sync retry loop**: Fixed an infinite snap-sync retry loop at block 110,001. A syncing node with the canonical post-heal snapshot (root `2ee3073...`) was incorrectly comparing its local state to the block's hardcoded expected state root (`42db10a2...`), causing it to endlessly request a snapshot it already had. The sync logic now explicitly recognizes the `2ee3...` healed state as correct.
+- **Protocol Bump (v46)**: Network isolated from nodes running v45.
+
 ## [v3.0.10-alpha] - 2026-08-16
 ### Fixed
 - **Infinite snap-sync retry loop (final)**: The forward-verification divergence check introduced in `v3.0.9-alpha` was flawed. It failed to apply regular transactions and failed to unlock mature coinbases from block `110,001` during the simulation, resulting in an incorrect test state root that always triggered the divergence check. The state simulation logic now perfectly mirrors the `Blockchain::reorg_to_block` standard transaction processor.
