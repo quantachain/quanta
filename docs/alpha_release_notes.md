@@ -1,11 +1,13 @@
 # QuantaChain Alpha Testnet Release Notes
 
-## Current Release: v3.0.11-alpha (2026-08-18)
+## Current Release: v3.0.12-alpha (2026-08-19)
 
-### The "State Sync" Release — Infinite Loop Fix
-This release closes an infinite loop bug that occurred at block 110,001. A syncing node that successfully applied the canonical post-heal snapshot (root `2ee3073...`) would incorrectly compare its local state to the block's hardcoded expected state root (`42db10a2...`), causing it to falsely detect divergence and continuously request the same snapshot. The sync logic now correctly validates the `2ee3...` healed state.
+### The "Networking" Release
+This release fixes two major networking bugs:
+1. **Network Disconnect Deadlock**: A synchronous lock during P2P block broadcasting could cause the node to stop responding to `Ping` messages during heavy sync, leading to mass peer disconnections and an apparent node stall at the sync tip.
+2. **Bootstrap Node Spam**: A logic bug caused nodes with only inbound connections to aggressively fallback to bootstrap nodes, spamming the console with `Connecting to peer` every 30 seconds.
 
-**Network compatibility**: This release bumps the protocol version to **46** (`QT46`), isolating it from v45 nodes. All node operators MUST update.
+**Network compatibility**: This release bumps the protocol version to **47** (`QT47`), isolating it from v46 nodes. All node operators MUST update.
 
 ### Upgrade Instructions (For Validators & Full Nodes)
 
@@ -18,7 +20,7 @@ docker stop quanta-node
 rm -rf /root/quanta_data/blocks /root/quanta_data/db
 
 # 3. Pull the new version
-docker pull xd637/quanta-node:v3.0.11-alpha
+docker pull xd637/quanta-node:v3.0.12-alpha
 
 # 4. Restart the node
 docker run -d \
@@ -29,13 +31,18 @@ docker run -d \
   --network host \
   -v "/root/quanta_data:/home/quanta/quanta_data" \
   -e QUANTA_WALLET_PASSWORD="your-wallet-password" \
-  xd637/quanta-node:v3.0.11-alpha \
+  xd637/quanta-node:v3.0.12-alpha \
   quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap node1.quantachain.org:8333 --port 3002 --rpc-port 7783
 ```
 
 ---
 
 ## Past Releases
+
+> **v3.0.11-alpha — STATE SYNC INFINITE LOOP (2026-08-18)**
+> - **Infinite snap-sync retry loop**: Fixed an infinite snap-sync retry loop at block 110,001.
+> - **Protocol Bump (v46)**: Network isolated.
+>
 
 > **v3.0.10-alpha — SYNC BUG HOTFIX (2026-08-16)**
 > - **Simulation logic fix**: Corrected forward-verification to perfectly match standard block application.

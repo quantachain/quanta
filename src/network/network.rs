@@ -184,7 +184,10 @@ impl Network {
                             "Periodic mempool sync: requesting from {}",
                             peer.address().await
                         );
-                        let _ = peer.send_message(P2PMessage::GetMempool).await;
+                        let peer = Arc::clone(peer);
+                        tokio::spawn(async move {
+                            let _ = peer.send_message(P2PMessage::GetMempool).await;
+                        });
                     }
                 }
             })
@@ -1690,7 +1693,7 @@ impl Network {
                 // SECURITY FIX: Subnet bucketing strategy for outgoing connections
                 let mut target_peers = self.discovery.get_random_peers(needed).await;
 
-                if target_peers.is_empty() && !self.config.bootstrap_nodes.is_empty() {
+                if target_peers.is_empty() && peer_count == 0 && !self.config.bootstrap_nodes.is_empty() {
                     target_peers.extend(self.config.bootstrap_nodes.iter().copied());
                 }
 
@@ -1781,10 +1784,13 @@ impl Network {
             info!("Heartbeat: Pinging {} peers", peers.len());
         }
         for peer in peers {
-            let nonce = rand::random();
-            if let Err(e) = peer.send_message(P2PMessage::Ping(nonce)).await {
-                warn!("Heartbeat ping failed: {}", e);
-            }
+            let peer = Arc::clone(&peer);
+            tokio::spawn(async move {
+                let nonce = rand::random();
+                if let Err(e) = peer.send_message(P2PMessage::Ping(nonce)).await {
+                    warn!("Heartbeat ping failed: {}", e);
+                }
+            });
         }
     }
 }

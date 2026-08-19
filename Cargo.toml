@@ -1,6 +1,6 @@
 [package]
 name = "quanta"
-version = "3.0.11-alpha"
+version = "3.0.12-alpha"
 edition = "2021"
 description = "QUANTA - Quantum-resistant blockchain with Falcon signatures"
 

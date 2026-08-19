@@ -1,5 +1,11 @@
 # Changelog
 
+## [v3.0.12-alpha] - 2026-08-19
+### Fixed
+- **Network broadcast deadlock**: Fixed a critical bug where synchronous networking code blocked the `process_messages` task and prevented `Pong` replies during heavy block sync, leading to mass peer disconnections. Network broadcasts and heartbeats are now executed in parallel Tokio tasks, allowing the network layer to scale massively without stalling.
+- **Bootstrap connection spam**: Fixed a bug where a node with established inbound connections would needlessly and aggressively fallback to repeatedly attempting (and failing) to connect to hardcoded bootstrap nodes, spamming the console with `Connecting to peer` every 30 seconds.
+- **Protocol Bump (v47)**: Protocol bumped to v47 to enforce isolation from v46 nodes.
+
 ## [v3.0.11-alpha] - 2026-08-18
 ### Fixed
 - **Infinite snap-sync retry loop**: Fixed an infinite snap-sync retry loop at block 110,001. A syncing node with the canonical post-heal snapshot (root `2ee3073...`) was incorrectly comparing its local state to the block's hardcoded expected state root (`42db10a2...`), causing it to endlessly request a snapshot it already had. The sync logic now explicitly recognizes the `2ee3...` healed state as correct.
