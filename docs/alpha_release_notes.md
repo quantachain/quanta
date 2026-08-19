@@ -1,6 +1,17 @@
 # QuantaChain Alpha Testnet Release Notes
 
-## Current Release: v3.0.13-alpha (2026-08-19)
+## Current Release: v3.0.14-alpha (2026-08-19)
+
+### The "BFT Stall & TCP Deadlock Fix" Release
+This release resolves critical bugs causing peers to randomly disconnect and the network to stall at block 162763:
+1. **TCP Deadlocks ("Stream corrupted or dead")**: Fixed a network-layer deadlock where synchronous TCP writes (`send_to_peer`) blocked the main peer event loop. If a remote peer was slow to receive, it starved the local node from reading, causing the remote peer's sends to also timeout, resulting in a cascade of 10-second `write_all` timeouts across the network. All peer message dispatch is now fully asynchronous (`enqueue_message`).
+2. **Network Stall (Height 162763) Hard Fork**: Several nodes experienced "Backup state behind unit collection state" crashes after their oversized AlephBFT backup files were aggressively wiped during the memory leak incident. This stalled consensus because restarting nodes could not rejoin the current session. A hard fork session rotation at height `162763` has been added to instantly force a clean DAG start across the network.
+
+**Network compatibility**: This release bumps the protocol version to **49** (`QT49`), isolating it from previous buggy nodes. All node operators MUST update.
+
+---
+
+### Previous Release: v3.0.13-alpha (2026-08-19)
 
 ### The "Memory & CPU Stabilization" Release
 This release resolves critical resource exhaustion issues:

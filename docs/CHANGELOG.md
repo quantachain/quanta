@@ -1,6 +1,10 @@
 # Changelog
 
-## [v3.0.13-alpha] - 2026-08-19
+## [v3.0.14-alpha] - 2026-08-19
+### Fixed
+- **TCP Deadlocks ("Stream corrupted or dead")**: Fixed a network-layer deadlock where synchronous TCP writes (`send_to_peer`) blocked the main peer event loop. If a remote peer was slow to receive, it starved the local node from reading, causing the remote peer's sends to also timeout, resulting in a cascade of 10-second `write_all` timeouts across the network. All peer message dispatch is now fully asynchronous (`enqueue_message`).
+- **Network Stall (Height 162763) Hard Fork**: Several nodes experienced "Backup state behind unit collection state" crashes after their oversized AlephBFT backup files were aggressively wiped during the memory leak incident. This stalled consensus because restarting nodes could not rejoin the current session. A hard fork session rotation at height `162763` has been added to instantly force a clean DAG start across the network.
+- **Protocol Bump (v49)**: Network isolated from nodes running v47.## [v3.0.13-alpha] - 2026-08-19
 ### Fixed
 - **350% CPU Starvation (Consensus)**: Added a bounded LRU signature cache to `QuantaKeychain`. AlephBFT no longer endlessly re-verifies the exact same Falcon-512 signatures during DAG traversals, dropping the node's baseline CPU usage from ~350% to roughly 10-30%.
 - **6.4 GiB Memory Leak (OOM)**: Fixed a catastrophic memory leak where the P2P layer pumped decompressed BFT messages into an unbounded channel (`mpsc::unbounded_channel`) faster than the CPU-starved consensus could consume them. Replaced with a strictly bounded channel with a drop-on-full policy (`try_send`) to keep RAM flat.

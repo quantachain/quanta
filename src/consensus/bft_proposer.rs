@@ -265,8 +265,13 @@ pub async fn run_bft_proposer(
         // HARD FORK FIX: Session 1361's DAG was corrupted when operators deleted their multi-GB 
         // backup files to recover from OOM crashes. The network is permanently stalled at height 81664.
         // We force a session rotation here to start a fresh session (1362) with a clean DAG,
-        // without altering the existing committee election rules which evaluated at 81660.
         if current_height >= 81664 {
+            session_id += 1;
+        }
+        // HARD FORK FIX 2: Network stalled again at 162763 because operators wiped their
+        // abnormally large backup files, causing "Backup state behind unit collection state"
+        // panics which stalled BFT. We force another rotation here.
+        if current_height >= 162763 {
             session_id += 1;
         }
 
@@ -509,6 +514,9 @@ pub async fn run_bft_proposer(
         };
         let mut new_session_id = new_height / SESSION_LENGTH;
         if new_height >= 81664 {
+            new_session_id += 1;
+        }
+        if new_height >= 162763 {
             new_session_id += 1;
         }
 

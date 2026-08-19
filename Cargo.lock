@@ -2289,7 +2289,7 @@ dependencies = [
 
 [[package]]
 name = "quanta"
-version = "3.0.12-alpha"
+version = "3.0.14-alpha"
 dependencies = [
  "aleph-bft",
  "argon2",

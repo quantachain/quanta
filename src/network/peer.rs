@@ -127,13 +127,26 @@ impl Peer {
         }
     }
 
-    pub async fn send_message(&self, message: P2PMessage) -> Result<(), String> {
+    pub async fn send_message_sync(&self, message: P2PMessage) -> Result<(), String> {
         // BETA FIX: Offload CPU-heavy Zstd compression to blocking threadpool
         let data = tokio::task::spawn_blocking(move || serialize_message(&message))
             .await
             .map_err(|e| format!("Serialization task panicked: {}", e))??;
             
         self.send_raw_data(data).await
+    }
+
+    /// Enqueue a message to be sent asynchronously without blocking the caller.
+    /// This is CRITICAL to prevent TCP deadlocks where sending to a slow peer blocks
+    /// our read loop, which in turn causes the other peer to timeout sending to us.
+    pub async fn send_message(self: &Arc<Self>, message: P2PMessage) -> Result<(), String> {
+        let peer_clone = Arc::clone(self);
+        tokio::spawn(async move {
+            if let Err(e) = peer_clone.send_message_sync(message).await {
+                tracing::debug!("Failed to send message to peer (background): {}", e);
+            }
+        });
+        Ok(())
     }
 
     /// Receive a message from this peer with timeout
@@ -287,7 +300,7 @@ impl Peer {
             node_id: our_node_id,
         };
 
-        self.send_message(version_msg).await?;
+        self.send_message_sync(version_msg).await?;
 
         // Wait for their version
         match self.receive_message().await? {
@@ -311,7 +324,7 @@ impl Peer {
                     .await;
 
                 // Send verack
-                self.send_message(P2PMessage::VerAck).await?;
+                self.send_message_sync(P2PMessage::VerAck).await?;
 
                 // Wait for their verack
                 match self.receive_message().await? {
@@ -331,7 +344,7 @@ impl Peer {
 
     /// Disconnect from peer
     pub async fn disconnect(&self) {
-        let _ = self.send_message(P2PMessage::Disconnect).await;
+        let _ = self.send_message_sync(P2PMessage::Disconnect).await;
         let _ = self.shutdown_tx.send(()).await;
     }
 }
