@@ -1,5 +1,10 @@
 # Changelog
 
+## [v3.0.13-alpha] - 2026-08-19
+### Fixed
+- **350% CPU Starvation (Consensus)**: Added a bounded LRU signature cache to `QuantaKeychain`. AlephBFT no longer endlessly re-verifies the exact same Falcon-512 signatures during DAG traversals, dropping the node's baseline CPU usage from ~350% to roughly 10-30%.
+- **6.4 GiB Memory Leak (OOM)**: Fixed a catastrophic memory leak where the P2P layer pumped decompressed BFT messages into an unbounded channel (`mpsc::unbounded_channel`) faster than the CPU-starved consensus could consume them. Replaced with a strictly bounded channel with a drop-on-full policy (`try_send`) to keep RAM flat.
+
 ## [v3.0.12-alpha] - 2026-08-19
 ### Fixed
 - **Network broadcast deadlock**: Fixed a critical bug where synchronous networking code blocked the `process_messages` task and prevented `Pong` replies during heavy block sync, leading to mass peer disconnections. Network broadcasts and heartbeats are now executed in parallel Tokio tasks, allowing the network layer to scale massively without stalling.

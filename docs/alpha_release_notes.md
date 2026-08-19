@@ -1,6 +1,17 @@
 # QuantaChain Alpha Testnet Release Notes
 
-## Current Release: v3.0.12-alpha (2026-08-19)
+## Current Release: v3.0.13-alpha (2026-08-19)
+
+### The "Memory & CPU Stabilization" Release
+This release resolves critical resource exhaustion issues:
+1. **350% CPU Starvation (Consensus)**: Added a bounded LRU signature cache to `QuantaKeychain`. AlephBFT no longer endlessly re-verifies the exact same Falcon-512 signatures during DAG traversals, dropping the node's baseline CPU usage from ~350% to roughly 10-30%.
+2. **6.4 GiB Memory Leak (OOM)**: Fixed a catastrophic memory leak where the P2P layer pumped decompressed BFT messages into an unbounded channel (`mpsc::unbounded_channel`) faster than the CPU-starved consensus could consume them. Replaced with a strictly bounded channel with a drop-on-full policy (`try_send`) to keep RAM flat.
+
+**Network compatibility**: This release maintains network compatibility with v47 nodes.
+
+---
+
+### Previous Release: v3.0.12-alpha (2026-08-19)
 
 ### The "Networking" Release
 This release fixes two major networking bugs:

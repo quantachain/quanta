@@ -72,7 +72,7 @@ pub struct Network {
     /// downloaded by the sync loop. Set just before GetBlocks is sent;
     sync_request_range: Arc<tokio::sync::Mutex<Option<(u64, u64)>>>,
     /// Channel to forward received AlephBFT messages to consensus
-    aleph_bft_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>>,
+    aleph_bft_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::mpsc::Sender<Vec<u8>>>>>,
 }
 
 impl Network {
@@ -600,10 +600,14 @@ impl Network {
                 // If we deduplicate before sending to AlephBFT, retries are dropped locally.
                 if !skip_local {
                     if let Some(tx) = &*tx_opt {
-                        if let Err(_e) = tx.send(data.clone()) {
-                            tracing::debug!(
-                                "BFT channel closed/unregistered, dropping message during sync"
-                            );
+                        match tx.try_send(data.clone()) {
+                            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                                tracing::warn!("BFT channel full, dropping message (Memory leak prevented)");
+                            }
+                            Err(_) => {
+                                tracing::debug!("BFT channel closed/unregistered, dropping message during sync");
+                            }
+                            Ok(_) => {}
                         }
                     }
                 }
@@ -1169,7 +1173,7 @@ impl Network {
     }
 
     /// Register a channel sender for incoming AlephBFT messages.
-    pub async fn register_aleph_bft_tx(&self, tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>) {
+    pub async fn register_aleph_bft_tx(&self, tx: tokio::sync::mpsc::Sender<Vec<u8>>) {
         let mut guard = self.aleph_bft_tx.write().await;
         *guard = Some(tx);
     }

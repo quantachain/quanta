@@ -26,7 +26,7 @@ pub struct QuantaNetworkBridge<D> {
     /// Shared reference to the network manager for sending/broadcasting messages.
     pub network: Arc<Network>,
     /// Channel to receive incoming BFT messages from Quanta's network manager.
-    pub aleph_rx: tokio::sync::Mutex<mpsc::UnboundedReceiver<Vec<u8>>>,
+    pub aleph_rx: tokio::sync::Mutex<mpsc::Receiver<Vec<u8>>>,
     /// Index of this node within the committee.
     pub my_node_index: usize,
     /// Committee ordered by NodeIndex: committee[i] = validator wallet address of node i.
@@ -38,7 +38,7 @@ pub struct QuantaNetworkBridge<D> {
 impl<D> QuantaNetworkBridge<D> {
     pub fn new(
         network: Arc<Network>,
-        aleph_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+        aleph_rx: mpsc::Receiver<Vec<u8>>,
         my_node_index: usize,
         committee: Vec<String>,
     ) -> Self {

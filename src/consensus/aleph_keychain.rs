@@ -2,7 +2,9 @@ use crate::crypto::wallet::QuantumWallet;
 use aleph_bft::{
     Index, Keychain, MultiKeychain, NodeCount, NodeIndex, PartialMultisignature, SignatureSet,
 };
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use parking_lot::RwLock;
 
 /// AlephBFT Signature Wrapper for Falcon-512 signatures
 #[derive(Debug, Clone, PartialEq, Eq, codec::Encode, codec::Decode)]
@@ -22,6 +24,9 @@ pub struct QuantaKeychain {
     /// Ordered list of committee public keys (raw bytes or addresses)
     /// Used for signature verification of other nodes.
     committee_pubkeys: Vec<Vec<u8>>,
+    /// Cache for verified signatures to prevent CPU starvation.
+    /// Maps (NodeIndex, Hash) -> Verification Result
+    sig_cache: Arc<RwLock<(HashMap<(usize, [u8; 32]), bool>, VecDeque<(usize, [u8; 32])>)>>,
 }
 
 impl QuantaKeychain {
@@ -36,6 +41,7 @@ impl QuantaKeychain {
             my_index,
             node_count,
             committee_pubkeys,
+            sig_cache: Arc::new(RwLock::new((HashMap::new(), VecDeque::new()))),
         }
     }
 }
@@ -75,7 +81,28 @@ impl Keychain for QuantaKeychain {
         let len = msg.len().min(32);
         hash_arr[..len].copy_from_slice(&msg[..len]);
 
+        // 1. Check cache
+        {
+            let cache = self.sig_cache.read();
+            if let Some(&res) = cache.0.get(&(index.0, hash_arr)) {
+                return res;
+            }
+        }
+
         let result = crate::crypto::signatures::verify_hash_strict(&hash_arr, &sgn.raw, pubkey);
+        
+        // 2. Update cache
+        {
+            let mut cache = self.sig_cache.write();
+            if cache.0.len() >= 10_000 {
+                if let Some(old_key) = cache.1.pop_front() {
+                    cache.0.remove(&old_key);
+                }
+            }
+            cache.0.insert((index.0, hash_arr), result);
+            cache.1.push_back((index.0, hash_arr));
+        }
+
         if !result {
             tracing::debug!(
                 "AlephBFT signature verification FAILED for node index {}",
@@ -83,12 +110,13 @@ impl Keychain for QuantaKeychain {
             );
         } else {
             // TRACE only — verify() is called thousands of times per DAG replay.
-            // Logging at INFO level floods the output and starves the tokio runtime.
+            // Excessive logging here starves the tokio workers.
             tracing::trace!(
-                "AlephBFT signature verification SUCCESS for node index {}",
+                "AlephBFT signature verified for node index {}",
                 index.0
             );
         }
+
         result
     }
 }

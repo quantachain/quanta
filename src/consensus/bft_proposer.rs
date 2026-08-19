@@ -306,7 +306,7 @@ pub async fn run_bft_proposer(
         // BW-FIX-4: Pass committee (wallet addresses indexed by NodeIndex) so the
         // bridge can route Recipient::Node(idx) to the correct peer rather than
         // broadcasting every unicast message to all validators.
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::channel(10000);
         network_ref.register_aleph_bft_tx(tx).await;
         let network_bridge: QuantaNetworkBridge<
             aleph_bft::NetworkData<
