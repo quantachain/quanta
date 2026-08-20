@@ -5,8 +5,13 @@ use crate::network::protocol::{
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
-use tokio::net::TcpStream;
+// PQC TRANSPORT v3.1.0-alpha (2026-08-20): Peer now holds boxed async I/O trait objects
+// instead of concrete ReadHalf<TcpStream>. This allows Peer to wrap any stream type:
+//   - tokio::net::TcpStream (plain, pre-TLS during testing)
+//   - tokio_rustls::TlsStream<TcpStream> (PQC-encrypted production)
+//   - future libp2p streams (v4.0 migration)
+// No other code in the file needs to change — only Peer::new() and the type fields.
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::timeout;
 use tracing::{info, warn};
@@ -32,19 +37,32 @@ pub struct PeerInfo {
     /// Legacy field kept so PeerManager cleanup can still gate on it
     pub strikes: u8,
     pub is_outbound: bool,
+    /// ADDRMAN FIX v3.1.0-alpha (2026-08-20): The listen port this peer self-reported
+    /// in their Version message. Combined with their source IP, gives us the correct
+    /// connectable address to store in the discovery table.
+    pub reported_listen_port: Option<u16>,
 }
 
-/// Represents a connection to a peer in the network
+/// Represents a connection to a peer in the network.
+/// The stream is held as boxed trait objects so this struct works with any
+/// underlying transport: TcpStream (plain), TlsStream (PQC), or libp2p streams.
 pub struct Peer {
     info: Arc<RwLock<PeerInfo>>,
-    read_half: Arc<RwLock<ReadHalf<TcpStream>>>,
-    write_half: Arc<RwLock<WriteHalf<TcpStream>>>,
+    read_half: Arc<RwLock<Box<dyn AsyncRead + Unpin + Send + Sync>>>,
+    write_half: Arc<RwLock<Box<dyn AsyncWrite + Unpin + Send + Sync>>>,
     shutdown_tx: mpsc::Sender<()>,
 }
 
 impl Peer {
-    /// Create a new peer connection
-    pub async fn new(stream: TcpStream, address: SocketAddr) -> Result<Self, String> {
+    /// Create a new peer from any async read+write stream.
+    ///
+    /// PQC TRANSPORT v3.1.0-alpha (2026-08-20): Generic over the stream type.
+    /// Pass a TcpStream for plaintext (testing) or a TlsStream<TcpStream>
+    /// for PQC-encrypted production connections.
+    pub async fn new<S>(stream: S, address: SocketAddr) -> Result<Self, String>
+    where
+        S: AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static,
+    {
         let (shutdown_tx, _) = mpsc::channel(1);
 
         let info = PeerInfo {
@@ -58,15 +76,17 @@ impl Peer {
             misbehavior_score: 0,
             strikes: 0,
             is_outbound: false,
+            reported_listen_port: None,
         };
 
-        // CRITICAL: Split stream to avoid read/write lock contention
+        // CRITICAL: Split stream to avoid read/write lock contention.
+        // tokio::io::split works on any AsyncRead + AsyncWrite type.
         let (read_half, write_half) = tokio::io::split(stream);
 
         Ok(Self {
             info: Arc::new(RwLock::new(info)),
-            read_half: Arc::new(RwLock::new(read_half)),
-            write_half: Arc::new(RwLock::new(write_half)),
+            read_half: Arc::new(RwLock::new(Box::new(read_half))),
+            write_half: Arc::new(RwLock::new(Box::new(write_half))),
             shutdown_tx,
         })
     }
@@ -276,6 +296,15 @@ impl Peer {
         self.info.read().await.address
     }
 
+    /// ADDRMAN FIX v3.1.0-alpha (2026-08-20): Get the connectable (IP, listen_port) address
+    /// that the peer self-reported in their Version handshake.
+    /// This is the correct address to store in the discovery table — NOT addr.ip():addr.port()
+    /// which is an ephemeral NAT port and almost never connectable.
+    pub async fn reported_listen_addr(&self) -> Option<SocketAddr> {
+        let info = self.info.read().await;
+        info.reported_listen_port.map(|port| SocketAddr::new(info.address.ip(), port))
+    }
+
     /// Check if peer is alive
     pub async fn is_alive(&self) -> bool {
         let info = self.info.read().await;
@@ -290,6 +319,9 @@ impl Peer {
         our_height: u64,
         our_cumulative_work: u128,
         our_node_id: String,
+        // ADDRMAN FIX v3.1.0-alpha (2026-08-20): Self-report our own listen port.
+        // The peer will record (our_source_ip, our_listen_port) as our connectable address.
+        our_listen_port: u16,
     ) -> Result<(), String> {
         // Send our version
         let version_msg = P2PMessage::Version {
@@ -298,6 +330,7 @@ impl Peer {
             cumulative_work: our_cumulative_work,
             timestamp: chrono::Utc::now().timestamp(),
             node_id: our_node_id,
+            listen_port: our_listen_port,
         };
 
         self.send_message_sync(version_msg).await?;
@@ -309,6 +342,7 @@ impl Peer {
                 height,
                 cumulative_work,
                 node_id,
+                listen_port,
                 ..
             } => {
                 if version != our_version {
@@ -319,6 +353,11 @@ impl Peer {
                         our_version
                     );
                     return Err("Incompatible protocol version".to_string());
+                }
+                // Store the peer's self-reported listen port alongside their other info
+                {
+                    let mut info = self.info.write().await;
+                    info.reported_listen_port = Some(listen_port);
                 }
                 self.update_info(node_id, version, height, cumulative_work)
                     .await;

@@ -1,6 +1,6 @@
 [package]
 name = "quanta"
-version = "3.0.14-alpha"
+version = "3.1.0-alpha"
 edition = "2021"
 description = "QUANTA - Quantum-resistant blockchain with Falcon signatures"
 
@@ -112,10 +112,19 @@ rpassword = "7.3"
 config = "0.14"
 toml = "0.8"
 
-# TLS/Security
-tokio-rustls = "0.25"
-rustls = "0.22"
+# TLS/Security — PQC Transport Encryption
+# CHANGED v3.1.0-alpha (2026-08-20): Upgraded to rustls 0.23 with aws-lc-rs backend
+# which provides X25519MLKEM768 hybrid PQC key exchange (RFC 10024).
+# This is what Cloudflare, Chrome, and Firefox use in production.
+# aws-lc-rs requires cmake at build time (added to Dockerfile).
+tokio-rustls = "0.26"
+rustls = { version = "0.23", features = ["prefer-post-quantum"] }
 rustls-pemfile = "2.0"
+# rcgen: self-signed certificate generation for P2P TLS identity
+# Each node generates an ephemeral cert at startup. The cert is only
+# used to establish an encrypted channel; the REAL identity verification
+# is done by our Falcon-512 handshake above the TLS layer.
+rcgen = "0.13"
 
 # HD Wallet (BIP32/39)
 bip39 = "2.0"

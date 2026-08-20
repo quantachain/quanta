@@ -14,6 +14,13 @@ pub enum P2PMessage {
         cumulative_work: u128,
         timestamp: i64,
         node_id: String,
+        // ADDRMAN FIX v3.1.0-alpha (2026-08-20): Self-reported listen port.
+        // This is the Bitcoin/libp2p/Algorand-standard approach: nodes NEVER
+        // assume the source IP of an inbound TCP connection is their listen address
+        // (it's almost always a NAT/Cloudflare ephemeral port). Instead, each node
+        // self-reports their own listen_port in the handshake so peers can store
+        // the correct (IP, listen_port) tuple in the discovery table.
+        listen_port: u16,
     },
     VerAck,
 
@@ -128,13 +135,13 @@ impl From<&Block> for BlockHeader {
 // CHANGED 2026-07-22 v2.5.0-alpha: Bumped from 32 -> 33 for State-Healing Hard Fork.
 // CHANGED 2026-07-29 v2.5.1-alpha: Bumped from 33 -> 34 to isolate nodes with the
 // create_block_template state root fix from v2.5.0 proposers that embed a wrong root.
-pub const PROTOCOL_VERSION: u32 = 49; // v3.0.14-alpha
+pub const PROTOCOL_VERSION: u32 = 51; // v3.1.0-alpha — AddrMan + PQC TLS transport (X25519MLKEM768)
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"QT49"; // Quanta V3 Testnet (Katenet)
+pub const TESTNET_MAGIC: [u8; 4] = *b"QT51"; // Quanta V3 — PQC TLS transport
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;

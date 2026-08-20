@@ -1,13 +1,19 @@
 # QuantaChain Alpha Testnet Release Notes
 
-## Current Release: v3.0.14-alpha (2026-08-19)
+## Current Release: v3.1.0-alpha (2026-08-20)
 
-### The "BFT Stall & TCP Deadlock Fix" Release
-This release resolves critical bugs causing peers to randomly disconnect and the network to stall at block 162763:
-1. **TCP Deadlocks ("Stream corrupted or dead")**: Fixed a network-layer deadlock where synchronous TCP writes (`send_to_peer`) blocked the main peer event loop. If a remote peer was slow to receive, it starved the local node from reading, causing the remote peer's sends to also timeout, resulting in a cascade of 10-second `write_all` timeouts across the network. All peer message dispatch is now fully asynchronous (`enqueue_message`).
-2. **Network Stall (Height 162763) Hard Fork**: Several nodes experienced "Backup state behind unit collection state" crashes after their oversized AlephBFT backup files were aggressively wiped during the memory leak incident. This stalled consensus because restarting nodes could not rejoin the current session. A hard fork session rotation at height `162763` has been added to instantly force a clean DAG start across the network.
+### The "PQC Transport & AddrMan" Release
+This release fundamentally secures both the transport layer (PQC) and the peer discovery layer (AddrMan).
 
-**Network compatibility**: This release bumps the protocol version to **49** (`QT49`), isolating it from previous buggy nodes. All node operators MUST update.
+**Security: PQC Transport Encryption (Phase 1)**
+Every P2P connection is now wrapped in TLS 1.3 using **X25519MLKEM768** hybrid key exchange (RFC 10024). This protects the network from "harvest now, decrypt later" attacks while preserving the Falcon-512 application-layer identity checks. Quanta is now PQC-secured at both consensus/application and transport layers!
+
+**Peer Discovery: AddrMan (Bitcoin Model)**
+1. **Self-Reported Listen Port (`listen_port` in `Version` msg):** Nodes now broadcast their own listen port during the P2P handshake. Previously, the bootstrap node blindly assumed the source IP of an inbound connection was connectable — but 99% of nodes are behind NAT or Cloudflare proxies. This infected the discovery table with dead IPs which were gossiped to the entire network, causing all validators to loop trying to reconnect to Cloudflare IPs.
+2. **New/Tried Table (Verified Peer Gossip):** Inbound connections are now added as **unverified ("new" table)**. A peer is promoted to **verified ("tried" table)** only when we successfully connect to them **outbound**. `GetAddr` responses now only return verified peers — so dead NAT/Cloudflare IPs can never spread through the network.
+3. **Bootstrap Fallback Fix:** Nodes with 0 peers now always retry the bootstrap node regardless of their discovery table size.
+
+**Network compatibility**: This release bumps the protocol version to **51** (`QT51`) and is incompatible with v50/v49 nodes. All node operators MUST update.
 
 ---
 

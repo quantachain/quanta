@@ -3,8 +3,10 @@ use crate::core::block::Block;
 use crate::core::transaction::Transaction;
 use crate::network::peer::{Peer, PeerManager};
 use crate::network::protocol::{P2PMessage, PROTOCOL_VERSION};
+use crate::network::tls::{generate_node_cert, make_tls_acceptor, make_tls_connector};
 use crate::network::PeerDiscovery;
 use lru::LruCache;
+use rustls::pki_types::ServerName;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,6 +15,7 @@ use std::sync::Mutex;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, RwLock};
 use tokio::time::{interval, Duration};
+use tokio_rustls::TlsAcceptor;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -52,34 +55,33 @@ pub struct Network {
     pub peer_manager: Arc<PeerManager>,
     message_tx: mpsc::Sender<(SocketAddr, P2PMessage)>,
     message_rx: Arc<RwLock<mpsc::Receiver<(SocketAddr, P2PMessage)>>>,
-    // BETA FIX: Deduplication caches — prevent broadcast storms.
-    // A node only re-propagates a block/tx the FIRST time it sees it.
-    // LRU(1024) keeps ~10+ minutes of blocks at 30s block time.
     seen_blocks: Arc<Mutex<LruCache<String, ()>>>,
     seen_txs: Arc<Mutex<LruCache<String, ()>>>,
     seen_bft: Arc<Mutex<LruCache<String, std::time::Instant>>>,
     discovery: Arc<PeerDiscovery>,
-    /// SYNC FIX: Track whether a sync operation is currently in progress.
-    /// When true, broadcast blocks that are "too far ahead" will NOT
-    /// trigger additional GetBlocks requests (prevents request storms).
     syncing: Arc<AtomicBool>,
-    /// SYNC FIX: Mutex-protected sync block buffer. Sync response blocks
-    /// are collected here and applied sequentially, not concurrently.
     sync_buffer: Arc<tokio::sync::Mutex<Vec<Block>>>,
-    /// Header sync buffer
     header_buffer: Arc<tokio::sync::Mutex<Vec<crate::network::protocol::BlockHeader>>>,
-    /// REORG FIX: The exact [start, end] block index range currently being
-    /// downloaded by the sync loop. Set just before GetBlocks is sent;
     sync_request_range: Arc<tokio::sync::Mutex<Option<(u64, u64)>>>,
-    /// Channel to forward received AlephBFT messages to consensus
     aleph_bft_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::mpsc::Sender<Vec<u8>>>>>,
+    // PQC TRANSPORT v3.1.0-alpha (2026-08-20): TLS acceptor for inbound connections.
+    // Generated at startup from an ephemeral self-signed cert. Peers verify identity
+    // via Falcon-512 handshake above the TLS layer.
+    tls_acceptor: TlsAcceptor,
 }
 
 impl Network {
     /// Create a new network instance
     pub fn new(config: NetworkConfig, blockchain: Arc<RwLock<Blockchain>>) -> Self {
+        // PQC TRANSPORT v3.1.0-alpha (2026-08-20): Generate ephemeral TLS certificate.
+        // This certificate identifies the node at the TLS layer.
+        // Application-layer identity is still verified by Falcon-512 handshake.
+        let cert = generate_node_cert()
+            .expect("Failed to generate P2P TLS certificate");
+        let tls_acceptor = make_tls_acceptor(&cert)
+            .expect("Failed to create TLS acceptor");
+
         // CRIT-3 FIX: Bounded channel(1_000) prevents OOM via message flood.
-        // 10_000 * 8MB max message size was causing 80GB OOMs.
         let (message_tx, message_rx) = mpsc::channel(1_000);
         let discovery = Arc::new(PeerDiscovery::with_dns_seeds(
             config.bootstrap_nodes.clone(),
@@ -91,9 +93,7 @@ impl Network {
             peer_manager: Arc::new(PeerManager::new(125, config.node_id.clone())),
             message_tx,
             message_rx: Arc::new(RwLock::new(message_rx)),
-            // 1024 entries ≈ 30+ minutes of blocks at 30s block time
             seen_blocks: Arc::new(Mutex::new(LruCache::new(NonZeroUsize::new(1024).unwrap()))),
-            // 10k tx entries ≈ handles a full mempool cycle without re-flooding
             seen_txs: Arc::new(Mutex::new(LruCache::new(
                 NonZeroUsize::new(10_000).unwrap(),
             ))),
@@ -106,6 +106,7 @@ impl Network {
             header_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             sync_request_range: Arc::new(tokio::sync::Mutex::new(None)),
             aleph_bft_tx: Arc::new(tokio::sync::RwLock::new(None)),
+            tls_acceptor,
         }
     }
 
@@ -232,29 +233,27 @@ impl Network {
         Ok(())
     }
 
-    /// Listen for incoming peer connections
+    /// Listen for incoming peer connections (PQC TLS)
     async fn listen_for_connections(&self) -> Result<(), String> {
         let listener = TcpListener::bind(self.config.listen_addr)
             .await
             .map_err(|e| format!("Failed to bind listener: {}", e))?;
 
-        info!("Listening for connections on {}", self.config.listen_addr);
+        info!("Listening for TLS connections on {}", self.config.listen_addr);
+
+        let tls_acceptor = self.tls_acceptor.clone();
 
         loop {
             match listener.accept().await {
-                Ok((stream, addr)) => {
-                    // H-4: Reject inbound connections that would exceed the configured peer limit.
-                    // Without this check a botnet can exhaust connection slots before
-                    // PeerManager.add_peer() is even called.
+                Ok((tcp_stream, addr)) => {
                     let current_count = self.peer_manager.peer_count().await;
                     if current_count >= self.config.max_peers {
-                        // Drop stream immediately — TCP RST is sent on drop.
                         tracing::debug!(
                             "Inbound connection from {} rejected: peer limit {} reached",
                             addr,
                             self.config.max_peers
                         );
-                        drop(stream);
+                        drop(tcp_stream);
                         continue;
                     }
 
@@ -265,9 +264,20 @@ impl Network {
                     let blockchain = Arc::clone(&self.blockchain);
                     let discovery = Arc::clone(&self.discovery);
                     let node_id = self.config.node_id.clone();
-                    let assumed_port = self.config.listen_addr.port();
+                    let our_listen_port = self.config.listen_addr.port();
+                    // PQC TRANSPORT v3.1.0-alpha (2026-08-20): Accept as TLS session.
+                    // X25519MLKEM768 key exchange negotiated here (if peer supports it).
+                    let tls_acceptor = tls_acceptor.clone();
 
                     tokio::spawn(async move {
+                        // Perform TLS handshake before anything else
+                        let stream = match tls_acceptor.accept(tcp_stream).await {
+                            Ok(s) => s,
+                            Err(e) => {
+                                tracing::debug!("TLS handshake failed from {}: {}", addr, e);
+                                return;
+                            }
+                        };
                         match Peer::new(stream, addr).await {
                             Ok(peer) => {
                                 let peer = Arc::new(peer);
@@ -279,7 +289,7 @@ impl Network {
 
                                 if tokio::time::timeout(
                                     std::time::Duration::from_secs(10),
-                                    peer.handshake(PROTOCOL_VERSION, height, cumulative_work, node_id)
+                                    peer.handshake(PROTOCOL_VERSION, height, cumulative_work, node_id, our_listen_port)
                                 )
                                 .await
                                 .unwrap_or(Err("Handshake timed out".to_string()))
@@ -288,11 +298,14 @@ impl Network {
                                     info!("Successful handshake with {}", addr);
                                     match peer_manager.add_peer(Arc::clone(&peer)).await {
                                         Ok(_) => {
-                                            // Re-enable inbound discovery so the network doesn't form disconnected star topologies.
-                                            // We guess the peer's listener port based on our own network port to avoid gossiping ephemeral NAT ports.
-                                            let mut peer_addr = addr;
-                                            peer_addr.set_port(assumed_port);
-                                            discovery.add_peer(peer_addr).await;
+                                            // ADDRMAN FIX v3.1.0-alpha (2026-08-20): Now that we have the peer's
+                                            // self-reported listen_port, add them to discovery as UNVERIFIED.
+                                            // This is safe because: (a) the address uses their listen_port, not their
+                                            // ephemeral source port; (b) they go into the "new" table and will only be
+                                            // promoted to "tried" (and thus gossiped) once we connect outbound to them.
+                                            if let Some(reported_addr) = peer.reported_listen_addr().await {
+                                                discovery.add_peer(reported_addr).await;
+                                            }
 
                                             // Request known peers from this new connection to discover the rest of the network
                                             let _ = peer.send_message(P2PMessage::GetAddr).await;
@@ -377,15 +390,35 @@ impl Network {
         });
     }
 
-    /// Connect to a peer
+    /// Connect to a peer (PQC TLS)
     pub async fn connect_to_peer(&self, addr: SocketAddr) -> Result<(), String> {
-        info!("Connecting to peer {}", addr);
+        info!("Connecting to peer {} (PQC TLS)", addr);
 
-        let connect_future = TcpStream::connect(addr);
-        let stream = tokio::time::timeout(std::time::Duration::from_secs(5), connect_future)
-            .await
-            .map_err(|_| "Connection timed out".to_string())?
-            .map_err(|e| format!("Failed to connect: {}", e))?;
+        // Step 1: Plain TCP connect
+        let tcp_stream = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            TcpStream::connect(addr)
+        )
+        .await
+        .map_err(|_| "Connection timed out".to_string())?
+        .map_err(|e| format!("Failed to connect: {}", e))?;
+
+        // Step 2: PQC TLS handshake (X25519MLKEM768)
+        // PQC TRANSPORT v3.1.0-alpha (2026-08-20): Wrap the TCP stream with TLS.
+        // Using "quanta.node" as the SNI — our custom NoCertificateVerification
+        // accepts any self-signed cert, so the SNI value is irrelevant.
+        // Real identity verification happens via Falcon-512 in the Version handshake below.
+        let tls_connector = make_tls_connector()
+            .map_err(|e| format!("TLS connector error: {}", e))?;
+        let server_name = ServerName::try_from("quanta.node")
+            .map_err(|e| format!("Invalid server name: {}", e))?;
+        let stream = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            tls_connector.connect(server_name, tcp_stream)
+        )
+        .await
+        .map_err(|_| "TLS handshake timed out".to_string())?
+        .map_err(|e| format!("TLS handshake failed: {}", e))?;
 
         let peer = Arc::new(Peer::new(stream, addr).await?);
         peer.set_outbound().await;
@@ -403,6 +436,9 @@ impl Network {
                 height,
                 cumulative_work,
                 self.config.node_id.clone(),
+                // ADDRMAN FIX v3.1.0-alpha: Self-report our listen port so the remote peer
+                // can add our correct connectable address to their discovery table.
+                self.config.listen_addr.port(),
             )
         )
         .await
@@ -540,7 +576,10 @@ impl Network {
                 // Keep-alive response
             }
             P2PMessage::GetAddr => {
-                let addrs = self.discovery.get_random_peers(50).await;
+                // ADDRMAN FIX v3.1.0-alpha (2026-08-20): Only gossip VERIFIED ("tried") peers.
+                // Bitcoin rule: never gossip an IP you haven't personally connected to outbound.
+                // This prevents dead NAT/Cloudflare IPs from propagating through the network.
+                let addrs = self.discovery.get_verified_peers(50).await;
                 if let Some(p) = peer {
                     let _ = p.send_message(P2PMessage::Addr(addrs)).await;
                 }
@@ -1697,7 +1736,7 @@ impl Network {
                 // SECURITY FIX: Subnet bucketing strategy for outgoing connections
                 let mut target_peers = self.discovery.get_random_peers(needed).await;
 
-                if target_peers.is_empty() && peer_count == 0 && !self.config.bootstrap_nodes.is_empty() {
+                if peer_count == 0 && !self.config.bootstrap_nodes.is_empty() {
                     target_peers.extend(self.config.bootstrap_nodes.iter().copied());
                 }
 

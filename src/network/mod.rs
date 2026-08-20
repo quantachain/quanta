@@ -3,6 +3,9 @@ pub mod discovery;
 pub mod network;
 pub mod peer;
 pub mod protocol;
+// PQC TRANSPORT v3.1.0-alpha (2026-08-20): TLS module wraps all P2P connections
+// with TLS 1.3 + X25519MLKEM768 hybrid post-quantum key exchange.
+pub mod tls;
 
 pub use discovery::PeerDiscovery;
 pub use network::{Network, NetworkConfig};

@@ -12,8 +12,13 @@ pub struct PeerMeta {
     pub last_seen: i64,
     pub failures: u32,
     pub source: PeerSource,
-    pub reputation: i32, // Reputation score: starts at 0, increases on good behavior, decreases on bad
-    pub banned_until: Option<i64>, // Unix timestamp when ban expires (None if not banned)
+    pub reputation: i32,
+    pub banned_until: Option<i64>,
+    /// ADDRMAN FIX v3.1.0-alpha (2026-08-20): Bitcoin-style "new" vs "tried" table.
+    /// false = "new table": discovered via gossip or inbound connect; not yet confirmed connectable.
+    /// true  = "tried table": we personally connected OUTBOUND to this IP and it succeeded.
+    /// ONLY verified peers are returned in GetAddr responses (gossip-safe).
+    pub verified: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -94,13 +99,13 @@ impl PeerDiscovery {
         &self.seed_nodes
     }
 
-    /// Add a known peer with metadata
+    /// Add a known peer with metadata (added as UNVERIFIED / "new table")
     pub async fn add_peer(&self, addr: SocketAddr) {
         self.add_peer_with_source(addr, PeerSource::Discovered)
             .await;
     }
 
-    /// Add a peer with specific source
+    /// Add a peer with specific source (added as UNVERIFIED / "new table")
     pub async fn add_peer_with_source(&self, addr: SocketAddr, source: PeerSource) {
         let mut peers = self.known_peers.write().await;
         peers.entry(addr).or_insert_with(|| {
@@ -110,19 +115,25 @@ impl PeerDiscovery {
                 last_seen: chrono::Utc::now().timestamp(),
                 failures: 0,
                 source,
-                reputation: 0, // Start with neutral reputation
+                reputation: 0,
                 banned_until: None,
+                verified: false, // ADDRMAN: starts as "new table" (unverified)
             }
         });
     }
 
-    /// Update peer last seen time and improve reputation
+    /// Update peer last seen time and promote to "tried" table (verified).
+    /// Called ONLY after a successful OUTBOUND connection — this is the AddrMan promotion.
     pub async fn update_peer_seen(&self, addr: SocketAddr) {
         let mut peers = self.known_peers.write().await;
         if let Some(meta) = peers.get_mut(&addr) {
             meta.last_seen = chrono::Utc::now().timestamp();
-            meta.failures = 0; // Reset failures on successful contact
-            meta.reputation = (meta.reputation + 1).min(100); // Increase reputation (cap at 100)
+            meta.failures = 0;
+            meta.reputation = (meta.reputation + 1).min(100);
+            // ADDRMAN FIX v3.1.0-alpha (2026-08-20): Promote to "tried" table on successful outbound connection.
+            // This mirrors Bitcoin's feeler connection model: only IPs we've personally
+            // connected to outbound are considered "verified" and safe to gossip.
+            meta.verified = true;
         }
     }
 
@@ -193,52 +204,70 @@ impl PeerDiscovery {
         warn!("Removed peer: {}", addr);
     }
 
-    /// Get random peers for connection (prioritizes healthy peers)
+    /// Get seeds + healthy UNVERIFIED peers for connection attempts (feeler/new-table candidates).
+    /// These are NOT gossiped to the network — only verified peers are.
     pub async fn get_random_peers(&self, count: usize) -> Vec<SocketAddr> {
         use rand::seq::SliceRandom;
 
         let peers = self.known_peers.read().await;
         let now = chrono::Utc::now().timestamp();
 
-        // Filter healthy peers (seen recently, low failures, not banned, good reputation)
-        let mut healthy: Vec<SocketAddr> = peers
+        // Include all known peers (verified or not) as candidates to connect to.
+        // If they are NAT/dead, the outbound connect will fail → mark_peer_failed → eventually removed.
+        // If they succeed → update_peer_seen → promoted to verified.
+        let mut candidates: Vec<SocketAddr> = peers
             .values()
             .filter(|meta| {
-                // Not currently banned
                 let not_banned = meta.banned_until.is_none_or(|ban_until| now > ban_until);
-                // Good reputation and recent activity
-                let healthy =
-                    meta.failures < 3 && meta.reputation > -10 && (now - meta.last_seen) < 3600; // Active in last hour
-
-                not_banned && healthy
+                let not_dead = meta.failures < 5 && meta.reputation > -20;
+                not_banned && not_dead
             })
             .map(|meta| meta.address)
             .collect();
 
-        // Add seeds if we don't have enough healthy peers
-        if healthy.len() < count {
+        // Always include seeds as fallback
+        if candidates.len() < count {
             for seed in &self.seed_nodes {
-                if !healthy.contains(seed) {
-                    healthy.push(*seed);
+                if !candidates.contains(seed) {
+                    candidates.push(*seed);
                 }
             }
         }
 
         let mut rng = rand::thread_rng();
-        healthy.shuffle(&mut rng);
+        candidates.shuffle(&mut rng);
+        candidates.into_iter().take(count).collect()
+    }
 
-        // Deduplicate before returning
-        let mut unique = Vec::new();
-        for addr in healthy {
-            if !unique.contains(&addr) {
-                unique.push(addr);
-                if unique.len() == count {
-                    break;
-                }
+    /// ADDRMAN FIX v3.1.0-alpha (2026-08-20): Get only VERIFIED ("tried") peers for GetAddr gossip.
+    /// These are IPs we have personally connected to outbound at least once.
+    /// This is the Bitcoin rule: never gossip unverified IPs.
+    pub async fn get_verified_peers(&self, count: usize) -> Vec<SocketAddr> {
+        use rand::seq::SliceRandom;
+
+        let peers = self.known_peers.read().await;
+        let now = chrono::Utc::now().timestamp();
+
+        let mut verified: Vec<SocketAddr> = peers
+            .values()
+            .filter(|meta| {
+                let not_banned = meta.banned_until.is_none_or(|ban_until| now > ban_until);
+                // Only return peers we've personally verified via outbound connection
+                meta.verified && not_banned && meta.failures < 3
+            })
+            .map(|meta| meta.address)
+            .collect();
+
+        // Always include seeds in addr gossip — they are known-good by definition
+        for seed in &self.seed_nodes {
+            if !verified.contains(seed) {
+                verified.push(*seed);
             }
         }
 
-        unique
+        let mut rng = rand::thread_rng();
+        verified.shuffle(&mut rng);
+        verified.into_iter().take(count).collect()
     }
 
     /// Check if peer is currently banned
@@ -264,8 +293,9 @@ impl PeerDiscovery {
                 last_seen: chrono::Utc::now().timestamp(),
                 failures: 0,
                 source: PeerSource::Seed,
-                reputation: 50, // Seeds start with good reputation
+                reputation: 50,
                 banned_until: None,
+                verified: true, // ADDRMAN: seeds are pre-verified — always safe to gossip
             });
         }
 
@@ -302,8 +332,9 @@ impl PeerDiscovery {
                 last_seen: now,
                 failures: 0,
                 source: PeerSource::Discovered,
-                reputation: 0, // New discovered peers start neutral
+                reputation: 0,
                 banned_until: None,
+                verified: false, // ADDRMAN: received via gossip = unverified ("new" table)
             });
         }
     }

@@ -1,8 +1,8 @@
 # ============================================================
 # Dockerfile — QUANTA Blockchain Node
 # ============================================================
-# V3 Release for testnet testing (v3.0.13-alpha)
-# Image : xd637/quanta-node:v3.0.13-alpha
+# V3.0.15 Release for testnet testing (v3.1.0-alpha) — AddrMan + PQC TLS transport
+# Image : xd637/quanta-node:v3.1.0-alpha
 # Repo  : https://hub.docker.com/r/xd637/quanta-node
 #
 # Quick start (single node):
@@ -18,19 +18,22 @@
 FROM rust:latest AS builder
 
 # Version metadata
-LABEL version="3.0.12-alpha"
-LABEL org.quanta.network.protocol="47"
+LABEL version="3.1.0-alpha"
+LABEL org.quanta.network.protocol="51"
 LABEL org.opencontainers.image.title="Quanta Node" \
-      org.opencontainers.image.description="QuantaChain V3 node — post-quantum BFT, Falcon-512 signatures, zero-mining. v3.0.12-alpha." \
-      org.opencontainers.image.version="v3.0.12-alpha" \
+      org.opencontainers.image.description="QuantaChain V3 node — PQC BFT, Falcon-512, X25519MLKEM768 TLS transport, AddrMan. v3.1.0-alpha." \
+      org.opencontainers.image.version="v3.1.0-alpha" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="Apache-2.0"
 
 # Install build dependencies
+# cmake: required by aws-lc-rs (AWS LibCrypto) for ML-KEM / X25519MLKEM768 PQC key exchange
+# Added v3.1.0-alpha (2026-08-20) for PQC TLS transport
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    cmake \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

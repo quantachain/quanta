@@ -1,5 +1,15 @@
 # Changelog
 
+## [v3.1.0-alpha] - 2026-08-20
+### Security
+- **PQC Transport Encryption (Phase 1):** Every P2P connection is now wrapped in TLS 1.3 using the `X25519MLKEM768` hybrid post-quantum key exchange (RFC 10024). This protects against "harvest now, decrypt later" quantum attacks on the wire. Real identity verification still occurs via Falcon-512 handshake above the TLS layer. Upgraded to `rustls 0.23` with the `aws-lc-rs` backend.
+
+### Fixed
+- **AddrMan: NAT/Cloudflare IP Gossip (Root Cause of Network Halt):** The bootstrap node was adding inbound connections' source IPs to the discovery table and gossiping them to all validators. Since 99% of connecting nodes are behind NAT or Cloudflare, this infected every validator's peer table with dead IPs. Validators then looped trying to connect to dead Cloudflare IPs and ignored the real bootstrap node.
+- **AddrMan: New/Tried Table Separation:** Implemented Bitcoin's proven AddrMan architecture. Inbound peers go into an unverified "new" table. A peer is only promoted to verified ("tried") after a successful **outbound** connection. `GetAddr` gossip now only shares verified peers, preventing any NAT/Cloudflare IP from ever propagating through the network.
+- **AddrMan: Bootstrap Fallback:** Nodes at 0 peers now always retry bootstrap nodes regardless of discovery table size.
+- **Protocol Bump (v51 / QT51):** Network isolated from older nodes to force upgrade for TLS and AddrMan changes.
+
 ## [v3.0.14-alpha] - 2026-08-19
 ### Fixed
 - **TCP Deadlocks ("Stream corrupted or dead")**: Fixed a network-layer deadlock where synchronous TCP writes (`send_to_peer`) blocked the main peer event loop. If a remote peer was slow to receive, it starved the local node from reading, causing the remote peer's sends to also timeout, resulting in a cascade of 10-second `write_all` timeouts across the network. All peer message dispatch is now fully asynchronous (`enqueue_message`).
