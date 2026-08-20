@@ -274,6 +274,11 @@ pub async fn run_bft_proposer(
         if current_height >= 162763 {
             session_id += 1;
         }
+        // HARD FORK FIX 3: Network stalled at 163174 because a validator crashed and lost its
+        // DAG backup (or the 10MB auto-wipe triggered). We force a rotation to recover.
+        if current_height >= 163174 {
+            session_id += 1;
+        }
 
         // 1. Setup Keychain
         let keychain = QuantaKeychain::new(
@@ -517,6 +522,9 @@ pub async fn run_bft_proposer(
             new_session_id += 1;
         }
         if new_height >= 162763 {
+            new_session_id += 1;
+        }
+        if new_height >= 163174 {
             new_session_id += 1;
         }
 

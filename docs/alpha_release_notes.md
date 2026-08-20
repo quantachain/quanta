@@ -1,7 +1,11 @@
 # Quanta Node Alpha Release Notes
 
-## Current Version: **v3.1.2-alpha** (Protocol: **53**)
+## Current Version: **v3.1.3-alpha** (Protocol: **54**)
 *Release Date: 2026-08-20*
+
+### Important Changes in v3.1.3-alpha
+1. **Network Stall Fix**: Fixed a critical network stall at block 163,174 where nodes lost their DAG backups (due to the 10MB auto-wipe) leading to "Backup state behind unit collection state" errors that stalled BFT consensus. We forced a session rotation to recover the network.
+2. **Protocol Bump (QT54)**: Protocol bumped to `54` to isolate the fixed network.
 
 ### Important Changes in v3.1.2-alpha
 1. **Network Halt & AddrMan Cascade Ban Fixed**: Fixed a critical network regression from v3.1.0 where validators would accidentally ban each other. When an inbound validator connected through Cloudflare, the node would attempt to dial back to its ephemeral port, fail, and rapidly decrease the Cloudflare IP's reputation until it was banned. This caused the network to shatter and consensus to halt.

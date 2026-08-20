@@ -1,5 +1,10 @@
 # QuantaChain CHANGELOG
 
+## [v3.1.3-alpha] - 2026-08-20
+### Fixed
+- **Network Stall (Height 163174) Hard Fork**: Several nodes experienced "Backup state behind unit collection state" errors after their oversized AlephBFT backup files were aggressively wiped. This stalled consensus because restarting nodes could not rejoin the current session. A hard fork session rotation at height `163174` has been added to instantly force a clean DAG start across the network.
+- **Protocol Bump (v54 / QT54)**: Protocol bumped to `54` to isolate the fixed network.
+
 ## [v3.1.2-alpha] - 2026-08-20
 ### Fixed
 - **Memory/CPU Leak in Block Sync**: Fixed a massive CPU and memory spike (OOM vector) where sending 2000 blocks to a syncing peer spawned 2000 concurrent unbounded Tokio tasks, queuing gigabytes of block data into the `spawn_blocking` Zstd compression thread pool simultaneously. Block serving now uses `send_to_peer_sync` to stream blocks sequentially, reducing peak memory usage from ~2GB to ~10MB and CPU usage from 300% to near zero.
