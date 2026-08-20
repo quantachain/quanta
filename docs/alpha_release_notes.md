@@ -48,7 +48,7 @@ docker stop quanta-node
 rm -rf /root/quanta_data/blocks /root/quanta_data/db
 
 # 3. Pull the new version
-docker pull xd637/quanta-node:v3.0.12-alpha
+docker pull xd637/quanta-node:latest
 
 # 4. Restart the node
 docker run -d \
@@ -59,7 +59,7 @@ docker run -d \
   --network host \
   -v "/root/quanta_data:/home/quanta/quanta_data" \
   -e QUANTA_WALLET_PASSWORD="your-wallet-password" \
-  xd637/quanta-node:v3.0.12-alpha \
+  xd637/quanta-node:latest \
   quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap node1.quantachain.org:8333 --port 3002 --rpc-port 7783
 ```
 
