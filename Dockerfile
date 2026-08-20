@@ -15,7 +15,7 @@
 #   9090 — Prometheus metrics
 # ============================================================
 
-FROM rust:latest AS builder
+FROM rust:bookworm AS builder
 
 # Version metadata
 LABEL version="3.1.0-alpha"
