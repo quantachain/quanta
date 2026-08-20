@@ -1033,9 +1033,14 @@ impl Network {
             };
             for block in blocks {
                 if let Some(ref p) = peer {
-                    let _ = p.send_message(P2PMessage::Block(block)).await;
+                    if let Err(e) = p.send_message_sync(P2PMessage::Block(block)).await {
+                        tracing::warn!("Peer {} disconnected during block sync: {}", addr, e);
+                        return Err(e); // Stop sending the rest of the 2000 blocks
+                    }
                 } else {
-                    self.send_to_peer(addr, P2PMessage::Block(block)).await?;
+                    if let Err(e) = self.send_to_peer_sync(addr, P2PMessage::Block(block)).await {
+                        return Err(e);
+                    }
                 }
             }
             cursor = sub_end + 1;
@@ -1200,6 +1205,19 @@ impl Network {
         for peer in peers {
             if peer.address().await == addr {
                 return peer.send_message(msg).await;
+            }
+        }
+
+        Err("Peer not found".to_string())
+    }
+
+    /// Send message to specific peer synchronously (blocks until serialized and sent to prevent memory exhaustion on large batches)
+    async fn send_to_peer_sync(&self, addr: SocketAddr, msg: P2PMessage) -> Result<(), String> {
+        let peers = self.peer_manager.get_peers().await;
+
+        for peer in peers {
+            if peer.address().await == addr {
+                return peer.send_message_sync(msg).await;
             }
         }
 

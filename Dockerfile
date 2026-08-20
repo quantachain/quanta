@@ -1,8 +1,8 @@
 # ============================================================
 # Dockerfile — QUANTA Blockchain Node
 # ============================================================
-# V3.1.1-alpha Release for testnet testing — Hotfix for inbound connection OOM DOS
-# Image : xd637/quanta-node:v3.1.1-alpha
+# V3.1.2-alpha Release for testnet testing — Hotfix for Memory Leak and Outbound Dial Bans
+# Image : xd637/quanta-node:v3.1.2-alpha
 # Repo  : https://hub.docker.com/r/xd637/quanta-node
 #
 # Quick start (single node):
@@ -18,11 +18,11 @@
 FROM rust:bookworm AS builder
 
 # Version metadata
-LABEL version="3.1.1-alpha"
-LABEL org.quanta.network.protocol="52"
+LABEL version="3.1.2-alpha"
+LABEL org.quanta.network.protocol="53"
 LABEL org.opencontainers.image.title="Quanta Node" \
-      org.opencontainers.image.description="QuantaChain V3 node — PQC BFT, Falcon-512, X25519MLKEM768 TLS transport, AddrMan. v3.1.1-alpha." \
-      org.opencontainers.image.version="v3.1.1-alpha" \
+      org.opencontainers.image.description="QuantaChain V3 node — PQC BFT, Falcon-512, X25519MLKEM768 TLS transport, AddrMan. v3.1.2-alpha." \
+      org.opencontainers.image.version="v3.1.2-alpha" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="Apache-2.0"

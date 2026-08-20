@@ -135,13 +135,13 @@ impl From<&Block> for BlockHeader {
 // CHANGED 2026-07-22 v2.5.0-alpha: Bumped from 32 -> 33 for State-Healing Hard Fork.
 // CHANGED 2026-07-29 v2.5.1-alpha: Bumped from 33 -> 34 to isolate nodes with the
 // create_block_template state root fix from v2.5.0 proposers that embed a wrong root.
-pub const PROTOCOL_VERSION: u32 = 52; // v3.1.0-alpha — AddrMan + PQC TLS transport (X25519MLKEM768)
+pub const PROTOCOL_VERSION: u32 = 53; // v3.1.2-alpha — Fix AddrMan cascade ban & Memory Leak
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"QT52"; // Quanta V3 — PQC TLS transport
+pub const TESTNET_MAGIC: [u8; 4] = *b"QT53"; // Quanta V3 — PQC TLS transport
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;

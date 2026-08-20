@@ -137,53 +137,43 @@ impl PeerDiscovery {
         }
     }
 
-    /// Mark peer as failed (decreases reputation, may result in ban)
+    /// Mark peer as failed (network/dial failure)
     pub async fn mark_peer_failed(&self, addr: SocketAddr) {
         let mut peers = self.known_peers.write().await;
         if let Some(meta) = peers.get_mut(&addr) {
             meta.failures += 1;
-            meta.reputation -= 5; // Decrease reputation on failure
+            
+            // SECURITY HOTFIX (v3.1.2-alpha): Connection failures (timeouts, NAT blocks, Cloudflare resets)
+            // MUST NOT decrease reputation or cause bans. If we ban Cloudflare IPs for dial failures,
+            // we accidentally ban all inbound connections routed through that edge node.
+            // Reputation is strictly reserved for malicious protocol behavior (invalid signatures, etc).
 
             let failures = meta.failures;
-            let reputation = meta.reputation;
             let is_seed = meta.source == PeerSource::Seed;
 
-            // Ban logic: 4 strikes with low reputation
-            if (failures >= 4 && reputation <= -20) || failures > 10 {
-                if !is_seed {
-                    // FIX: Reduce ban to 60 seconds (down from 24 hours) to prevent
-                    // FIX: Use shared ban duration from PeerManager
-                    let ban_duration = crate::network::peer::BAN_DURATION.as_secs(); // 3600 seconds
-                    let ban_until = chrono::Utc::now().timestamp() + ban_duration as i64;
-                    meta.banned_until = Some(ban_until);
-                    tracing::warn!(
-                        "Peer {} BANNED for {} seconds (reputation: {}, failures: {})",
-                        addr,
-                        ban_duration,
-                        meta.reputation,
-                        meta.failures
-                    );
-                } else {
-                    warn!(
-                        "Seed node {} has {} failures (not banning seed)",
-                        addr, failures
-                    );
-                }
-            } else {
-                warn!(
-                    "Peer {} failed (reputation: {}, failures: {})",
-                    addr, reputation, failures
-                );
-            }
+            tracing::debug!(
+                "Peer {} dial/network failed (failures: {})",
+                addr, failures
+            );
 
-            // Remove if reputation too low and not a seed
-            if reputation < -50 && !is_seed {
-                peers.remove(&addr);
-                warn!(
-                    "Removed peer {} after reputation dropped to {}",
-                    addr, reputation
-                );
+            // If a peer is completely unreachable after many attempts, just remove it from known_peers
+            // so we stop trying to dial it. We DO NOT set banned_until.
+            if failures > 10 && !is_seed {
+                tracing::debug!("Peer {} unreachable after 10 attempts, removing from discovery", addr);
             }
+        }
+        
+        // Actually perform the removal outside the get_mut scope
+        let should_remove = {
+            if let Some(meta) = peers.get(&addr) {
+                meta.failures > 10 && meta.source != PeerSource::Seed
+            } else {
+                false
+            }
+        };
+        
+        if should_remove {
+            peers.remove(&addr);
         }
     }
 

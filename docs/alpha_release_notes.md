@@ -1,7 +1,11 @@
 # Quanta Node Alpha Release Notes
 
-## Current Version: **v3.1.1-alpha** (Protocol: **52**)
+## Current Version: **v3.1.2-alpha** (Protocol: **53**)
 *Release Date: 2026-08-20*
+
+### Important Changes in v3.1.2-alpha
+1. **Network Halt & AddrMan Cascade Ban Fixed**: Fixed a critical network regression from v3.1.0 where validators would accidentally ban each other. When an inbound validator connected through Cloudflare, the node would attempt to dial back to its ephemeral port, fail, and rapidly decrease the Cloudflare IP's reputation until it was banned. This caused the network to shatter and consensus to halt.
+2. **Block Sync CPU/Memory Spikes**: Fixed a massive memory and CPU leak where syncing peers would trigger the node to spawn 2000 concurrent threads to serialize and transmit blocks. Block streaming is now done synchronously, dramatically reducing CPU and RAM usage.
 
 ### Important Changes in v3.1.1-alpha
 1. **OOM / DOS Protection (Hotfix)**: Fixed a critical vulnerability where aggressive reconnects from Cloudflare proxies or malicious actors could cause thousands of half-open TCP connections, exhausting node memory via concurrent PQC TLS handshakes and causing an OOM crash.

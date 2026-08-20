@@ -1,5 +1,10 @@
 # QuantaChain CHANGELOG
 
+## [v3.1.2-alpha] - 2026-08-20
+### Fixed
+- **Memory/CPU Leak in Block Sync**: Fixed a massive CPU and memory spike (OOM vector) where sending 2000 blocks to a syncing peer spawned 2000 concurrent unbounded Tokio tasks, queuing gigabytes of block data into the `spawn_blocking` Zstd compression thread pool simultaneously. Block serving now uses `send_to_peer_sync` to stream blocks sequentially, reducing peak memory usage from ~2GB to ~10MB and CPU usage from 300% to near zero.
+- **Network Shatter / AddrMan Cascade Ban**: Fixed a critical AddrMan regression introduced in v3.1.0 where `network_loop` would attempt to dial back inbound Cloudflare ephemeral ports, inevitably fail (connection timeout), and decrease the peer's reputation until Cloudflare edge nodes were permanently banned. This caused validators to rapidly ban all Cloudflare IPs and isolate themselves from the network, shattering consensus. Connection timeouts now simply remove the IP from active dial pools without triggering reputation penalties or bans.
+
 ## [v3.1.1-alpha] - 2026-08-20
 ### Fixed
 - **Security Hotfix (DOS Protection)**: Added a hard concurrency limit (semaphore) to inbound TCP connections in `listen_for_connections` to prevent memory exhaustion (OOM) attacks from half-open Cloudflare/proxy connections overwhelming the node.
