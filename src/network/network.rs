@@ -243,7 +243,19 @@ impl Network {
 
         let tls_acceptor = self.tls_acceptor.clone();
 
+        // DOS/OOM Protection (v3.1.0-alpha): Limit the number of concurrent TCP connections
+        // being handshaked. This prevents memory exhaustion from half-open
+        // connections (e.g. Cloudflare proxy spam).
+        let connection_semaphore = Arc::new(tokio::sync::Semaphore::new(self.config.max_peers * 2));
+
         loop {
+            // Wait for a connection permit before accepting. This blocks if we are 
+            // currently processing too many half-open TCP connections.
+            let permit = match Arc::clone(&connection_semaphore).acquire_owned().await {
+                Ok(p) => p,
+                Err(_) => break Ok(()), // Semaphore closed
+            };
+
             match listener.accept().await {
                 Ok((tcp_stream, addr)) => {
                     let current_count = self.peer_manager.peer_count().await;
@@ -254,6 +266,7 @@ impl Network {
                             self.config.max_peers
                         );
                         drop(tcp_stream);
+                        drop(permit); // Release immediately
                         continue;
                     }
 
@@ -270,6 +283,9 @@ impl Network {
                     let tls_acceptor = tls_acceptor.clone();
 
                     tokio::spawn(async move {
+                        // Keep permit alive until this connection task finishes (success or drop)
+                        let _permit = permit;
+
                         // Perform TLS handshake before anything else
                         let stream = match tls_acceptor.accept(tcp_stream).await {
                             Ok(s) => s,

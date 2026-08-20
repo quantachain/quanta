@@ -1,8 +1,8 @@
 # ============================================================
 # Dockerfile — QUANTA Blockchain Node
 # ============================================================
-# V3.0.15 Release for testnet testing (v3.1.0-alpha) — AddrMan + PQC TLS transport
-# Image : xd637/quanta-node:v3.1.0-alpha
+# V3.1.1-alpha Release for testnet testing — Hotfix for inbound connection OOM DOS
+# Image : xd637/quanta-node:v3.1.1-alpha
 # Repo  : https://hub.docker.com/r/xd637/quanta-node
 #
 # Quick start (single node):
@@ -18,11 +18,11 @@
 FROM rust:bookworm AS builder
 
 # Version metadata
-LABEL version="3.1.0-alpha"
-LABEL org.quanta.network.protocol="51"
+LABEL version="3.1.1-alpha"
+LABEL org.quanta.network.protocol="52"
 LABEL org.opencontainers.image.title="Quanta Node" \
-      org.opencontainers.image.description="QuantaChain V3 node — PQC BFT, Falcon-512, X25519MLKEM768 TLS transport, AddrMan. v3.1.0-alpha." \
-      org.opencontainers.image.version="v3.1.0-alpha" \
+      org.opencontainers.image.description="QuantaChain V3 node — PQC BFT, Falcon-512, X25519MLKEM768 TLS transport, AddrMan. v3.1.1-alpha." \
+      org.opencontainers.image.version="v3.1.1-alpha" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="Apache-2.0"

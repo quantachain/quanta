@@ -1,7 +1,13 @@
-# QuantaChain Alpha Testnet Release Notes
+# Quanta Node Alpha Release Notes
 
-## Current Release: v3.1.0-alpha (2026-08-20)
+## Current Version: **v3.1.1-alpha** (Protocol: **52**)
+*Release Date: 2026-08-20*
 
+### Important Changes in v3.1.1-alpha
+1. **OOM / DOS Protection (Hotfix)**: Fixed a critical vulnerability where aggressive reconnects from Cloudflare proxies or malicious actors could cause thousands of half-open TCP connections, exhausting node memory via concurrent PQC TLS handshakes and causing an OOM crash.
+2. **Protocol Bump (QT52)**: Protocol bumped to `52` to isolate the fixed network.
+
+### Important Changes in v3.1.0-alpha
 ### The "PQC Transport & AddrMan" Release
 This release fundamentally secures both the transport layer (PQC) and the peer discovery layer (AddrMan).
 

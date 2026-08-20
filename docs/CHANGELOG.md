@@ -1,4 +1,9 @@
-# Changelog
+# QuantaChain CHANGELOG
+
+## [v3.1.1-alpha] - 2026-08-20
+### Fixed
+- **Security Hotfix (DOS Protection)**: Added a hard concurrency limit (semaphore) to inbound TCP connections in `listen_for_connections` to prevent memory exhaustion (OOM) attacks from half-open Cloudflare/proxy connections overwhelming the node.
+- **Protocol Bump (v52 / QT52)**: To ensure all nodes on the network are protected against the DOS vector.
 
 ## [v3.1.0-alpha] - 2026-08-20
 ### Security
