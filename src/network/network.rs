@@ -314,13 +314,30 @@ impl Network {
                                     info!("Successful handshake with {}", addr);
                                     match peer_manager.add_peer(Arc::clone(&peer)).await {
                                         Ok(_) => {
-                                            // ADDRMAN FIX v3.1.0-alpha (2026-08-20): Now that we have the peer's
-                                            // self-reported listen_port, add them to discovery as UNVERIFIED.
-                                            // This is safe because: (a) the address uses their listen_port, not their
-                                            // ephemeral source port; (b) they go into the "new" table and will only be
-                                            // promoted to "tried" (and thus gossiped) once we connect outbound to them.
+                                            // ADDRMAN FIX v3.1.4-alpha (2026-08-29): Inbound peers that
+                                            // self-report a listen_addr via the Version handshake are now marked
+                                            // verified=true immediately.
+                                            //
+                                            // Why: The old rule (v3.1.0) only marked a peer verified after an
+                                            // OUTBOUND connection. This was designed to prevent NAT/Cloudflare
+                                            // ephemeral IPs from polluting gossip. But it over-corrected:
+                                            // the relay node (node1) only has INBOUND connections from validators,
+                                            // so ALL validators stayed unverified in node1's table forever. When
+                                            // any operator sent GetAddr to node1, node1 returned an empty list —
+                                            // no peer discovery happened, everyone stayed at 1 peer.
+                                            //
+                                            // The fix: a peer that passes TLS + Falcon-512 handshake AND
+                                            // self-reports a connectable listen_port (not ephemeral source port)
+                                            // is trustworthy enough to gossip. This is safe because:
+                                            //   (a) The port we store is the LISTEN port from their Version message,
+                                            //       not the ephemeral source port — it is actually connectable.
+                                            //   (b) They already passed two layers of authentication.
+                                            //   (c) Worst case a bad IP gets gossiped → connect fails → marked_failed
+                                            //       → removed after 10 failures. Not a security issue.
                                             if let Some(reported_addr) = peer.reported_listen_addr().await {
+                                                // Add and immediately promote to verified so GetAddr gossip includes it.
                                                 discovery.add_peer(reported_addr).await;
+                                                discovery.update_peer_seen(reported_addr).await;
                                             }
 
                                             // Request known peers from this new connection to discover the rest of the network

@@ -53,12 +53,14 @@ prune_days = 30
 max_peers = 125
 
 # Bootstrap peer addresses - Initial peers to connect to on startup
-# Currently EMPTY as no bootstrap infrastructure exists yet
-# Add peer addresses here when available: ["ip:port", "ip:port"]
-bootstrap_nodes = []
+# node1.quantachain.org is the official Quanta bootstrap/relay node.
+# Add a comma-separated list of additional known-good validator IPs here
+# to help operators peer directly without routing everything through node1:
+#   bootstrap_nodes = ["node1.quantachain.org:8333", "<validator-ip>:8333", ...]
+bootstrap_nodes = ["node1.quantachain.org:8333"]
 
 # DNS seeds for peer discovery
-# Currently EMPTY as no DNS seed infrastructure exists yet
+# Currently EMPTY — no DNS seed infrastructure deployed yet.
 # Add seed domains here when available: ["seed1.domain", "seed2.domain"]
 dns_seeds = []
 

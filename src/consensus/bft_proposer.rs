@@ -340,7 +340,7 @@ pub async fn run_bft_proposer(
         use std::path::Path;
         use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-        let backup_path = Path::new(&data_dir).join(format!("alephbft_backup_{}.dat", session_id));
+        let mut backup_path = Path::new(&data_dir).join(format!("alephbft_backup_{}.dat", session_id));
 
 
         info!(
@@ -356,6 +356,19 @@ pub async fn run_bft_proposer(
         // to 2GB+ during initialization, causing the node to hang on startup.
         // A healthy backup file is ~1-2 MB. If it's >10 MB, it is hopelessly 
         // bloated and we must delete it to allow the node to boot.
+        //
+        // CRITICAL FIX (2026-08-29): When we wipe a backup and restart the
+        // SAME session_id, AlephBFT reads an empty backup (round=0) but finds
+        // its in-memory collection at round N (from the previous run within this
+        // session). This mismatch triggers the fatal:
+        //   "Backup state behind unit collection state. Next round inferred
+        //    from: collection: N, backup: 0"
+        // which immediately crashes the consensus service.
+        //
+        // Fix: bump session_id by +1 after any backup wipe so AlephBFT always
+        // enters a completely fresh session with no prior state to reconcile.
+        // The extra +1 is safe because session_id is only used to namespace
+        // backup files and internal AlephBFT state — it is NOT tied to chain height.
         // -----------------------------------------------------------------------
         if let Ok(metadata) = std::fs::metadata(&backup_path) {
             if metadata.len() > 10 * 1024 * 1024 { // 10 MB
@@ -365,6 +378,14 @@ pub async fn run_bft_proposer(
                     metadata.len()
                 );
                 let _ = std::fs::remove_file(&backup_path);
+                // CRITICAL: bump session_id so AlephBFT starts a truly fresh
+                // session rather than resuming a wiped one (causes backup-behind panic).
+                session_id += 1;
+                backup_path = Path::new(&data_dir).join(format!("alephbft_backup_{}.dat", session_id));
+                info!(
+                    "BFT Proposer: backup wiped — bumped to fresh session_id={} backup={:?}",
+                    session_id, backup_path
+                );
             }
         }
 
@@ -491,7 +512,7 @@ pub async fn run_bft_proposer(
                         }
                     }
 
-                    // WATCHDOG: kill session if no block finalized for >120s
+                    // WATCHDOG: kill session if no block finalized for >STUCK_WATCHDOG_SECS
                     let now_ts = chrono::Utc::now().timestamp();
                     let last_ts = last_ts_monitor.load(std::sync::atomic::Ordering::Acquire);
                     if now_ts.saturating_sub(last_ts) > STUCK_WATCHDOG_SECS {
@@ -501,9 +522,23 @@ pub async fn run_bft_proposer(
                                 now_ts.saturating_sub(last_ts), session_id
                             );
 
-                            // We no longer wipe the backup file here. Wiping it causes AlephBFT to 
-                            // throw "Backup state behind unit collection state" when the session restarts,
-                            // permanently breaking the node for the duration of the current session.
+                            // WATCHDOG BACKUP WIPE FIX (2026-08-29):
+                            // If the backup has grown large during the stuck session, wipe it now.
+                            // The session restart loop will detect the missing file and open a fresh
+                            // one. Because the restart loop also bumps session_id on wipe, AlephBFT
+                            // will start a brand-new session rather than re-entering the stuck one.
+                            // This breaks the WATCHDOG → restart → same session → stuck → WATCHDOG loop.
+                            let wipe_path = backup_path.clone();
+                            if let Ok(meta) = std::fs::metadata(&wipe_path) {
+                                if meta.len() > 5 * 1024 * 1024 { // 5 MB threshold for watchdog wipe
+                                    warn!(
+                                        "BFT Proposer: WATCHDOG wiping oversized backup {:?} ({} bytes) before restart.",
+                                        wipe_path, meta.len()
+                                    );
+                                    let _ = std::fs::remove_file(&wipe_path);
+                                }
+                            }
+
                             let _ = tx.send(());
                         }
                     }

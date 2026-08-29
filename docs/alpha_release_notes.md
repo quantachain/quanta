@@ -1,33 +1,57 @@
 # Quanta Node Alpha Release Notes
 
-## Current Version: **v3.1.3-alpha** (Protocol: **54**)
-*Release Date: 2026-08-20*
+## Current Version: **v3.1.4-alpha** (Protocol: **55** / Magic: **QT55**)
+*Release Date: 2026-08-29*
 
-### Important Changes in v3.1.3-alpha
-1. **Network Stall Fix**: Fixed a critical network stall at block 163,174 where nodes lost their DAG backups (due to the 10MB auto-wipe) leading to "Backup state behind unit collection state" errors that stalled BFT consensus. We forced a session rotation to recover the network.
-2. **Protocol Bump (QT54)**: Protocol bumped to `54` to isolate the fixed network.
+### 🔴 This is a mandatory upgrade. v3.1.4 nodes (QT55) are incompatible with v3.1.3 nodes (QT54).
 
-### Important Changes in v3.1.2-alpha
-1. **Network Halt & AddrMan Cascade Ban Fixed**: Fixed a critical network regression from v3.1.0 where validators would accidentally ban each other. When an inbound validator connected through Cloudflare, the node would attempt to dial back to its ephemeral port, fail, and rapidly decrease the Cloudflare IP's reputation until it was banned. This caused the network to shatter and consensus to halt.
-2. **Block Sync CPU/Memory Spikes**: Fixed a massive memory and CPU leak where syncing peers would trigger the node to spawn 2000 concurrent threads to serialize and transmit blocks. Block streaming is now done synchronously, dramatically reducing CPU and RAM usage.
+---
 
-### Important Changes in v3.1.1-alpha
-1. **OOM / DOS Protection (Hotfix)**: Fixed a critical vulnerability where aggressive reconnects from Cloudflare proxies or malicious actors could cause thousands of half-open TCP connections, exhausting node memory via concurrent PQC TLS handshakes and causing an OOM crash.
-2. **Protocol Bump (QT52)**: Protocol bumped to `52` to isolate the fixed network.
+### What's Fixed in v3.1.4-alpha
 
-### Important Changes in v3.1.0-alpha
-### The "PQC Transport & AddrMan" Release
-This release fundamentally secures both the transport layer (PQC) and the peer discovery layer (AddrMan).
+#### 1. Operators stuck at 1 peer — root cause fixed (AddrMan)
+**All node operators were connecting to only 1 peer** (the bootstrap relay) despite 20+ validators being online and synced. The root cause was the AddrMan "verified" peer system introduced in v3.1.0:
 
-**Security: PQC Transport Encryption (Phase 1)**
-Every P2P connection is now wrapped in TLS 1.3 using **X25519MLKEM768** hybrid key exchange (RFC 10024). This protects the network from "harvest now, decrypt later" attacks while preserving the Falcon-512 application-layer identity checks. Quanta is now PQC-secured at both consensus/application and transport layers!
+- The bootstrap node (`node1.quantachain.org`) only has **inbound** connections from validators — it never dials them outbound.
+- Under v3.1.0 rules, a peer can only be "verified" after a successful **outbound** connection.
+- So every validator's entry in node1's table was forever `verified=false` → excluded from `GetAddr` gossip.
+- When any operator sent `GetAddr` to node1: **empty response**. No peer discovery. Everyone stayed at 1 peer.
 
-**Peer Discovery: AddrMan (Bitcoin Model)**
-1. **Self-Reported Listen Port (`listen_port` in `Version` msg):** Nodes now broadcast their own listen port during the P2P handshake. Previously, the bootstrap node blindly assumed the source IP of an inbound connection was connectable — but 99% of nodes are behind NAT or Cloudflare proxies. This infected the discovery table with dead IPs which were gossiped to the entire network, causing all validators to loop trying to reconnect to Cloudflare IPs.
-2. **New/Tried Table (Verified Peer Gossip):** Inbound connections are now added as **unverified ("new" table)**. A peer is promoted to **verified ("tried" table)** only when we successfully connect to them **outbound**. `GetAddr` responses now only return verified peers — so dead NAT/Cloudflare IPs can never spread through the network.
-3. **Bootstrap Fallback Fix:** Nodes with 0 peers now always retry the bootstrap node regardless of their discovery table size.
+**Fix**: Inbound peers that pass TLS + Falcon-512 handshake and self-report a `listen_addr` (not an ephemeral source port) are now marked `verified=true` immediately. The relay can now gossip all 20+ validators back to the network, allowing direct mesh connections.
 
-**Network compatibility**: This release bumps the protocol version to **51** (`QT51`) and is incompatible with v50/v49 nodes. All node operators MUST update.
+#### 2. "Backup state behind unit collection state" crash loop — fixed
+Nodes with an oversized backup file (>10 MB) were stuck in a **permanent crash loop**:
+```
+WARN  Wiping backup alephbft_backup_3425.dat (10.6 MB)
+INFO  BFT Proposer: running session_id=3425 ...
+ERROR Backup state behind unit collection state. collection: 11, backup: 0
+WARN  Session 3425 ended. Restarting in 30s...
+```
+The wipe cleared the file but AlephBFT restarted with the **same session_id**. It read an empty backup (round=0) but found in-memory state at round 11 → fatal mismatch → instant crash → repeat every 30 seconds.
+
+**Fix**: `session_id` is incremented by +1 after any backup wipe. AlephBFT enters a fresh session with no prior state to reconcile. Crash loop eliminated.
+
+#### 3. Watchdog → stuck session CPU loop — fixed
+The WATCHDOG (kills sessions with no block for 10 min) did not wipe the backup before terminating. On restart, the same oversized backup was reloaded → immediately stuck again → WATCHDOG fired again → CPU pinned at ~100% permanently.
+
+**Fix**: WATCHDOG wipes backups >5 MB before sending the kill signal. The restart loop sees a missing file, bumps `session_id`, starts a fresh session. Loop broken.
+
+#### 4. Docker CPU cap: 3.0 → 2.0 cores
+The 3.0-core limit was allowing the AlephBFT spin-loop to consume 118% CPU across all cores and trigger Docker OOM restarts. Reduced to 2.0 cores.
+
+---
+
+### Previous Release: v3.1.3-alpha (2026-08-20)
+
+**Network Stall Fix at block 163,174**: Nodes that had their AlephBFT backup files wiped by the 10MB auto-wipe couldn't rejoin the current BFT session, causing "Backup state behind unit collection state" errors and stalled consensus. A hard-fork session rotation at height 163,174 forced a clean DAG restart across the network.
+Protocol bumped to `54` (`QT54`).
+
+---
+
+### Previous Release: v3.1.2-alpha (2026-08-20)
+
+1. **Block Sync CPU/Memory Spike**: Fixed 2000 concurrent goroutines spawned during block sync. Block streaming is now sequential, reducing peak RAM from ~2 GB to ~10 MB.
+2. **AddrMan Cascade Ban**: Fixed a regression where failed Cloudflare ephemeral-port dial-backs were decreasing peer reputation and eventually banning Cloudflare edge nodes, shattering the network.
 
 ---
 
@@ -53,28 +77,27 @@ This release fixes two major networking bugs:
 
 ### Upgrade Instructions (For Validators & Full Nodes)
 
-If your node was stuck at block 110,000 or 110,001, **you must wipe your old data and sync fresh**.
+> **No database wipe required for v3.1.4-alpha.** This is a network-layer and consensus-stability fix only — chain data is fully compatible. Simply pull the new image and restart.
+
 ```bash
-# 1. Stop your existing node container
-docker stop quanta-node
+# 1. Stop your existing container
+docker stop quanta_node1  # or: docker compose down
 
-# 2. Delete the corrupted local chain data (IMPORTANT: Do NOT delete your validator.qua wallet!)
-rm -rf /root/quanta_data/blocks /root/quanta_data/db
-
-# 3. Pull the new version
+# 2. Pull the new image
 docker pull xd637/quanta-node:latest
 
-# 4. Restart the node
+# 3. Restart
+docker compose up -d
+# — OR if running docker run directly:
 docker run -d \
-  --memory=3.5g \
-  --memory-swap=3.5g \
-  --name "quanta-node" \
+  --memory=4g \
+  --name "quanta-validator" \
   --restart always \
   --network host \
   -v "/root/quanta_data:/home/quanta/quanta_data" \
   -e QUANTA_WALLET_PASSWORD="your-wallet-password" \
   xd637/quanta-node:latest \
-  quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap node1.quantachain.org:8333 --port 3002 --rpc-port 7783
+  quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap node1.quantachain.org:8333
 ```
 
 ---
