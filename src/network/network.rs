@@ -2,8 +2,11 @@ use crate::consensus::blockchain_actor::BlockchainHandle;
 use crate::core::block::Block;
 use crate::core::transaction::Transaction;
 use crate::network::peer::{Peer, PeerManager};
+use crate::network::swarm_command::SwarmCommand;
 use crate::network::protocol::{P2PMessage, PROTOCOL_VERSION};
-use crate::network::tls::{generate_node_cert, make_tls_acceptor, make_tls_connector};
+use crate::network::tls::{generate_node_cert, make_tls_acceptor, make_tls_connector, make_server_tls_config, make_client_tls_config};
+use libp2p::{PeerId, Multiaddr};
+use futures::StreamExt;
 use crate::network::PeerDiscovery;
 use lru::LruCache;
 use rustls::pki_types::ServerName;
@@ -67,7 +70,7 @@ pub struct Network {
     // PQC TRANSPORT v3.1.0-alpha (2026-08-20): TLS acceptor for inbound connections.
     // Generated at startup from an ephemeral self-signed cert. Peers verify identity
     // via Falcon-512 handshake above the TLS layer.
-    tls_acceptor: TlsAcceptor,
+    pub swarm_tx: Arc<tokio::sync::RwLock<Option<tokio::sync::mpsc::Sender<crate::network::swarm_command::SwarmCommand>>>>,
 }
 
 impl Network {
@@ -76,10 +79,8 @@ impl Network {
         // PQC TRANSPORT v3.1.0-alpha (2026-08-20): Generate ephemeral TLS certificate.
         // This certificate identifies the node at the TLS layer.
         // Application-layer identity is still verified by Falcon-512 handshake.
-        let cert = generate_node_cert()
-            .expect("Failed to generate P2P TLS certificate");
-        let tls_acceptor = make_tls_acceptor(&cert)
-            .expect("Failed to create TLS acceptor");
+        
+        
 
         // CRIT-3 FIX: Bounded channel(1_000) prevents OOM via message flood.
         let (message_tx, message_rx) = mpsc::channel(1_000);
@@ -106,7 +107,7 @@ impl Network {
             header_buffer: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             sync_request_range: Arc::new(tokio::sync::Mutex::new(None)),
             aleph_bft_tx: Arc::new(tokio::sync::RwLock::new(None)),
-            tls_acceptor,
+            swarm_tx: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 
@@ -114,17 +115,103 @@ impl Network {
     pub async fn start(self: Arc<Self>) -> Result<(), String> {
         info!("Starting network node on {}", self.config.listen_addr);
 
-        // Start listening for incoming connections
-        let listen_handle = {
-            let network = Arc::clone(&self);
-            tokio::spawn(async move {
-                if let Err(e) = network.listen_for_connections().await {
-                    error!("Listener error: {}", e);
-                }
-            })
-        };
+        let (swarm_cmd_tx, mut swarm_cmd_rx) = tokio::sync::mpsc::channel(100);
+        *self.swarm_tx.write().await = Some(swarm_cmd_tx);
 
-        // Start message processor
+        let network_clone_for_swarm = Arc::clone(&self);
+        
+        let swarm_handle = tokio::spawn(async move {
+            let cert = generate_node_cert().expect("Failed to generate P2P TLS certificate");
+            let server_config = make_server_tls_config(&cert).expect("Failed to create TLS server config");
+            let client_config = make_client_tls_config().expect("Failed to create TLS client config");
+            
+            let mut swarm = crate::network::swarm::build_swarm(
+                network_clone_for_swarm.config.node_id.clone(),
+                server_config,
+                client_config
+            ).expect("Failed to build swarm");
+            
+            let addr = format!("/ip4/{}/tcp/{}", network_clone_for_swarm.config.listen_addr.ip(), network_clone_for_swarm.config.listen_addr.port());
+            let multiaddr: Multiaddr = addr.parse().unwrap();
+            let _ = swarm.listen_on(multiaddr);
+
+            let topic = libp2p::gossipsub::IdentTopic::new("quanta-blocks");
+            let _ = swarm.behaviour_mut().gossipsub.subscribe(&topic);
+
+            let mut peer_to_addr = std::collections::HashMap::new();
+            let mut addr_to_peer = std::collections::HashMap::new();
+
+            loop {
+                tokio::select! {
+                    event = swarm.select_next_some() => {
+                        match event {
+                            libp2p::swarm::SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+                                let addr = match endpoint {
+                                    libp2p::core::ConnectedPoint::Dialer { address, .. } => address,
+                                    libp2p::core::ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
+                                };
+                                if let Some(libp2p::multiaddr::Protocol::Ip4(ip)) = addr.iter().next() {
+                                    if let Some(libp2p::multiaddr::Protocol::Tcp(port)) = addr.iter().nth(1) {
+                                        let socket_addr = std::net::SocketAddr::new(std::net::IpAddr::V4(ip), port);
+                                        peer_to_addr.insert(peer_id, socket_addr);
+                                        addr_to_peer.insert(socket_addr, peer_id);
+                                    }
+                                }
+                            }
+                            libp2p::swarm::SwarmEvent::ConnectionClosed { peer_id, .. } => {
+                                if let Some(addr) = peer_to_addr.remove(&peer_id) {
+                                    addr_to_peer.remove(&addr);
+                                }
+                            }
+                            libp2p::swarm::SwarmEvent::Behaviour(crate::network::p2p_behaviour::QuantaBehaviourEvent::RequestResponse(
+                                libp2p::request_response::Event::Message { peer, message, .. }
+                            )) => {
+                                match message {
+                                    libp2p::request_response::Message::Request { request, .. } => {
+                                        if let Some(socket_addr) = peer_to_addr.get(&peer) {
+                                            let _ = network_clone_for_swarm.message_tx.send((*socket_addr, request)).await;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            libp2p::swarm::SwarmEvent::Behaviour(crate::network::p2p_behaviour::QuantaBehaviourEvent::Gossipsub(
+                                libp2p::gossipsub::Event::Message { message, .. }
+                            )) => {
+                                if let Ok(parsed) = crate::network::protocol::deserialize_message(&message.data) {
+                                    let dummy_addr = "0.0.0.0:0".parse().unwrap();
+                                    let _ = network_clone_for_swarm.message_tx.send((dummy_addr, parsed)).await;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    Some(cmd) = swarm_cmd_rx.recv() => {
+                        match cmd {
+                            SwarmCommand::Dial(addr) => {
+                                let multiaddr: Multiaddr = format!("/ip4/{}/tcp/{}", addr.ip(), addr.port()).parse().unwrap();
+                                let _ = swarm.dial(multiaddr);
+                            }
+                            SwarmCommand::SendTo(addr, msg) => {
+                                if let Some(peer_id) = addr_to_peer.get(&addr) {
+                                    swarm.behaviour_mut().request_response.send_request(peer_id, msg);
+                                }
+                            }
+                            SwarmCommand::Broadcast(msg) => {
+                                if let Ok(data) = crate::network::protocol::serialize_message(&msg) {
+                                    let topic = libp2p::gossipsub::IdentTopic::new("quanta-blocks");
+                                    let _ = swarm.behaviour_mut().gossipsub.publish(topic, data);
+                                }
+                            }
+                            SwarmCommand::Disconnect(node_id) => {
+                                // Ignore for now
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
         let processor_handle = {
             let network = Arc::clone(&self);
             tokio::spawn(async move {
@@ -132,7 +219,6 @@ impl Network {
             })
         };
 
-        // Start peer maintenance
         let maintenance_handle = {
             let network = Arc::clone(&self);
             tokio::spawn(async move {
@@ -140,15 +226,10 @@ impl Network {
             })
         };
 
-        // BW-FIX-2: Heartbeat now uses the PING_INTERVAL_SECS constant (60s) defined in
-        // protocol.rs, not a hardcoded 10s. The old 10s value was 6× faster than the
-        // protocol spec, generating ~360 Ping/Pong pairs/hour across a 7-node cluster.
         let heartbeat_handle = {
             let network = Arc::clone(&self);
             tokio::spawn(async move {
-                let mut interval = interval(Duration::from_secs(
-                    crate::network::protocol::PING_INTERVAL_SECS,
-                ));
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(crate::network::protocol::PING_INTERVAL_SECS));
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 loop {
                     interval.tick().await;
@@ -157,34 +238,18 @@ impl Network {
             })
         };
 
-        // FIX (2026-06-24): Periodic mempool sync loop.
-        //
-        // Transaction gossip is fire-and-forget — if a validator misses a
-        // NewTx broadcast (e.g. because it was banned, restarted, or
-        // temporarily disconnected), it never receives that transaction.
-        // This loop polls a random peer for its full mempool every 30 seconds,
-        // ensuring all validators eventually converge on the same pending set
-        // and the round-robin distribution of transactions works correctly.
         let mempool_sync_handle = {
             let network = Arc::clone(&self);
             tokio::spawn(async move {
-                // Stagger the first sync so it doesn't overlap with initial connection setup.
-                tokio::time::sleep(Duration::from_secs(15)).await;
-                let mut interval = interval(Duration::from_secs(30));
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
                 interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
                 loop {
                     interval.tick().await;
                     let peers = network.peer_manager.get_peers().await;
-                    if peers.is_empty() {
-                        continue;
-                    }
-                    // Pick a random peer to request mempool from.
+                    if peers.is_empty() { continue; }
                     let idx = (chrono::Utc::now().timestamp() as usize) % peers.len();
                     if let Some(peer) = peers.get(idx) {
-                        tracing::debug!(
-                            "Periodic mempool sync: requesting from {}",
-                            peer.address().await
-                        );
                         let peer = Arc::clone(peer);
                         tokio::spawn(async move {
                             let _ = peer.send_message(P2PMessage::GetMempool).await;
@@ -194,7 +259,6 @@ impl Network {
             })
         };
 
-        // Resolve DNS seeds to get additional bootstrap nodes
         if !self.config.dns_seeds.is_empty() {
             info!("Resolving {} DNS seeds...", self.config.dns_seeds.len());
             let network = Arc::clone(&self);
@@ -202,28 +266,24 @@ impl Network {
                 let addrs = network.discovery.resolve_dns_seeds().await;
                 for addr in addrs {
                     if let Err(e) = network.connect_to_peer(addr).await {
-                        debug!("Failed to connect to DNS peer {}: {}", addr, e);
+                        tracing::debug!("Failed to connect to DNS peer {}: {}", addr, e);
                     }
                 }
             });
         }
 
-        // Connect to bootstrap nodes
         for addr in &self.config.bootstrap_nodes {
             let network = Arc::clone(&self);
             let addr = *addr;
             tokio::spawn(async move {
                 if let Err(e) = network.connect_to_peer(addr).await {
-                    warn!("Failed to connect to bootstrap node {}: {}", addr, e);
+                    tracing::warn!("Failed to connect to bootstrap node {}: {}", addr, e);
                 }
             });
         }
 
-        info!("Network node started successfully");
-
-        // Wait for handles
         let _ = tokio::join!(
-            listen_handle,
+            swarm_handle,
             processor_handle,
             maintenance_handle,
             heartbeat_handle,
@@ -233,279 +293,17 @@ impl Network {
         Ok(())
     }
 
-    /// Listen for incoming peer connections (PQC TLS)
-    async fn listen_for_connections(&self) -> Result<(), String> {
-        let listener = TcpListener::bind(self.config.listen_addr)
-            .await
-            .map_err(|e| format!("Failed to bind listener: {}", e))?;
-
-        info!("Listening for TLS connections on {}", self.config.listen_addr);
-
-        let tls_acceptor = self.tls_acceptor.clone();
-
-        // DOS/OOM Protection (v3.1.0-alpha): Limit the number of concurrent TCP connections
-        // being handshaked. This prevents memory exhaustion from half-open
-        // connections (e.g. Cloudflare proxy spam).
-        let connection_semaphore = Arc::new(tokio::sync::Semaphore::new(self.config.max_peers * 2));
-
-        loop {
-            // Wait for a connection permit before accepting. This blocks if we are 
-            // currently processing too many half-open TCP connections.
-            let permit = match Arc::clone(&connection_semaphore).acquire_owned().await {
-                Ok(p) => p,
-                Err(_) => break Ok(()), // Semaphore closed
-            };
-
-            match listener.accept().await {
-                Ok((tcp_stream, addr)) => {
-                    let current_count = self.peer_manager.peer_count().await;
-                    if current_count >= self.config.max_peers {
-                        tracing::debug!(
-                            "Inbound connection from {} rejected: peer limit {} reached",
-                            addr,
-                            self.config.max_peers
-                        );
-                        drop(tcp_stream);
-                        drop(permit); // Release immediately
-                        continue;
-                    }
-
-                    info!("Incoming connection from {}", addr);
-
-                    let message_tx = self.message_tx.clone();
-                    let peer_manager = Arc::clone(&self.peer_manager);
-                    let blockchain = self.blockchain.clone();
-                    let discovery = Arc::clone(&self.discovery);
-                    let node_id = self.config.node_id.clone();
-                    let our_listen_port = self.config.listen_addr.port();
-                    // PQC TRANSPORT v3.1.0-alpha (2026-08-20): Accept as TLS session.
-                    // X25519MLKEM768 key exchange negotiated here (if peer supports it).
-                    let tls_acceptor = tls_acceptor.clone();
-
-                    tokio::spawn(async move {
-                        // Keep permit alive until this connection task finishes (success or drop)
-                        let _permit = permit;
-
-                        // Perform TLS handshake before anything else
-                        let stream = match tls_acceptor.accept(tcp_stream).await {
-                            Ok(s) => s,
-                            Err(e) => {
-                                tracing::debug!("TLS handshake failed from {}: {}", addr, e);
-                                return;
-                            }
-                        };
-                        match Peer::new(stream, addr).await {
-                            Ok(peer) => {
-                                let peer = Arc::new(peer);
-
-                                let blockchain = blockchain.clone();
-                                let height = blockchain.get_height().await.unwrap();
-                                let cumulative_work = blockchain.cumulative_work_at(height).await.unwrap();
-
-                                if tokio::time::timeout(
-                                    std::time::Duration::from_secs(10),
-                                    peer.handshake(PROTOCOL_VERSION, height, cumulative_work, node_id, our_listen_port)
-                                )
-                                .await
-                                .unwrap_or(Err("Handshake timed out".to_string()))
-                                .is_ok()
-                                {
-                                    info!("Successful handshake with {}", addr);
-                                    match peer_manager.add_peer(Arc::clone(&peer)).await {
-                                        Ok(_) => {
-                                            // ADDRMAN FIX v3.1.4-alpha (2026-08-29): Inbound peers that
-                                            // self-report a listen_addr via the Version handshake are now marked
-                                            // verified=true immediately.
-                                            //
-                                            // Why: The old rule (v3.1.0) only marked a peer verified after an
-                                            // OUTBOUND connection. This was designed to prevent NAT/Cloudflare
-                                            // ephemeral IPs from polluting gossip. But it over-corrected:
-                                            // the relay node (node1) only has INBOUND connections from validators,
-                                            // so ALL validators stayed unverified in node1's table forever. When
-                                            // any operator sent GetAddr to node1, node1 returned an empty list —
-                                            // no peer discovery happened, everyone stayed at 1 peer.
-                                            //
-                                            // The fix: a peer that passes TLS + Falcon-512 handshake AND
-                                            // self-reports a connectable listen_port (not ephemeral source port)
-                                            // is trustworthy enough to gossip. This is safe because:
-                                            //   (a) The port we store is the LISTEN port from their Version message,
-                                            //       not the ephemeral source port — it is actually connectable.
-                                            //   (b) They already passed two layers of authentication.
-                                            //   (c) Worst case a bad IP gets gossiped → connect fails → marked_failed
-                                            //       → removed after 10 failures. Not a security issue.
-                                            if let Some(reported_addr) = peer.reported_listen_addr().await {
-                                                // Add and immediately promote to verified so GetAddr gossip includes it.
-                                                discovery.add_peer(reported_addr).await;
-                                                discovery.update_peer_seen(reported_addr).await;
-                                            }
-
-                                            // Request known peers from this new connection to discover the rest of the network
-                                            let _ = peer.send_message(P2PMessage::GetAddr).await;
-
-                                            Self::start_peer_receive_task(
-                                                peer,
-                                                message_tx,
-                                                peer_manager,
-                                            )
-                                            .await;
-                                        }
-                                        Err(e) => {
-                                            // FLAP-FIX: Send an explicit Disconnect before dropping the stream.
-                                            // Without this, silently dropping the TCP connection looks like a
-                                            // network failure to the remote, which immediately retries —
-                                            // causing the 'Connection reset' flapping loop.
-                                            // A Disconnect message tells the remote that the rejection was
-                                            // intentional so it can back off gracefully.
-                                            debug!(
-                                                "Inbound peer {} rejected ({}); sending Disconnect",
-                                                addr, e
-                                            );
-                                            let _ = peer.send_message(P2PMessage::Disconnect).await;
-                                        }
-                                    }
-                                } else {
-                                    tracing::warn!("Handshake with {} failed (timeout or version mismatch)", addr);
-                                }
-                            }
-                            Err(e) => {
-                                warn!("Failed to create peer for {}: {}", addr, e);
-                            }
-                        }
-                    });
-                }
-                Err(e) => {
-                    error!("Failed to accept connection: {}", e);
-                }
-            }
+    /// Connect to a specific peer
+    pub async fn connect_to_peer(&self, addr: std::net::SocketAddr) -> Result<(), String> {
+        let mut tx_lock = self.swarm_tx.write().await;
+        if let Some(tx) = tx_lock.as_mut() {
+            let _ = tx.send(crate::network::swarm_command::SwarmCommand::Dial(addr)).await;
+            Ok(())
+        } else {
+            Err("Swarm not initialized".to_string())
         }
     }
 
-    /// Start a single receive task for a peer (prevents duplicate loops)
-    async fn start_peer_receive_task(
-        peer: Arc<Peer>,
-        message_tx: mpsc::Sender<(SocketAddr, P2PMessage)>,
-        peer_manager: Arc<PeerManager>,
-    ) {
-        let addr = peer.address().await;
-        tokio::spawn(async move {
-            loop {
-                match peer.receive_message().await {
-                    Ok(msg) => {
-                        // Use a compact label instead of {:?} — the debug format of
-                        // AlephBFTMessage dumps the entire raw byte vector which spams
-                        // operator logs with hundreds of lines of unreadable binary data.
-                        let label = match &msg {
-                            crate::network::protocol::P2PMessage::AlephBFTMessage(d) =>
-                                format!("AlephBFT({} bytes)", d.len()),
-                            crate::network::protocol::P2PMessage::Block(b) =>
-                                format!("Block(#{})", b.index),
-                            crate::network::protocol::P2PMessage::NewTx(tx) =>
-                                format!("NewTx({})", &tx.hash()[..8]),
-                            other => format!("{:?}", other),
-                        };
-                        debug!("<- {} from {}", label, addr);
-                        // FIX: Use .send().await instead of try_send.
-                        // If the shared channel is full due to heavy network load,
-                        // backpressure is applied naturally. We should NOT drop the peer.
-                        if message_tx.send((addr, msg)).await.is_err() {
-                            warn!("Message channel closed, disconnecting from {}", addr);
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        warn!("Error receiving from {}: {}", addr, e);
-                        break;
-                    }
-                }
-            }
-            peer_manager.remove_peer(addr).await;
-        });
-    }
-
-    /// Connect to a peer (PQC TLS)
-    pub async fn connect_to_peer(&self, addr: SocketAddr) -> Result<(), String> {
-        info!("Connecting to peer {} (PQC TLS)", addr);
-
-        // Step 1: Plain TCP connect
-        let tcp_stream = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            TcpStream::connect(addr)
-        )
-        .await
-        .map_err(|_| "Connection timed out".to_string())?
-        .map_err(|e| format!("Failed to connect: {}", e))?;
-
-        // Step 2: PQC TLS handshake (X25519MLKEM768)
-        // PQC TRANSPORT v3.1.0-alpha (2026-08-20): Wrap the TCP stream with TLS.
-        // Using "quanta.node" as the SNI — our custom NoCertificateVerification
-        // accepts any self-signed cert, so the SNI value is irrelevant.
-        // Real identity verification happens via Falcon-512 in the Version handshake below.
-        let tls_connector = make_tls_connector()
-            .map_err(|e| format!("TLS connector error: {}", e))?;
-        let server_name = ServerName::try_from("quanta.node")
-            .map_err(|e| format!("Invalid server name: {}", e))?;
-        let stream = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            tls_connector.connect(server_name, tcp_stream)
-        )
-        .await
-        .map_err(|_| "TLS handshake timed out".to_string())?
-        .map_err(|e| format!("TLS handshake failed: {}", e))?;
-
-        let peer = Arc::new(Peer::new(stream, addr).await?);
-        peer.set_outbound().await;
-
-        // Perform handshake
-        let blockchain = self.blockchain.clone();
-        let height = blockchain.get_height().await.unwrap();
-        let cumulative_work = blockchain.cumulative_work_at(height).await.unwrap();
-
-        tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            peer.handshake(
-                PROTOCOL_VERSION,
-                height,
-                cumulative_work,
-                self.config.node_id.clone(),
-                // ADDRMAN FIX v3.1.0-alpha: Self-report our listen port so the remote peer
-                // can add our correct connectable address to their discovery table.
-                self.config.listen_addr.port(),
-            )
-        )
-        .await
-        .unwrap_or(Err("Handshake timed out".to_string()))?;
-
-        // Add to peer manager
-        self.peer_manager.add_peer(Arc::clone(&peer)).await?;
-
-        // Request known peers from this new connection to discover the rest of the network
-        let _ = peer.send_message(P2PMessage::GetAddr).await;
-
-        // BW-FIX-3: Only pull the peer's mempool if our own mempool is empty.
-        // The original unconditional GetMempool fired on every connect — combined with
-        // the peer-flapping bug (reconnects every ~10s) this caused full mempool
-        // transfers at 10-second intervals, adding hundreds of MB/hour per node pair.
-        // The periodic 30s mempool sync loop already handles convergence once connected.
-        let local_mempool_size = self
-            .blockchain
-            .get_mempool_size()
-            .await
-            .unwrap();
-        if local_mempool_size == 0 {
-            let _ = peer.send_message(P2PMessage::GetMempool).await;
-        }
-
-        // Start single receive task
-        Self::start_peer_receive_task(
-            peer,
-            self.message_tx.clone(),
-            Arc::clone(&self.peer_manager),
-        )
-        .await;
-
-        info!("Connected to peer {}", addr);
-        Ok(())
-    }
 
     /// Process incoming messages (PARALLELIZED - spawn handler per message)
     async fn process_messages(self: Arc<Self>) {
@@ -689,9 +487,7 @@ impl Network {
                 // HIGH FIX: Relay the message to all peers! This eliminates the need
                 // for a "Full Mesh" network topology and allows the network to scale
                 // massively without hardcoding bootstrap IPs.
-                self.peer_manager
-                    .broadcast(P2PMessage::AlephBFTMessage(data))
-                    .await;
+                self.broadcast_message(P2PMessage::AlephBFTMessage(data)).await;
             }
             _ => {
                 debug!("Unhandled message type from {}", addr);
@@ -751,7 +547,7 @@ impl Network {
                         "Banning peer {} for repeated invalid transactions (score ≥ 100)",
                         p.address().await
                     );
-                    p.disconnect().await;
+                    if let Some(tx) = &*self.swarm_tx.read().await { let _ = tx.send(crate::network::swarm_command::SwarmCommand::Disconnect(p.info.read().await.node_id.clone())).await; }
                     self.peer_manager.remove_peer(p.address().await).await;
                 }
             }
@@ -995,7 +791,7 @@ impl Network {
                             "Banning peer {} for invalid network blocks (score ≥ 100)",
                             p.address().await
                         );
-                        p.disconnect().await;
+                        if let Some(tx) = &*self.swarm_tx.read().await { let _ = tx.send(crate::network::swarm_command::SwarmCommand::Disconnect(p.info.read().await.node_id.clone())).await; }
                         self.peer_manager.remove_peer(p.address().await).await;
                     }
                 }
@@ -1237,7 +1033,7 @@ impl Network {
 
     /// Broadcast transaction to all peers
     pub async fn broadcast_transaction(&self, tx: Transaction) {
-        self.peer_manager.broadcast(P2PMessage::NewTx(tx)).await;
+        self.broadcast_message(P2PMessage::NewTx(tx)).await;
     }
 
     /// Broadcast a newly-mined block to all connected peers.
@@ -1246,14 +1042,18 @@ impl Network {
     /// full block (~2 MB). Peers that need the full block request it via
     /// GetBlocks after receiving the header. This reduces per-block broadcast
     /// bandwidth from O(peers * 2 MB) to O(peers * 200 B).
+    pub async fn broadcast_message(&self, msg: P2PMessage) {
+        if let Some(tx) = &*self.swarm_tx.read().await {
+            let _ = tx.send(crate::network::swarm_command::SwarmCommand::Broadcast(msg)).await;
+        }
+    }
+
     pub async fn broadcast_block(&self, block: Block) {
         let mut header: crate::network::protocol::BlockHeader = (&block).into();
         // cumulative_work is not available without a blockchain read; peers
         // will compute their own value after fetching the full block.
         header.cumulative_work = 0;
-        self.peer_manager
-            .broadcast(P2PMessage::Headers(vec![header]))
-            .await;
+        self.broadcast_message(P2PMessage::Headers(vec![header])).await;
     }
 
     /// Register a channel sender for incoming AlephBFT messages.
@@ -1264,9 +1064,7 @@ impl Network {
 
     /// Broadcast an AlephBFT message to all connected peers
     pub async fn broadcast_aleph_bft(&self, data: Vec<u8>) {
-        self.peer_manager
-            .broadcast(P2PMessage::AlephBFTMessage(data))
-            .await;
+        self.broadcast_message(P2PMessage::AlephBFTMessage(data)).await;
     }
 
     /// BW-FIX-4: Send an AlephBFT message to a SPECIFIC validator peer identified by

@@ -137,7 +137,7 @@ impl From<&Block> for BlockHeader {
 // create_block_template state root fix from v2.5.0 proposers that embed a wrong root.
 // CHANGED 2026-09-01 v3.1.5-alpha: Bumped 55 → 56.
 // Sync deadlock fix: Bypass parallel signature verification for blocks within the active sync range.
-pub const PROTOCOL_VERSION: u32 = 56;
+pub const PROTOCOL_VERSION: u32 = 57;
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;

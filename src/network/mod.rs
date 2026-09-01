@@ -13,3 +13,8 @@ pub use network::{Network, NetworkConfig};
 pub use peer::{Peer, PeerManager};
 #[allow(unused_imports)]
 pub use protocol::P2PMessage;
+pub mod swarm;
+pub mod p2p_transport;
+pub mod p2p_behaviour;
+pub mod p2p_codec;
+pub mod swarm_command;

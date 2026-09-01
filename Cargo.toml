@@ -1,6 +1,6 @@
 [package]
 name = "quanta"
-version = "3.1.5-alpha"
+version = "3.2.0-alpha"
 edition = "2021"
 description = "QUANTA - Quantum-resistant blockchain with Falcon signatures"
 
@@ -135,6 +135,9 @@ tower_governor = "0.8.0"
 # System info for benchmark reports
 sysinfo = "0.30"
 codec = { package = "parity-scale-codec", version = "3.0.0", features = ["derive"] }
+libp2p = { version = "0.56.0", features = ["tokio", "tcp", "gossipsub", "kad", "macros", "tls", "yamux", "request-response"] }
+futures-rustls = "0.26.0"
+libp2p-request-response = "0.29.0"
 
 # For tests
 [dev-dependencies]
