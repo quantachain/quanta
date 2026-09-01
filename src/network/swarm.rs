@@ -22,6 +22,8 @@ pub fn build_swarm(
     server_config: Arc<rustls::ServerConfig>,
     client_config: Arc<rustls::ClientConfig>,
 ) -> Result<Swarm<QuantaBehaviour>, Box<dyn std::error::Error>> {
+    let keypair = identity::Keypair::generate_ed25519();
+
     let auth_upgrade = QuantaAuth {
         node_id: node_id.clone(),
         server_config,
@@ -50,13 +52,12 @@ pub fn build_swarm(
         .map_err(|e| format!("Failed to build gossipsub config: {}", e))?;
 
     let gossipsub = gossipsub::Behaviour::new(
-        gossipsub::MessageAuthenticity::Anonymous,
+        gossipsub::MessageAuthenticity::Signed(keypair.clone()),
         gossipsub_config,
     )
     .map_err(|e| format!("Failed to build gossipsub: {}", e))?;
 
     // Setup Kademlia
-    let keypair = identity::Keypair::generate_ed25519();
     let local_peer_id = keypair.public().to_peer_id();
     let store = kad::store::MemoryStore::new(local_peer_id);
     let mut kademlia = kad::Behaviour::new(local_peer_id, store);
