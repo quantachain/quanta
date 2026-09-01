@@ -1,6 +1,20 @@
 # QUANTA Network Alpha Release Notes
 
-## Current Focus: v3.1.5-alpha (State Actor Refactoring & Sync Deadlock)
+## Current Release: v3.2.0-alpha (The "Swarm" Release)
+This release introduces a massive architectural overhaul of the Quanta P2P networking stack. The custom raw TCP loops have been entirely replaced with the industry-standard `libp2p` stack.
+
+**Key Changes:**
+- **Gossipsub Protocol**: Blocks and transactions are now propagated using efficient `Gossipsub` publish/subscribe mechanics instead of linear peer-loop unicasting.
+- **Kademlia DHT**: Node discovery is now powered by Kademlia, augmenting the legacy `PeerDiscovery` DNS seeding.
+- **Lock Starvation Eliminated**: Moving connection handling and socket I/O into the `Swarm` event loop eliminates the async lock contention that caused BFT nodes to freeze under heavy sync load.
+
+---
+
+### 🔴 This is a mandatory upgrade. v3.2.0 nodes (QT57) are incompatible with v3.1.5 nodes (QT56).
+
+---
+
+### Previous Release: v3.1.5-alpha (State Actor Refactoring & Sync Deadlock)
 This release addresses a critical bottleneck in the Quanta consensus engine where heavy P2P sync and API requests would cause thread starvation and node freezing due to `RwLock<Blockchain>` contention, as well as Tokio thread pool exhaustion.
 
 **Key Changes:**
@@ -9,17 +23,6 @@ This release addresses a critical bottleneck in the Quanta consensus engine wher
 - **Sync Deadlock Fix**: Bypassed concurrent pre-verification for synchronized blocks to avoid saturating the Tokio blocking thread pool, resolving the 60s timeout issue.
 - **Improved Uptime**: Network nodes will no longer deadlock or drop peers when processing heavy mempool operations.
 - **PQC Intact**: Post-Quantum Cryptography implementations (Falcon-512) remain untouched and secure.
-
----
-
-### 🔴 This is a mandatory upgrade. v3.1.5 nodes (QT56) are incompatible with v3.1.4 nodes (QT55).
-
----
-
-### What's Fixed in v3.1.5-alpha
-
-#### 1. Sync Deadlock (Thread Pool Exhaustion)
-Fixed a critical issue where nodes syncing from scratch or after downtime would timeout (`Block download idle timeout after 60s`) and disconnect from peers. The node was previously verifying signatures for thousands of incoming sync blocks concurrently on the Tokio blocking thread pool, saturating the CPU and preventing the networking layer from reading the TCP stream. The node now safely bypasses concurrent pre-verification for synchronized blocks, shifting validation to the sequential chain-application phase. This completely resolves the sync stall.
 
 ---
 

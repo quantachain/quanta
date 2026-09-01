@@ -2,7 +2,7 @@
 
 **Document Type:** Internal Developer Reference  
 **Relevant Files:** `src/crypto/signatures.rs`, `src/bin/distribute_faucet.rs`, `src/benchmark/network_bench.rs`, `quanta-wasm/src/lib.rs`  
-**Last Updated:** May 2026
+**Last Updated:** September 2026
 
 ---
 

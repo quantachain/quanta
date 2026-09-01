@@ -1,5 +1,17 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.0-alpha] - 2026-09-01
+
+### Added
+- Integrated `libp2p::Swarm` to replace the legacy raw TCP `PeerManager`.
+- Network now uses `Gossipsub` for P2PMessage broadcasting (blocks and transactions).
+- Implemented `Kademlia` DHT routing in `QuantaBehaviour` alongside `request_response` for direct peer communication.
+
+### Changed
+- All legacy TCP logic in `network.rs` (`listen_for_connections` and `connect_to_peer`) stripped.
+- Replaced direct socket writes in `peer.rs` with routing via `swarm_tx` using `SwarmCommand` enum to eliminate peer lock starvation.
+- Bumped `PROTOCOL_VERSION` to 57 to enforce network upgrade.
+
 ## [v3.1.5-alpha] - 2026-09-01
 
 ### Fixed
