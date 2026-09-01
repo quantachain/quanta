@@ -1,4 +1,4 @@
-use crate::consensus::blockchain::Blockchain;
+use crate::consensus::blockchain_actor::BlockchainHandle;
 use crate::core::block::Block;
 use crate::core::transaction::Transaction;
 use crate::network::peer::{Peer, PeerManager};
@@ -51,7 +51,7 @@ impl Default for NetworkConfig {
 /// Network manager for P2P blockchain network
 pub struct Network {
     pub config: NetworkConfig,
-    blockchain: Arc<RwLock<Blockchain>>,
+    blockchain: BlockchainHandle,
     pub peer_manager: Arc<PeerManager>,
     message_tx: mpsc::Sender<(SocketAddr, P2PMessage)>,
     message_rx: Arc<RwLock<mpsc::Receiver<(SocketAddr, P2PMessage)>>>,
@@ -72,7 +72,7 @@ pub struct Network {
 
 impl Network {
     /// Create a new network instance
-    pub fn new(config: NetworkConfig, blockchain: Arc<RwLock<Blockchain>>) -> Self {
+    pub fn new(config: NetworkConfig, blockchain: BlockchainHandle) -> Self {
         // PQC TRANSPORT v3.1.0-alpha (2026-08-20): Generate ephemeral TLS certificate.
         // This certificate identifies the node at the TLS layer.
         // Application-layer identity is still verified by Falcon-512 handshake.
@@ -274,7 +274,7 @@ impl Network {
 
                     let message_tx = self.message_tx.clone();
                     let peer_manager = Arc::clone(&self.peer_manager);
-                    let blockchain = Arc::clone(&self.blockchain);
+                    let blockchain = self.blockchain.clone();
                     let discovery = Arc::clone(&self.discovery);
                     let node_id = self.config.node_id.clone();
                     let our_listen_port = self.config.listen_addr.port();
@@ -298,10 +298,9 @@ impl Network {
                             Ok(peer) => {
                                 let peer = Arc::new(peer);
 
-                                let blockchain = blockchain.read().await;
-                                let height = blockchain.get_height();
-                                let cumulative_work = blockchain.cumulative_work_at(height);
-                                drop(blockchain);
+                                let blockchain = blockchain.clone();
+                                let height = blockchain.get_height().await.unwrap();
+                                let cumulative_work = blockchain.cumulative_work_at(height).await.unwrap();
 
                                 if tokio::time::timeout(
                                     std::time::Duration::from_secs(10),
@@ -457,10 +456,9 @@ impl Network {
         peer.set_outbound().await;
 
         // Perform handshake
-        let blockchain = self.blockchain.read().await;
-        let height = blockchain.get_height();
-        let cumulative_work = blockchain.cumulative_work_at(height);
-        drop(blockchain);
+        let blockchain = self.blockchain.clone();
+        let height = blockchain.get_height().await.unwrap();
+        let cumulative_work = blockchain.cumulative_work_at(height).await.unwrap();
 
         tokio::time::timeout(
             std::time::Duration::from_secs(10),
@@ -490,10 +488,9 @@ impl Network {
         // The periodic 30s mempool sync loop already handles convergence once connected.
         let local_mempool_size = self
             .blockchain
-            .read()
+            .get_mempool_size()
             .await
-            .get_pending_transactions()
-            .len();
+            .unwrap();
         if local_mempool_size == 0 {
             let _ = peer.send_message(P2PMessage::GetMempool).await;
         }
@@ -735,17 +732,17 @@ impl Network {
             return Ok(());
         }
 
-        let blockchain = self.blockchain.write().await;
+        let blockchain = self.blockchain.clone();
         // Check for duplicates in mempool (extra safety)
         {
-            let pending = blockchain.get_pending_transactions();
+            let pending = blockchain.get_pending_transactions().await.unwrap();
             if pending.iter().any(|t| t.hash() == tx_hash) {
                 return Ok(()); // Already in mempool
             }
         }
 
         // Add to pending transactions
-        if let Err(e) = blockchain.add_transaction(tx.clone()) {
+        if let Err(e) = blockchain.add_transaction(tx.clone()).await.unwrap() {
             warn!("Rejected transaction from peer: {}", e);
             if let Some(p) = peer {
                 // Invalid tx: +10 points (10 bad txs = ban)
@@ -760,7 +757,6 @@ impl Network {
             }
         } else {
             info!("Added new transaction to mempool, re-broadcasting");
-            drop(blockchain);
             // BETA FIX: Re-broadcast to propagate across all nodes in the mesh
             self.broadcast_transaction(tx).await;
         }
@@ -784,10 +780,10 @@ impl Network {
         // the on-disk checkpoint state as-is. The receiver will verify it by applying block
         // 110,001 on top of it and checking the state root of that block.
         debug!("Peer {} requested state snapshot for height {}", addr, height);
-        let blockchain = self.blockchain.read().await;
+        let blockchain = self.blockchain.clone();
 
         // Load the on-disk checkpoint for the requested height
-        if let Some(state) = blockchain.load_account_state_at_height(height) {
+        if let Some(state) = blockchain.load_account_state_at_height(height).await.unwrap() {
             let computed_root = state.calculate_state_root();
             info!("Serving state snapshot for height {} to peer {} (computed root={})", height, addr, computed_root);
             if let Ok(state_bytes) = bincode::serialize(&state) {
@@ -815,11 +811,11 @@ impl Network {
     ) -> Result<(), String> {
         info!("Received state snapshot for height {} from peer {} ({} bytes)", height, addr, state_bytes.len());
         
-        let blockchain = self.blockchain.write().await;
+        let blockchain = self.blockchain.clone();
         
         // Basic sanity check — only apply snapshot if we are waiting for it.
         // current_height is the number of blocks (max_index + 1), so for block 110,000 it is 110,001.
-        let current_height = blockchain.get_height();
+        let current_height = blockchain.get_height().await.unwrap();
         if height != current_height.saturating_sub(1) {
             warn!("Received unprompted state snapshot for height {} from {}, but our chain height is {}", height, addr, current_height);
             return Ok(());
@@ -849,7 +845,7 @@ impl Network {
 
         // Forward-verify: check that this state produces the correct root for block 110,001
         // Block 110,001 has strict state root enforcement (it's past the hard-fork).
-        let block_110001 = blockchain.get_block_by_height(height + 1);
+        let block_110001 = blockchain.get_block_by_height(height + 1).await.unwrap();
         if let Some(next_block) = block_110001 {
             if !next_block.state_root.is_empty() {
                 // Apply the snapshot state to a temp clone and simulate block 110,001
@@ -883,7 +879,7 @@ impl Network {
             info!("State snapshot for height {} accepted (block 110,001 not yet on disk; root={}).", height, computed_root);
         }
 
-        if let Err(e) = blockchain.apply_canonical_state_snapshot(height, state) {
+        if let Err(e) = blockchain.apply_canonical_state_snapshot(height, state).await.unwrap() {
             warn!("Failed to apply state snapshot: {}", e);
         }
         
@@ -895,8 +891,24 @@ impl Network {
     ///
     /// SYNC FIX: During an active sync, blocks that are "too far ahead" are
     /// silently dropped instead of triggering additional GetBlocks requests.
-    /// This prevents the request storm that was causing the stuck-at-272 bug.
     async fn handle_new_block(&self, block: Block, peer: Option<Arc<Peer>>) -> Result<(), String> {
+        let is_syncing = self.syncing.load(Ordering::SeqCst);
+
+        // REORG FIX: Use the exact requested range (sync_request_range) to decide
+        // whether to buffer this block during sync. 
+        if is_syncing {
+            let range_opt = *self.sync_request_range.lock().await;
+            if let Some((rstart, rend)) = range_opt {
+                if block.index >= rstart && block.index <= rend {
+                    let mut buffer = self.sync_buffer.lock().await;
+                    if buffer.len() < (MAX_SYNC_BATCH as usize + 200) {
+                        buffer.push(block);
+                    }
+                    return Ok(());
+                }
+            }
+        }
+
         // HIGH FIX: Pre-verify signatures off the Tokio executor thread!
         // This prevents an attacker from starving the executor and the Blockchain read lock
         // by spamming invalid blocks that pass PoW check but fail signatures.
@@ -921,27 +933,9 @@ impl Network {
             return Ok(());
         }
 
-        let is_syncing = self.syncing.load(Ordering::SeqCst);
-
-        // REORG FIX: Use the exact requested range (sync_request_range) to decide
-        // whether to buffer this block during sync. 
-        if is_syncing {
-            let range_opt = *self.sync_request_range.lock().await;
-            if let Some((rstart, rend)) = range_opt {
-                if block.index >= rstart && block.index <= rend {
-                    let mut buffer = self.sync_buffer.lock().await;
-                    if buffer.len() < (MAX_SYNC_BATCH as usize + 200) {
-                        buffer.push(block);
-                    }
-                    return Ok(());
-                }
-            }
-        }
-
-        let blockchain = self.blockchain.read().await;
-        let latest = blockchain.get_latest_block();
-        let _our_height = blockchain.get_height();
-        drop(blockchain);
+        let blockchain = self.blockchain.clone();
+        let latest = blockchain.get_latest_block().await.unwrap();
+        let _our_height = blockchain.get_height().await.unwrap();
 
         if block.index > latest.index + 100 {
             // We just ignore it. The periodic sync loop in main.rs will
@@ -961,13 +955,13 @@ impl Network {
         }
 
         // Add block to chain (full validation inside add_network_block)
-        let bc = self.blockchain.write().await;
-        match bc.add_network_block(block.clone()) {
+        let bc = self.blockchain.clone();
+        match bc.add_network_block(block.clone()).await.unwrap() {
             Ok(_) => {
                 // STATE SYNC FIX (v3.0.4-alpha)
                 if block.index == 110_000 {
                     let needs_sync = {
-                        let current_root = bc.current_state_root();
+                        let current_root = bc.current_state_root().await.unwrap();
                         current_root != block.state_root && current_root != "2ee3073191a84fa407d3a1e798d01571ad930c807ea9d6a838a4c9b93330cef6"
                     };
                     if needs_sync {
@@ -986,7 +980,6 @@ impl Network {
                     &block.hash[..8],
                     block.index
                 );
-                drop(bc);
                 // BETA FIX: Re-broadcast so nodes NOT directly connected to the miner
                 // also receive the block (essential for mesh topology with 6+ nodes).
                 self.broadcast_block(block.clone()).await;
@@ -1028,8 +1021,8 @@ impl Network {
     ) -> Result<(), String> {
         // HIGH-2 FIX: Clamp batch to MAX_SYNC_BATCH regardless of what peer claims
         let end = {
-            let blockchain = self.blockchain.read().await;
-            let chain_end = blockchain.get_height().saturating_sub(1);
+            let blockchain = self.blockchain.clone();
+            let chain_end = blockchain.get_height().await.unwrap().saturating_sub(1);
             end.min(start + MAX_SYNC_BATCH - 1).min(chain_end)
         };
 
@@ -1042,11 +1035,13 @@ impl Network {
         while cursor <= end {
             let sub_end = (cursor + SUB_BATCH - 1).min(end);
             let blocks: Vec<Block> = {
-                let blockchain = self.blockchain.read().await;
-                (cursor..=sub_end)
-                    .filter_map(|i| blockchain.load_block_from_storage(i))
-                    .collect()
-                // blockchain read lock released here
+                let mut blocks = Vec::new();
+                for i in cursor..=sub_end {
+                    if let Some(b) = self.blockchain.load_block_from_storage(i).await.unwrap() {
+                        blocks.push(b);
+                    }
+                }
+                blocks
             };
             for block in blocks {
                 if let Some(ref p) = peer {
@@ -1083,8 +1078,8 @@ impl Network {
         peer: Option<Arc<Peer>>,
     ) -> Result<(), String> {
         let headers = {
-            let blockchain = self.blockchain.read().await;
-            let height = blockchain.get_height();
+            let blockchain = self.blockchain.clone();
+            let height = blockchain.get_height().await.unwrap();
             let end = height.min(start + MAX_HEADERS_PER_RESPONSE);
 
             // PERF FIX: cumulative_work_at(i) is O(height) per call — calling it for
@@ -1096,14 +1091,14 @@ impl Network {
             // running sum by adding each block's difficulty. Total cost: O(start) once
             // + O(batch_size) incremental reads — orders of magnitude faster.
             let mut running_work = if start > 0 {
-                blockchain.cumulative_work_at(start)
+                blockchain.cumulative_work_at(start).await.unwrap()
             } else {
                 0u128
             };
 
             let mut headers = Vec::new();
             for i in start..=end {
-                if let Some(block) = blockchain.load_block_from_storage(i) {
+                if let Some(block) = blockchain.load_block_from_storage(i).await.unwrap() {
                     running_work = running_work.saturating_add(1u128); // BFT: 1 work unit per block
                     let mut header: crate::network::protocol::BlockHeader = (&block).into();
                     header.cumulative_work = running_work;
@@ -1152,7 +1147,7 @@ impl Network {
         // A batch of headers (> 1) is a sync response — buffer it as before.
         if headers.len() == 1 {
             let h = &headers[0];
-            let our_height = self.blockchain.read().await.get_height();
+            let our_height = self.blockchain.get_height().await.unwrap();
             // Only request the block if it is the immediate next block or within
             // a small forward window (avoids requesting far-future orphans).
             if h.index > our_height && h.index <= our_height + 5 {
@@ -1185,10 +1180,10 @@ impl Network {
 
     /// Handle get height request — BETA FIX: use storage height, not in-memory chain length
     async fn handle_get_height(&self, addr: SocketAddr) -> Result<(), String> {
-        let blockchain = self.blockchain.read().await;
+        let blockchain = self.blockchain.clone();
         // get_height() reads from storage — correct even after thousands of blocks
-        let height = blockchain.get_height();
-        let cumulative_work = blockchain.cumulative_work_at(height);
+        let height = blockchain.get_height().await.unwrap();
+        let cumulative_work = blockchain.cumulative_work_at(height).await.unwrap();
 
         self.send_to_peer(
             addr,
@@ -1202,16 +1197,15 @@ impl Network {
 
     /// Handle get mempool request — HIGH-3 FIX: cap response to 100 txs
     async fn handle_get_mempool(&self, addr: SocketAddr) -> Result<(), String> {
-        let blockchain = self.blockchain.read().await;
+        let blockchain = self.blockchain.clone();
         // HIGH-3 FIX: Return at most 100 transactions to prevent ~8.5 MB bandwidth DoS.
         // Peers needing more can send a second GetMempool request.
         let txs: Vec<Transaction> = blockchain
-            .get_pending_transactions()
+            .get_pending_transactions().await.unwrap()
             .iter()
             .take(100)
             .cloned()
             .collect();
-        drop(blockchain);
         self.send_to_peer(addr, P2PMessage::Mempool(txs)).await
     }
 
@@ -1329,9 +1323,9 @@ impl Network {
         // slightly after repeated shallow reorgs — without it the node loops
         // forever as "Already on heaviest chain" while actually being N blocks behind.
         let (local_work, our_height) = {
-            let bc = self.blockchain.read().await;
-            let h = bc.get_height();
-            (bc.cumulative_work_at(h), h)
+            let bc = self.blockchain.clone();
+            let h = bc.get_height().await.unwrap();
+            (bc.cumulative_work_at(h).await.unwrap(), h)
         };
         let mut max_work = local_work;
         let mut best_peer: Option<Arc<Peer>> = None;
@@ -1366,7 +1360,7 @@ impl Network {
 
         self.syncing.store(true, Ordering::SeqCst);
 
-        let _our_height = self.blockchain.read().await.get_height();
+        let _our_height = self.blockchain.get_height().await.unwrap();
         info!(
             "Syncing from peer {} (target work: {}, height: {})",
             peer.address().await,
@@ -1387,7 +1381,7 @@ impl Network {
 
         loop {
             // Always re-read the actual chain height — it changes after every reorg/apply.
-            let current_sync_height = self.blockchain.read().await.get_height();
+            let current_sync_height = self.blockchain.get_height().await.unwrap();
             
             // STATE SYNC HEAL FIX (v3.0.8-alpha — final fix)
             // FIX DATE: 2026-08-16 | VERSION: v3.0.8-alpha
@@ -1400,12 +1394,12 @@ impl Network {
             // our state is fine and no snap-sync is needed. Only trigger snap-sync if this check fails.
             if current_sync_height == 110_001 {
                 let needs_snapshot = {
-                    let bc = self.blockchain.read().await;
+                    let bc = self.blockchain.clone();
                     // Try to get block 110,001 to forward-verify our state
-                    if let Some(block_110001) = bc.get_block_by_height(110_001) {
+                    if let Some(block_110001) = bc.get_block_by_height(110_001).await.unwrap() {
                         if !block_110001.state_root.is_empty() {
                             // Simulate block 110,001 against current in-memory state
-                            let mut test_state = bc.get_account_state_clone();
+                            let mut test_state = bc.get_account_state_clone().await.unwrap();
                             test_state.unlock_mature_coinbase(block_110001.index);
                             for tx in &block_110001.transactions {
                                 if !tx.is_coinbase() && tx.sender != "TREASURY" && !tx.is_genesis_premine() {
@@ -1421,21 +1415,21 @@ impl Network {
                             test_root != block_110001.state_root
                         } else {
                             // Block 110,001 has no state root — fall back to canonical check
-                            let current_root = bc.current_state_root();
-                            bc.get_canonical_state_root(110_000)
+                            let current_root = bc.current_state_root().await.unwrap();
+                            bc.get_canonical_state_root(110_000).await.unwrap()
                                 .map(|expected| current_root != expected)
                                 .unwrap_or(false)
                         }
                     } else {
                         // Don't have block 110,001 yet — fall back to canonical check
-                        let current_root = bc.current_state_root();
+                        let current_root = bc.current_state_root().await.unwrap();
                         // The actual canonical post-heal root is the one produced by the snapshot (2ee3...),
                         // NOT the one written in the block (42db...).
                         // FIX DATE: 2026-08-18 | VERSION: v3.0.11-alpha
                         if current_root == "2ee3073191a84fa407d3a1e798d01571ad930c807ea9d6a838a4c9b93330cef6" {
                             false
                         } else {
-                            bc.get_canonical_state_root(110_000)
+                            bc.get_canonical_state_root(110_000).await.unwrap()
                                 .map(|expected| current_root != expected)
                                 .unwrap_or(false)
                         }
@@ -1443,8 +1437,8 @@ impl Network {
                 };
 
                 if needs_snapshot {
-                    let expected_root = self.blockchain.read().await
-                        .get_canonical_state_root(110_000)
+                    let expected_root = self.blockchain
+                        .get_canonical_state_root(110_000).await.unwrap()
                         .unwrap_or_default();
                     tracing::warn!("Local state root diverged at hard-fork block 110,000. Requesting canonical state snapshot from peer...");
                     let _ = peer.send_message(P2PMessage::GetStateSnapshot {
@@ -1519,17 +1513,16 @@ impl Network {
             stall_count = 0;
 
             // Step 2: Validate Headers & Find Fork Point
-            let bc = self.blockchain.read().await;
+            let bc = self.blockchain.clone();
             let mut fork_point = None;
             for h in headers.iter().rev() {
-                if let Some(our_hash) = bc.get_block_hash_at(h.index) {
+                if let Some(our_hash) = bc.get_block_hash_at(h.index).await.unwrap() {
                     if our_hash == h.hash {
                         fork_point = Some(h.index + 1);
                         break;
                     }
                 }
             }
-            drop(bc);
 
             let request_start = fork_point.unwrap_or(headers[0].index);
             let request_end = headers.last().unwrap().index;
@@ -1667,7 +1660,7 @@ impl Network {
             // A deep reorg on a partial batch will almost always fail validation mid-way, and the
             // node will waste massive I/O rolling back and restoring state for no reason.
             if blocks.len() != expected {
-                let bc_height = self.blockchain.read().await.get_height();
+                let bc_height = self.blockchain.get_height().await.unwrap();
                 if request_start < bc_height {
                     warn!("Deep reorg aborted: received partial batch ({}/{}) which would corrupt state. Will retry.",
                         blocks.len(), expected);
@@ -1690,11 +1683,11 @@ impl Network {
             }
 
             // Step 4: Apply Blocks
-            let bc_height = self.blockchain.read().await.get_height();
+            let bc_height = self.blockchain.get_height().await.unwrap();
             if request_start < bc_height {
                 // This is a fork/reorg
-                let bc = self.blockchain.write().await;
-                match bc.deep_reorg(request_start, blocks.clone()) {
+                let bc = self.blockchain.clone();
+                match bc.deep_reorg(request_start, blocks.clone()).await.unwrap() {
                     Ok(_) => info!("Reorg to heavier chain successful"),
                     Err(e) => {
                         // Reorg failures are almost always caused by our own sync logic
@@ -1707,9 +1700,9 @@ impl Network {
                 }
             } else {
                 // Normal extension
-                let bc = self.blockchain.write().await;
+                let bc = self.blockchain.clone();
                 for b in blocks {
-                    if let Err(e) = bc.add_network_block(b.clone()) {
+                    if let Err(e) = bc.add_network_block(b.clone()).await.unwrap() {
                         warn!("Failed to add block: {}", e);
                         break;
                     }
@@ -1717,7 +1710,7 @@ impl Network {
                     // STATE SYNC FIX (v3.0.4-alpha)
                     if b.index == 110_000 {
                         let needs_sync = {
-                            let current_root = bc.current_state_root();
+                            let current_root = bc.current_state_root().await.unwrap();
                             current_root != b.state_root
                         };
                         if needs_sync {
@@ -1747,7 +1740,7 @@ impl Network {
         *self.sync_request_range.lock().await = None; // ensure cleared on any exit path
         info!(
             "Sync cycle complete. Current height: {}",
-            self.blockchain.read().await.get_height()
+            self.blockchain.get_height().await.unwrap()
         );
         Ok(())
     }

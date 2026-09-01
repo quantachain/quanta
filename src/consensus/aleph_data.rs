@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::consensus::blockchain::Blockchain;
+use crate::consensus::blockchain_actor::BlockchainHandle;
 use crate::core::block::Block;
 
 /// Target block slot duration in seconds.
@@ -26,7 +26,7 @@ const SLOT_SECONDS: i64 = 6;
 /// node last proposed, so the gate works correctly across session rotations
 /// and node restarts.
 pub struct QuantaDataProvider {
-    blockchain: Arc<RwLock<Blockchain>>,
+    blockchain: BlockchainHandle,
     /// This validator's own address — used only for block template creation.
     my_address: String,
     /// Shared atomic written by the finalization consumer in `bft_proposer.rs`
@@ -39,7 +39,7 @@ pub struct QuantaDataProvider {
 
 impl QuantaDataProvider {
     pub fn new(
-        blockchain: Arc<RwLock<Blockchain>>,
+        blockchain: BlockchainHandle,
         my_address: String,
         last_finalized_ts: Arc<AtomicI64>,
         wallet: Arc<crate::crypto::wallet::QuantumWallet>,
@@ -87,11 +87,11 @@ impl DataProvider for QuantaDataProvider {
         // BUILD BLOCK TEMPLATE
         // -----------------------------------------------------------------------
         tracing::debug!("BFT DataProvider: slot opened, building block template...");
-        let bc = self.blockchain.read().await;
+        let bc = self.blockchain.clone();
         let elapsed = chrono::Utc::now()
             .timestamp()
             .saturating_sub(self.last_finalized_ts.load(Ordering::Acquire));
-        match bc.create_block_template(self.my_address.clone()) {
+        match bc.create_block_template(self.my_address.clone()).await.unwrap() {
             Ok(mut block) => {
                 // SECURITY FIX: Sign the block so network syncing nodes can cryptographically verify it.
                 // Since AlephBFT does not export standard BFT certificates, the Proposer's signature

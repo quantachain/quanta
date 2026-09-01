@@ -1,13 +1,29 @@
-# Quanta Node Alpha Release Notes
+# QUANTA Network Alpha Release Notes
 
-## Current Version: **v3.1.4-alpha** (Protocol: **55** / Magic: **QT55**)
-*Release Date: 2026-08-29*
+## Current Focus: v3.1.5-alpha (State Actor Refactoring & Sync Deadlock)
+This release addresses a critical bottleneck in the Quanta consensus engine where heavy P2P sync and API requests would cause thread starvation and node freezing due to `RwLock<Blockchain>` contention, as well as Tokio thread pool exhaustion.
 
-### 🔴 This is a mandatory upgrade. v3.1.4 nodes (QT55) are incompatible with v3.1.3 nodes (QT54).
+**Key Changes:**
+- **State Actor Model**: The entire core blockchain state is now running inside a dedicated `tokio::mpsc` message-passing loop (`BlockchainActor`).
+- **Lock-Free P2P & API**: The API (`handlers.rs`), RPC server (`server.rs`), and Networking (`network.rs`) layers now communicate with the state asynchronously using `BlockchainHandle`, completely removing read/write locks.
+- **Sync Deadlock Fix**: Bypassed concurrent pre-verification for synchronized blocks to avoid saturating the Tokio blocking thread pool, resolving the 60s timeout issue.
+- **Improved Uptime**: Network nodes will no longer deadlock or drop peers when processing heavy mempool operations.
+- **PQC Intact**: Post-Quantum Cryptography implementations (Falcon-512) remain untouched and secure.
 
 ---
 
-### What's Fixed in v3.1.4-alpha
+### 🔴 This is a mandatory upgrade. v3.1.5 nodes (QT56) are incompatible with v3.1.4 nodes (QT55).
+
+---
+
+### What's Fixed in v3.1.5-alpha
+
+#### 1. Sync Deadlock (Thread Pool Exhaustion)
+Fixed a critical issue where nodes syncing from scratch or after downtime would timeout (`Block download idle timeout after 60s`) and disconnect from peers. The node was previously verifying signatures for thousands of incoming sync blocks concurrently on the Tokio blocking thread pool, saturating the CPU and preventing the networking layer from reading the TCP stream. The node now safely bypasses concurrent pre-verification for synchronized blocks, shifting validation to the sequential chain-application phase. This completely resolves the sync stall.
+
+---
+
+### Previous Release: v3.1.4-alpha (2026-08-29)
 
 #### 1. Operators stuck at 1 peer — root cause fixed (AddrMan)
 **All node operators were connecting to only 1 peer** (the bootstrap relay) despite 20+ validators being online and synced. The root cause was the AddrMan "verified" peer system introduced in v3.1.0:
@@ -77,7 +93,7 @@ This release fixes two major networking bugs:
 
 ### Upgrade Instructions (For Validators & Full Nodes)
 
-> **No database wipe required for v3.1.4-alpha.** This is a network-layer and consensus-stability fix only — chain data is fully compatible. Simply pull the new image and restart.
+> **No database wipe required for v3.1.5-alpha.** This is a network-layer and consensus-stability fix only — chain data is fully compatible. Simply pull the new image and restart.
 
 ```bash
 # 1. Stop your existing container

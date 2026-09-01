@@ -5,6 +5,7 @@ pub mod authorities;
 pub mod bft;
 pub mod bft_proposer;
 pub mod blockchain;
+pub mod blockchain_actor;
 pub mod mempool;
 pub mod performance;
 

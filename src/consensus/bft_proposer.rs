@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio::sync::{watch, RwLock};
 use tracing::{error, info, warn};
 
-use crate::consensus::Blockchain;
+use crate::consensus::blockchain_actor::BlockchainHandle;
 use crate::core::block::Block;
 use crate::crypto::wallet::QuantumWallet;
 use crate::network::Network;
@@ -75,7 +75,7 @@ pub use crate::consensus::authorities::SESSION_LENGTH;
 const MAX_ROUNDS_PER_SESSION: u32 = 7000;
 
 pub async fn run_bft_proposer(
-    blockchain: Arc<RwLock<Blockchain>>,
+    blockchain: BlockchainHandle,
     wallet: Arc<QuantumWallet>,
     network: Option<Arc<Network>>,
     _new_block_rx: watch::Receiver<u64>,
@@ -124,9 +124,8 @@ pub async fn run_bft_proposer(
             ts_for_finalization.store(chrono::Utc::now().timestamp(), Ordering::Release);
 
             let apply_result = {
-                let bc = bc_for_finalization.write().await;
-                let result = bc.add_network_block(block.clone());
-                drop(bc); // Release write lock immediately after apply
+                let bc = bc_for_finalization.clone();
+                let result = bc.add_network_block(block.clone()).await.unwrap();
                 result
             };
             if let Err(e) = apply_result {
@@ -169,8 +168,8 @@ pub async fn run_bft_proposer(
         // which can actively prevent the node from downloading missing blocks.
         loop {
             let current_height = {
-                let bc = blockchain.read().await;
-                bc.get_height()
+                let bc = blockchain.clone();
+                bc.get_height().await.unwrap()
             };
 
             let peers = network_ref.get_peers_info().await;
@@ -214,10 +213,10 @@ pub async fn run_bft_proposer(
 
         // DYNAMIC COMMITTEE FIX: Compute committee HERE, every session, instead of at startup!
         let (committee, committee_pubkeys) = {
-            let bc = blockchain.read().await;
-            let current_height = bc.get_height();
+            let bc = blockchain.clone();
+            let current_height = bc.get_height().await.unwrap();
             let session_start_height = current_height - (current_height % SESSION_LENGTH);
-            let snap = bc.get_account_state_snapshot();
+            let snap = bc.get_account_state_clone().await.unwrap();
             let comm = super::authorities::compute_committee(&snap, session_start_height);
             let mut pubkeys = Vec::new();
             for addr in &comm {
@@ -258,8 +257,8 @@ pub async fn run_bft_proposer(
 
         // Compute the current session_id from chain height.
         let current_height = {
-            let bc = blockchain.read().await;
-            bc.get_height()
+            let bc = blockchain.clone();
+            bc.get_height().await.unwrap()
         };
         let mut session_id: u64 = current_height / SESSION_LENGTH;
         // HARD FORK FIX: Session 1361's DAG was corrupted when operators deleted their multi-GB 
@@ -504,7 +503,7 @@ pub async fn run_bft_proposer(
                     break;
                 }
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(500)) => {
-                    let height = bc_for_monitor.read().await.get_height();
+                    let height = bc_for_monitor.get_height().await.unwrap();
                     if height >= target_height_for_next_session {
                         if let Some(tx) = terminator_tx_opt.take() {
                             info!("BFT Proposer: reached session boundary (height {} >= {}). Terminating session {}...", height, target_height_for_next_session, session_id);
@@ -549,8 +548,8 @@ pub async fn run_bft_proposer(
         // Session ended (hit max_round or error).
         // Determine if a new session is warranted by checking chain height.
         let new_height = {
-            let bc = blockchain.read().await;
-            bc.get_height()
+            let bc = blockchain.clone();
+            bc.get_height().await.unwrap()
         };
         let mut new_session_id = new_height / SESSION_LENGTH;
         if new_height >= 81664 {

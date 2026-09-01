@@ -1,5 +1,5 @@
 use super::types::*;
-use crate::consensus::Blockchain;
+use crate::consensus::blockchain_actor::BlockchainHandle;
 use crate::network::Network;
 use axum::{extract::State, http::StatusCode, response::Json, routing::post, Router};
 use std::sync::Arc;
@@ -7,7 +7,7 @@ use std::time::Instant;
 use tokio::sync::RwLock;
 
 pub struct RpcServer {
-    pub blockchain: Arc<RwLock<Blockchain>>,
+    pub blockchain: BlockchainHandle,
     pub network: Option<Arc<Network>>,
     pub start_time: Arc<RwLock<Instant>>,
 
@@ -18,7 +18,7 @@ pub struct RpcServer {
 
 #[derive(Clone)]
 struct AppState {
-    blockchain: Arc<RwLock<Blockchain>>,
+    blockchain: BlockchainHandle,
     network: Option<Arc<Network>>,
     start_time: Arc<RwLock<Instant>>,
 
@@ -29,7 +29,7 @@ struct AppState {
 
 impl RpcServer {
     pub fn new(
-        blockchain: Arc<RwLock<Blockchain>>,
+        blockchain: BlockchainHandle,
         network: Option<Arc<Network>>,
         api_port: u16,
         network_port: u16,
@@ -96,10 +96,9 @@ async fn handle_rpc_request(
 }
 
 async fn handle_node_status(state: &AppState) -> JsonRpcResponse {
-    let blockchain = state.blockchain.read().await;
-    let chain_height = blockchain.get_height();
-    let mempool_size = blockchain.get_pending_transactions().len();
-    drop(blockchain);
+    let blockchain = state.blockchain.clone();
+    let chain_height = blockchain.get_height().await.unwrap();
+    let mempool_size = blockchain.get_pending_transactions().await.unwrap().len();
 
     let peer_count = if let Some(ref network) = state.network {
         network.peer_count().await
@@ -133,9 +132,9 @@ async fn handle_get_block(state: &AppState, params: &serde_json::Value) -> JsonR
         }
     };
 
-    let blockchain = state.blockchain.read().await;
+    let blockchain = state.blockchain.clone();
 
-    if let Some(block) = blockchain.get_block_by_height(height) {
+    if let Some(block) = blockchain.get_block_by_height(height).await.unwrap() {
         let block_info = BlockInfo {
             height: block.index,
             hash: block.hash.clone(),
@@ -164,8 +163,8 @@ async fn handle_get_balance(state: &AppState, params: &serde_json::Value) -> Jso
         }
     };
 
-    let blockchain = state.blockchain.read().await;
-    let balance = blockchain.get_balance(address);
+    let blockchain = state.blockchain.clone();
+    let balance = blockchain.get_balance(address.to_string()).await.unwrap();
 
     JsonRpcResponse::success(
         1,
@@ -195,8 +194,8 @@ async fn handle_get_peers(state: &AppState) -> JsonRpcResponse {
 }
 
 async fn handle_get_mempool(state: &AppState) -> JsonRpcResponse {
-    let blockchain = state.blockchain.read().await;
-    let transactions = blockchain.get_pending_transactions();
+    let blockchain = state.blockchain.clone();
+    let transactions = blockchain.get_pending_transactions().await.unwrap();
 
     let tx_data: Vec<serde_json::Value> = transactions
         .iter()

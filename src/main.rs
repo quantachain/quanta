@@ -20,6 +20,7 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use storage::BlockchainStorage;
 use tokio::sync::RwLock;
+use crate::consensus::blockchain_actor::{BlockchainActor, BlockchainHandle};
 use tracing_subscriber::{self, EnvFilter};
 
 // CONSENSUS CONSTANTS: 1 QUA = 1_000_000 microunits
@@ -368,10 +369,14 @@ async fn main() {
                 BlockchainStorage::with_options(&cfg.node.db_path, prune_mode, true)
                     .expect("Failed to open database"),
             );
-            let blockchain = Arc::new(RwLock::new(
-                Blockchain::new(storage, cfg.network_type)
-                    .expect("Failed to initialize blockchain"),
-            ));
+            let raw_blockchain = Blockchain::new(storage, cfg.network_type)
+                .expect("Failed to initialize blockchain");
+            
+            let (tx, rx) = tokio::sync::mpsc::channel(10000);
+            let actor = BlockchainActor::new(raw_blockchain, rx);
+            tokio::spawn(actor.run());
+            
+            let blockchain = BlockchainHandle::new(tx);
 
             let metrics = Arc::new(MetricsCollector::new());
 
@@ -429,7 +434,7 @@ async fn main() {
                     dns_seeds: cfg.network.dns_seeds.clone(),
                 };
 
-                let network = Arc::new(Network::new(network_config, Arc::clone(&blockchain)));
+                let network = Arc::new(Network::new(network_config, blockchain.clone()));
 
                 // Start P2P network
                 let network_clone = Arc::clone(&network);
@@ -441,7 +446,7 @@ async fn main() {
 
                 // Start blockchain sync (loops until caught up, then checks periodically)
                 let network_clone = Arc::clone(&network);
-                let blockchain_clone = Arc::clone(&blockchain);
+                let blockchain_clone = blockchain.clone();
                 tokio::spawn(async move {
                     // Initial delay to let connections establish
                     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
@@ -452,7 +457,7 @@ async fn main() {
                         }
 
                         // Check if we need to continue syncing
-                        let our_height = blockchain_clone.read().await.get_height();
+                        let our_height = blockchain_clone.get_height().await.unwrap();
                         let peers = network_clone.get_peers_info().await;
                         let max_peer_height = peers.iter().map(|p| p.height).max().unwrap_or(0);
 
@@ -513,8 +518,8 @@ async fn main() {
                                 "Starting BFT Proposer for validator {}",
                                 wallet.address
                             );
-                            let rx = blockchain.read().await.subscribe_new_blocks();
-                            let bc_clone = Arc::clone(&blockchain);
+                            let rx = blockchain.subscribe_new_blocks().await.unwrap();
+                            let bc_clone = blockchain.clone();
                             let net_clone = network.clone();
 
                             // Shared atomic: last finalized block timestamp (Unix seconds).
@@ -543,17 +548,15 @@ async fn main() {
 
             // Start metrics updater
             let metrics_clone = Arc::clone(&metrics);
-            let blockchain_clone = Arc::clone(&blockchain);
+            let blockchain_clone = blockchain.clone();
             let network_clone = network.clone();
             tokio::spawn(async move {
                 let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
                 loop {
                     interval.tick().await;
-                    let blockchain = blockchain_clone.read().await;
-                    let height = blockchain.get_height();
-                    let mempool_size = blockchain.get_pending_transactions().len();
-                    let last_block = blockchain.get_latest_block();
-                    drop(blockchain);
+                    let height = blockchain_clone.get_height().await.unwrap();
+                    let mempool_size = blockchain_clone.get_mempool_size().await.unwrap();
+                    let last_block = blockchain_clone.get_latest_block().await.unwrap();
 
                     metrics_clone
                         .update_blockchain_stats(height, mempool_size, Some(last_block.timestamp))
@@ -580,7 +583,7 @@ async fn main() {
 
             // Start RPC server
             let rpc_server = RpcServer::new(
-                Arc::clone(&blockchain),
+                blockchain.clone(),
                 network.clone(),
                 cfg.node.api_port,
                 cfg.node.network_port,
@@ -598,7 +601,7 @@ async fn main() {
 
             // Start API server
             let server_handle = {
-                let blockchain_clone = Arc::clone(&blockchain);
+                let blockchain_clone = blockchain.clone();
                 let metrics_clone = Some(metrics.clone());
                 let network_clone = network.clone();
                 let port = cfg.node.api_port;
@@ -615,10 +618,8 @@ async fn main() {
                     tracing::info!("Gracefully shutting down...");
 
                     // Save final state
-                    let blockchain_lock = blockchain.read().await;
-                    let chain_height = blockchain_lock.get_height();
+                    let chain_height = blockchain.get_height().await.unwrap();
                     tracing::info!("Final chain height: {}", chain_height);
-                    drop(blockchain_lock);
 
                     tracing::info!("QUANTA Node Version: v2.4.16-alpha");
                     tracing::info!("Node stopped successfully");

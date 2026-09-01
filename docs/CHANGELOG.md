@@ -1,5 +1,12 @@
 # QuantaChain CHANGELOG
 
+## [v3.1.5-alpha] - 2026-09-01
+
+### Fixed
+- **Critical Production Bug (State Contention)**: Completely eliminated `RwLock<Blockchain>` state contention by introducing the Actor Model (`BlockchainActor`). This prevents the P2P network from stalling under heavy API or sync load, keeping the chain responsive and preventing nodes from falling out of sync.
+- **Sync Deadlock (Thread Pool Exhaustion)**: Fixed an issue where the node would timeout (`Block download idle timeout after 60s`) and disconnect from peers during Initial Block Download. Previously, incoming sync blocks were concurrently pre-verified on the Tokio blocking thread pool, saturating it completely and preventing the networking layer from deserializing new TCP messages. The node now safely bypasses concurrent pre-verification for synchronized blocks, adding them directly to the sync buffer and relying on the sequential consensus validation. This resolves the sync stall and timeout issues.
+- **Protocol Bump (v56 / QT56)**: Protocol bumped to `56` to enforce the Actor Model and sync deadlock fixes.
+
 ## [v3.1.4-alpha] - 2026-08-29
 
 ### Fixed

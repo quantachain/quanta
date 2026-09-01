@@ -1,4 +1,5 @@
-use crate::consensus::blockchain::{AddressTransaction, Blockchain, BlockchainStats};
+use crate::consensus::blockchain::{AddressTransaction, BlockchainStats};
+use crate::consensus::blockchain_actor::BlockchainHandle;
 use crate::core::transaction::Transaction;
 use axum::extract::ConnectInfo;
 use axum::extract::Request;
@@ -28,7 +29,7 @@ use crate::core::block::Block;
 
 /// API state
 pub struct ApiState {
-    pub blockchain: Arc<RwLock<Blockchain>>,
+    pub blockchain: BlockchainHandle,
     pub metrics: Option<Arc<crate::consensus::mempool::MetricsCollector>>,
     pub network: Option<Arc<crate::network::Network>>,
 }
@@ -47,8 +48,8 @@ pub struct TransactionResponse {
 
 /// Get blockchain stats
 async fn get_stats(State(state): State<Arc<ApiState>>) -> Json<BlockchainStats> {
-    let blockchain = state.blockchain.read().await;
-    Json(blockchain.get_stats())
+    let blockchain = state.blockchain.clone();
+    Json(blockchain.get_stats().await.unwrap())
 }
 
 // -----------------------------------------------------------------------
@@ -72,9 +73,9 @@ async fn get_balance(
     State(state): State<Arc<ApiState>>,
     Json(req): Json<BalanceRequest>,
 ) -> Json<BalanceResponse> {
-    let blockchain = state.blockchain.read().await;
-    let balance = blockchain.get_balance(&req.address);
-    let nonce = blockchain.get_account_state_read().get_nonce(&req.address);
+    let blockchain = state.blockchain.clone();
+    let balance = blockchain.get_balance(req.address.clone()).await.unwrap();
+    let nonce = blockchain.get_account_state_clone().await.unwrap().get_nonce(&req.address);
     Json(BalanceResponse {
         address: req.address,
         balance_microunits: balance,
@@ -119,8 +120,8 @@ async fn get_address_info(
     State(state): State<Arc<ApiState>>,
     Path(address): Path<String>,
 ) -> Json<AddressInfoResponse> {
-    let blockchain = state.blockchain.read().await;
-    let account_state = blockchain.get_account_state_read();
+    let blockchain = state.blockchain.clone();
+    let account_state = blockchain.get_account_state_clone().await.unwrap();
 
     let balance_microunits = account_state.get_balance(&address);
     let total_microunits = account_state.get_total_balance(&address);
@@ -156,9 +157,9 @@ async fn get_balance_by_path(
     State(state): State<Arc<ApiState>>,
     Path(address): Path<String>,
 ) -> Json<BalanceResponse> {
-    let blockchain = state.blockchain.read().await;
-    let balance = blockchain.get_balance(&address);
-    let nonce = blockchain.get_account_state_read().get_nonce(&address);
+    let blockchain = state.blockchain.clone();
+    let balance = blockchain.get_balance(address.clone()).await.unwrap();
+    let nonce = blockchain.get_account_state_clone().await.unwrap().get_nonce(&address);
     Json(BalanceResponse {
         address,
         balance_microunits: balance,
@@ -187,8 +188,8 @@ async fn get_richlist(
     Query(params): Query<crate::api::handlers::LatestBlocksQuery>, // Reuse query struct for limit
 ) -> Json<RichListResponse> {
     let limit = params.count.unwrap_or(100).min(500);
-    let blockchain = state.blockchain.read().await;
-    let accounts = blockchain.get_account_state_read().get_top_accounts(limit);
+    let blockchain = state.blockchain.clone();
+    let accounts = blockchain.get_account_state_clone().await.unwrap().get_top_accounts(limit);
     
     let entries: Vec<RichListEntry> = accounts.into_iter().map(|(addr, bal)| RichListEntry {
         address: addr,
@@ -219,8 +220,8 @@ async fn get_address_transactions(
 ) -> Json<AddressTxsResponse> {
     // SECURITY FIX: Capped at 1000 to prevent tokio executor starvation via blocking disk reads
     let max_blocks = params.max_blocks.unwrap_or(100).min(1_000);
-    let blockchain = state.blockchain.read().await;
-    let txs = blockchain.get_address_transactions(&address, max_blocks);
+    let blockchain = state.blockchain.clone();
+    let txs = blockchain.get_address_transactions(address.clone(), max_blocks).await.unwrap();
     let count = txs.len();
     Json(AddressTxsResponse {
         address,
@@ -248,10 +249,10 @@ async fn get_tx_handler(
     State(state): State<Arc<ApiState>>,
     Path(hash): Path<String>,
 ) -> Result<Json<TxDetailResponse>, StatusCode> {
-    let blockchain = state.blockchain.read().await;
+    let blockchain = state.blockchain.clone();
 
     // 1. Check confirmed chain first via O(1) storage index
-    if let Some(tx) = blockchain.find_transaction_by_hash(&hash) {
+    if let Some(tx) = blockchain.find_transaction_by_hash(hash.clone()).await.unwrap() {
         return Ok(Json(TxDetailResponse {
             tx_hash: hash,
             status: "confirmed".to_string(),
@@ -261,7 +262,7 @@ async fn get_tx_handler(
     }
 
     // 2. Fall back to mempool
-    let pending = blockchain.get_pending_transactions();
+    let pending = blockchain.get_pending_transactions().await.unwrap();
     if let Some(tx) = pending.iter().find(|t| t.hash() == hash) {
         return Ok(Json(TxDetailResponse {
             tx_hash: hash,
@@ -355,8 +356,8 @@ async fn get_latest_blocks(
     Query(params): Query<LatestBlocksQuery>,
 ) -> Json<LatestBlocksResponse> {
     let count = params.count.unwrap_or(10).min(100);
-    let blockchain = state.blockchain.read().await;
-    let blocks = blockchain.get_latest_blocks(count);
+    let blockchain = state.blockchain.clone();
+    let blocks = blockchain.get_latest_blocks(count).await.unwrap();
     let block_count = blocks.len();
     Json(LatestBlocksResponse {
         block_count,
@@ -392,11 +393,10 @@ async fn submit_signed_transaction(
         );
     }
 
-    let blockchain = state.blockchain.read().await;
-    match blockchain.add_transaction(tx.clone()) {
+    let blockchain = state.blockchain.clone();
+    match blockchain.add_transaction(tx.clone()).await.unwrap() {
         Ok(_) => {
             let tx_hash = tx.hash();
-            drop(blockchain);
             if let Some(ref network) = state.network {
                 network.broadcast_transaction(tx).await;
             }
@@ -438,9 +438,9 @@ pub struct ValidateResponse {
 }
 
 async fn validate_chain(State(state): State<Arc<ApiState>>) -> Json<ValidateResponse> {
-    let blockchain = state.blockchain.read().await;
+    let blockchain = state.blockchain.clone();
     Json(ValidateResponse {
-        is_valid: blockchain.is_valid(),
+        is_valid: blockchain.is_valid().await.unwrap(),
     })
 }
 
@@ -535,8 +535,8 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
         std::collections::HashMap<String, u64>,
         u64,
     ) = {
-        let blockchain = state.blockchain.read().await;
-        let account_state = blockchain.get_account_state_read();
+        let blockchain = state.blockchain.clone();
+        let account_state = blockchain.get_account_state_clone().await.unwrap();
         let validators_raw = account_state
             .get_validators()
             .iter()
@@ -556,12 +556,12 @@ async fn get_validators(State(state): State<Arc<ApiState>>) -> Json<ValidatorsRe
             .collect::<Vec<_>>();
 
         // Tally bft_signers + proposer across the last UPTIME_WINDOW blocks
-        let height = blockchain.get_height();
+        let height = blockchain.get_height().await.unwrap();
         let start = height.saturating_sub(UPTIME_WINDOW);
         let mut proposed: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
         let mut signed: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
         for h in start..height {
-            if let Some(block) = blockchain.load_block_from_storage(h) {
+            if let Some(block) = blockchain.load_block_from_storage(h).await.unwrap() {
                 *proposed.entry(block.proposer.clone()).or_insert(0) += 1;
                 for signer in &block.bft_signers {
                     *signed.entry(signer.clone()).or_insert(0) += 1;
@@ -642,19 +642,19 @@ async fn get_validator(
         vec![]
     };
 
-    let blockchain = state.blockchain.read().await;
-    let account_state = blockchain.get_account_state_read();
+    let blockchain = state.blockchain.clone();
+    let account_state = blockchain.get_account_state_clone().await.unwrap();
     
     if let Some(info) = account_state.get_validator_info(&address) {
         // Collect basic participation stats for the single validator
-        let height = blockchain.get_height();
+        let height = blockchain.get_height().await.unwrap();
         let start = height.saturating_sub(UPTIME_WINDOW);
         let mut b_proposed: u64 = 0;
         let mut b_signed: u64 = 0;
         let mut actual_window: u64 = 0;
         
         for h in start..height {
-            if let Some(block) = blockchain.load_block_from_storage(h) {
+            if let Some(block) = blockchain.load_block_from_storage(h).await.unwrap() {
                 actual_window += 1;
                 if block.proposer == address {
                     b_proposed += 1;
@@ -774,8 +774,8 @@ async fn get_block(
     State(state): State<Arc<ApiState>>,
     Path(height): Path<u64>,
 ) -> Result<Json<BlockResponse>, StatusCode> {
-    let blockchain = state.blockchain.read().await;
-    match blockchain.load_block_from_storage(height) {
+    let blockchain = state.blockchain.clone();
+    match blockchain.load_block_from_storage(height).await.unwrap() {
         Some(block) => Ok(Json(BlockResponse::from(block))),
         None => Err(StatusCode::NOT_FOUND),
     }
@@ -790,8 +790,8 @@ pub struct MempoolResponse {
 }
 
 async fn get_mempool(State(state): State<Arc<ApiState>>) -> Json<MempoolResponse> {
-    let blockchain = state.blockchain.read().await;
-    let transactions = blockchain.get_pending_transactions().clone();
+    let blockchain = state.blockchain.clone();
+    let transactions = blockchain.get_pending_transactions().await.unwrap().clone();
     
     let total_fees_pending = transactions.iter().map(|tx| tx.fee).sum();
 
@@ -818,8 +818,8 @@ pub struct HealthResponse {
 static START_TIME: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
 async fn health_check(State(state): State<Arc<ApiState>>) -> Json<HealthResponse> {
-    let blockchain = state.blockchain.read().await;
-    let stats = blockchain.get_stats();
+    let blockchain = state.blockchain.clone();
+    let stats = blockchain.get_stats().await.unwrap();
 
     let peers_count = if let Some(ref network) = state.network {
         network.get_peer_count().await
@@ -895,7 +895,7 @@ async fn rate_limiter(
 
 /// Create the API router with all endpoints and middleware.
 pub fn create_router(
-    blockchain: Arc<RwLock<Blockchain>>,
+    blockchain: BlockchainHandle,
     metrics: Option<Arc<crate::consensus::mempool::MetricsCollector>>,
     network: Option<Arc<crate::network::Network>>,
 ) -> Router {
@@ -964,7 +964,7 @@ pub fn create_router(
 /// CRIT-1 FIX: Binds to `127.0.0.1` (localhost only) unless TLS is configured.
 /// Prevents password interception by blocking external access to the API port.
 pub async fn start_server(
-    blockchain: Arc<RwLock<Blockchain>>,
+    blockchain: BlockchainHandle,
     port: u16,
     metrics: Option<Arc<crate::consensus::mempool::MetricsCollector>>,
     network: Option<Arc<crate::network::Network>>,
@@ -1023,8 +1023,8 @@ async fn get_contract(
     State(state): State<Arc<ApiState>>,
     Path(address): Path<String>,
 ) -> impl IntoResponse {
-    let blockchain = state.blockchain.read().await;
-    let acc = blockchain.get_account_state_read();
+    let blockchain = state.blockchain.clone();
+    let acc = blockchain.get_account_state_clone().await.unwrap();
     match acc.get_contract(&address) {
         Some(c) => (
             StatusCode::OK,
@@ -1053,8 +1053,8 @@ async fn get_contract_events(
     State(state): State<Arc<ApiState>>,
     Path(address): Path<String>,
 ) -> impl IntoResponse {
-    let blockchain = state.blockchain.read().await;
-    let acc = blockchain.get_account_state_read();
+    let blockchain = state.blockchain.clone();
+    let acc = blockchain.get_account_state_clone().await.unwrap();
     match acc.get_contract(&address) {
         Some(c) => (
             StatusCode::OK,
@@ -1084,8 +1084,8 @@ async fn list_agents(
     State(state): State<Arc<ApiState>>,
     Query(q): Query<AgentQuery>,
 ) -> impl IntoResponse {
-    let blockchain = state.blockchain.read().await;
-    let acc = blockchain.get_account_state_read();
+    let blockchain = state.blockchain.clone();
+    let acc = blockchain.get_account_state_clone().await.unwrap();
     let agents: Vec<serde_json::Value> = acc
         .contracts
         .iter()

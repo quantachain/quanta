@@ -1,8 +1,8 @@
 # ============================================================
 # Dockerfile — QUANTA Blockchain Node
 # ============================================================
-# V3.1.4-alpha Release for testnet testing — AddrMan gossip fix + BFT backup-behind crash fix
-# Image : xd637/quanta-node:v3.1.4-alpha
+# V3.1.5-alpha Release for testnet testing — Sync deadlock fix
+# Image : xd637/quanta-node:v3.1.5-alpha
 # Repo  : https://hub.docker.com/r/xd637/quanta-node
 #
 # Quick start (single node):
@@ -18,11 +18,11 @@
 FROM rust:bookworm AS builder
 
 # Version metadata
-LABEL version="3.1.4-alpha"
-LABEL org.quanta.network.protocol="55"
+LABEL version="3.1.5-alpha"
+LABEL org.quanta.network.protocol="56"
 LABEL org.opencontainers.image.title="Quanta Node" \
-      org.opencontainers.image.description="QuantaChain V3 node — PQC BFT, Falcon-512, X25519MLKEM768 TLS transport, AddrMan gossip fix + BFT crash fix. v3.1.4-alpha." \
-      org.opencontainers.image.version="v3.1.4-alpha" \
+      org.opencontainers.image.description="QuantaChain V3 node — PQC BFT, Falcon-512, X25519MLKEM768 TLS transport, Sync deadlock fix. v3.1.5-alpha." \
+      org.opencontainers.image.version="v3.1.5-alpha" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="Apache-2.0"
