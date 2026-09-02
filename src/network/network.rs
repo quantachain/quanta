@@ -383,6 +383,15 @@ impl Network {
         msg: P2PMessage,
         peer: Option<Arc<Peer>>,
     ) -> Result<(), String> {
+        let actual_peer = if let Some(p) = &peer {
+            Some(Arc::clone(p))
+        } else {
+            self.peer_manager.get_peer(&addr).await
+        };
+        if let Some(p) = &actual_peer {
+            p.update_last_seen().await;
+        }
+
         match msg {
             P2PMessage::NewTx(tx) => {
                 self.handle_new_transaction(tx, peer).await?;

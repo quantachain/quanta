@@ -89,6 +89,11 @@ impl Peer {
         info.cumulative_work = cumulative_work;
     }
 
+    pub async fn update_last_seen(&self) {
+        let mut info = self.info.write().await;
+        info.last_seen = chrono::Utc::now().timestamp();
+    }
+
     pub async fn get_info(&self) -> PeerInfo {
         self.info.read().await.clone()
     }
@@ -240,6 +245,19 @@ impl PeerManager {
     pub async fn peer_count(&self) -> usize {
         self.peers.read().await.len()
     }
+
+    pub async fn get_peer(&self, addr: &SocketAddr) -> Option<Arc<Peer>> {
+        let peers = self.peers.read().await;
+        for peer in peers.iter() {
+            if let Ok(info) = peer.info.try_read() {
+                if info.address == *addr {
+                    return Some(Arc::clone(peer));
+                }
+            }
+        }
+        None
+    }
+
 
     pub async fn broadcast(&self, msg: P2PMessage) {
         let peers = self.peers.read().await.clone();

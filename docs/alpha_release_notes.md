@@ -1,11 +1,13 @@
 # QUANTA Network Alpha Release Notes
 
-## Current Release: v3.2.2-alpha (Protocol Bump for Egress Spam)
-This is a critical protocol version bump to force a network upgrade, finalizing the fix for the massive egress bandwidth spikes caused by gossipsub fallback loops. 
+## Current Release: v3.2.2-alpha (The "Sync & Stability" Release)
+This is a critical protocol version bump to force a network upgrade, finalizing the fix for the massive egress bandwidth spikes caused by gossipsub fallback loops, and fixing the chain sync stalls.
 
 **What was fixed:**
 - **Protocol Version Bump**: Bumped `PROTOCOL_VERSION` from 58 to 59. This hard-forks un-upgraded nodes that are still aggressively spamming duplicate `BftValidation` gossipsub requests when validators go offline.
-- **Egress Spam Disabled (BW-FIX-4)**: Disabled the aggressive gossipsub fallback mechanism in AlephBFT unicast.
+- **Egress Spam Disabled**: Disabled the aggressive gossipsub fallback mechanism in AlephBFT unicast.
+- **Sync Stall Fixed**: Replaced the O(N) database reads in `cumulative_work_at` with an O(1) mathematical calculation, fixing the massive 10-30 second network freeze during `GetHeaders` and ensuring nodes can sync instantly past height 195,331.
+- **Peer Liveness Fixed**: `last_seen` timestamps are now correctly updated when messages are received, preventing active peers from silently timing out and disappearing from the active routing pool after 60 seconds.
 
 ---
 

@@ -2343,15 +2343,9 @@ impl Blockchain {
         if tip_height >= current {
             return *self.cumulative_work.lock();
         }
-        // Slow path: arbitrary historical height (rare — only during deep fork).
-        let mut total: u128 = 0;
-        for h in 0..=tip_height {
-            // inclusive: block AT tip_height contributes its difficulty
-            if let Ok(_) = self.storage.load_block(h) {
-                total = total.saturating_add(1u128);
-            }
-        }
-        total
+        // Since Quanta 2.0 uses AlephBFT and block difficulty is always 1,
+        // cumulative work for a canonical historical height is exactly height + 1.
+        (tip_height as u128) + 1
     }
 
     /// Flush all pending sled writes to disk (explicit fsync).

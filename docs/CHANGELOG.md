@@ -3,6 +3,8 @@
 ## [v3.2.2-alpha] - 2026-09-02
 
 ### Fixed
+- **Sync Stall (O(N) DB Reads)**: Replaced the O(N) database reads in `cumulative_work_at` with an O(1) mathematical calculation, fixing a massive 10-30 second network freeze during `GetHeaders` that caused sync to fail with timeout.
+- **Peer Liveness (Timeout Bug)**: `last_seen` timestamps are now correctly updated when P2P messages are received. This prevents active peers from silently timing out and disappearing from the active routing pool after 60 seconds (which resulted in the `Already on the heaviest chain` error).
 - **Egress Spam (BW-FIX-4)**: Disabled the aggressive gossipsub fallback mechanism in AlephBFT unicast that was causing the node to continuously broadcast duplicate validation requests to the entire network when a targeted validator was offline. This patch prevents the node from spamming duplicate P2P messages, stabilizing gossipsub overhead.
 - Bumped `PROTOCOL_VERSION` to 59 to force a network upgrade and reject connections from un-upgraded nodes spamming the network.
 
