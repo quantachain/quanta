@@ -1,5 +1,11 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.2-alpha] - 2026-09-02
+
+### Fixed
+- **Egress Spam (BW-FIX-4)**: Disabled the aggressive gossipsub fallback mechanism in AlephBFT unicast that was causing the node to continuously broadcast duplicate validation requests to the entire network when a targeted validator was offline. This patch prevents the node from spamming duplicate P2P messages, stabilizing gossipsub overhead.
+- Bumped `PROTOCOL_VERSION` to 59 to force a network upgrade and reject connections from un-upgraded nodes spamming the network.
+
 ## [v3.2.1-alpha] - 2026-09-02
 
 ### Fixed

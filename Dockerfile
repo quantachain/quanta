@@ -18,11 +18,11 @@
 FROM rust:bookworm AS builder
 
 # Version metadata
-LABEL version="3.2.1-alpha"
-LABEL org.quanta.network.protocol="58"
+LABEL version="3.2.2-alpha"
+LABEL org.quanta.network.protocol="59"
 LABEL org.opencontainers.image.title="Quanta Node" \
-      org.opencontainers.image.description="QuantaChain V3 node — PQC BFT, Falcon-512, X25519MLKEM768 TLS transport, Sync deadlock fix. v3.2.1-alpha." \
-      org.opencontainers.image.version="v3.2.1-alpha" \
+      org.opencontainers.image.description="QuantaChain V3 node — PQC BFT, Falcon-512, X25519MLKEM768 TLS transport, Sync deadlock fix. v3.2.2-alpha." \
+      org.opencontainers.image.version="v3.2.2-alpha" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="Apache-2.0"
