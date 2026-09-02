@@ -174,6 +174,17 @@ impl Network {
                                     if let Some(swarm_tx) = swarm_tx_opt {
                                         if let Ok(peer) = crate::network::peer::Peer::new(socket_addr, peer_id.to_string(), swarm_tx).await {
                                             let _ = network_clone_for_swarm.peer_manager.add_peer(std::sync::Arc::new(peer)).await;
+                                            
+                                            // Send Version handshake over RequestResponse so peer knows our Quanta wallet address
+                                            let version_msg = crate::network::protocol::P2PMessage::Version {
+                                                version: crate::network::protocol::PROTOCOL_VERSION,
+                                                height: 0,
+                                                cumulative_work: 0,
+                                                timestamp: chrono::Utc::now().timestamp(),
+                                                node_id: network_clone_for_swarm.peer_manager.local_node_id.clone(),
+                                                listen_port: network_clone_for_swarm.config.listen_addr.port(),
+                                            };
+                                            let _ = network_clone_for_swarm.send_to_peer(socket_addr, version_msg).await;
                                         }
                                     }
                                 }
@@ -427,6 +438,16 @@ impl Network {
             }
             P2PMessage::Pong(_) => {
                 // Keep-alive response
+            }
+            P2PMessage::Version { version, height, cumulative_work, timestamp: _, node_id, listen_port: _ } => {
+                tracing::debug!("Received Version from {}: version={}, node_id={}", addr, version, node_id);
+                if let Some(p) = &peer {
+                    p.update_info(node_id.clone(), version, height, cumulative_work).await;
+                    let _ = p.send_message(P2PMessage::VerAck).await;
+                }
+            }
+            P2PMessage::VerAck => {
+                tracing::debug!("Received VerAck from {}", addr);
             }
             P2PMessage::GetAddr => {
                 // ADDRMAN FIX v3.1.0-alpha (2026-08-20): Only gossip VERIFIED ("tried") peers.
