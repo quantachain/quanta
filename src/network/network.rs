@@ -1123,7 +1123,7 @@ impl Network {
         let peers = self.peer_manager.get_peers().await;
         for peer in &peers {
             if peer.get_info().await.node_id == validator_address {
-                if let Err(e) = peer.send_message(P2PMessage::AlephBFTMessage(data)).await {
+                if let Err(e) = peer.send_message(P2PMessage::AlephBFTMessage(data.clone())).await {
                     tracing::debug!(
                         "Unicast AlephBFT to {} failed: {} — dropping",
                         validator_address, e
@@ -1132,7 +1132,11 @@ impl Network {
                 return;
             }
         }
-        self.broadcast_aleph_bft(data).await;
+        // If we didn't find the validator, they are offline or not connected yet.
+        // DO NOT broadcast! Broadcasting unicast messages intended for offline validators
+        // causes massive Gossipsub spam and O(N^3) bandwidth explosion.
+        // AlephBFT internally handles retries, so we can safely drop it.
+        tracing::trace!("Validator {} not found among peers, dropping unicast AlephBFT message", validator_address);
     }
 
     /// Synchronize blockchain from peers
