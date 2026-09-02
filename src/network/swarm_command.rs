@@ -7,5 +7,5 @@ pub enum SwarmCommand {
     Broadcast(P2PMessage),
     SendTo(SocketAddr, P2PMessage),
     Dial(SocketAddr),
-    Disconnect(String),
+    Disconnect(SocketAddr),
 }

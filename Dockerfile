@@ -18,7 +18,7 @@
 FROM rust:bookworm AS builder
 
 # Version metadata
-LABEL version="3.2.2-alpha"
+LABEL version="3.2.3-alpha"
 LABEL org.quanta.network.protocol="59"
 LABEL org.opencontainers.image.title="Quanta Node" \
       org.opencontainers.image.description="QuantaChain V3 node — PQC BFT, Falcon-512, X25519MLKEM768 TLS transport, Sync deadlock fix. v3.2.2-alpha." \

@@ -1,5 +1,11 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.3-alpha] - 2026-09-02
+
+### Fixed
+- **Strict Protocol Version Enforcement**: Added a strict disconnect during the `Version` handshake to actively drop outdated nodes (`v58` or older) connecting over `RequestResponse`. This prevents legacy nodes from hanging onto the network.
+- **Log Noise**: Filtered out harmless `libp2p_gossipsub` duplicate publish warnings from the console output.
+
 ## [v3.2.2-alpha] - 2026-09-02
 
 ### Fixed

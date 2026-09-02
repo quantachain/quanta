@@ -332,7 +332,7 @@ async fn main() {
             // "AlephBFT-consensus", "AlephBFT-collection", "AlephBFT-dag", etc.
             // We must explicitly append these to the user's filter so they are always
             // applied, otherwise RUST_LOG=info will override and spam operator logs.
-            let required_bft_filters = "aleph_bft=error,aleph-bft=error,\
+            let required_bft_filters = "libp2p_gossipsub=error,libp2p_swarm=error,aleph_bft=error,aleph-bft=error,\
                 aleph_bft_rmc=error,aleph_bft_api=error,\
                 aleph_bft_types=error,aleph_bft_mock=error,\
                 AlephBFT-consensus=error,AlephBFT-collection=error,\

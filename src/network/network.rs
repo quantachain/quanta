@@ -239,8 +239,10 @@ impl Network {
                                     let _ = swarm.behaviour_mut().gossipsub.publish(topic, data);
                                 }
                             }
-                            SwarmCommand::Disconnect(node_id) => {
-                                // Ignore for now
+                            SwarmCommand::Disconnect(addr) => {
+                                if let Some(peer_id) = addr_to_peer.remove(&addr) {
+                                    let _ = swarm.disconnect_peer_id(peer_id);
+                                }
                             }
                         }
                     }
@@ -450,6 +452,14 @@ impl Network {
             }
             P2PMessage::Version { version, height, cumulative_work, timestamp: _, node_id, listen_port: _ } => {
                 tracing::debug!("Received Version from {}: version={}, node_id={}", addr, version, node_id);
+                if version != crate::network::protocol::PROTOCOL_VERSION {
+                    tracing::warn!("Rejecting connection from {} due to protocol version mismatch (theirs: {}, ours: {})", addr, version, crate::network::protocol::PROTOCOL_VERSION);
+                    self.peer_manager.remove_peer(addr).await;
+                    if let Some(tx) = &*self.swarm_tx.read().await {
+                        let _ = tx.send(crate::network::swarm_command::SwarmCommand::Disconnect(addr)).await;
+                    }
+                    return Ok(());
+                }
                 if let Some(p) = &peer {
                     p.update_info(node_id.clone(), version, height, cumulative_work).await;
                     let _ = p.send_message(P2PMessage::VerAck).await;
@@ -602,7 +612,7 @@ impl Network {
                         "Banning peer {} for repeated invalid transactions (score ≥ 100)",
                         p.address().await
                     );
-                    if let Some(tx) = &*self.swarm_tx.read().await { let _ = tx.send(crate::network::swarm_command::SwarmCommand::Disconnect(p.info.read().await.node_id.clone())).await; }
+                    if let Some(tx) = &*self.swarm_tx.read().await { let _ = tx.send(crate::network::swarm_command::SwarmCommand::Disconnect(p.address().await)).await; }
                     self.peer_manager.remove_peer(p.address().await).await;
                 }
             }
@@ -846,7 +856,7 @@ impl Network {
                             "Banning peer {} for invalid network blocks (score ≥ 100)",
                             p.address().await
                         );
-                        if let Some(tx) = &*self.swarm_tx.read().await { let _ = tx.send(crate::network::swarm_command::SwarmCommand::Disconnect(p.info.read().await.node_id.clone())).await; }
+                        if let Some(tx) = &*self.swarm_tx.read().await { let _ = tx.send(crate::network::swarm_command::SwarmCommand::Disconnect(p.address().await)).await; }
                         self.peer_manager.remove_peer(p.address().await).await;
                     }
                 }

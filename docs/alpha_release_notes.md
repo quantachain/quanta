@@ -1,7 +1,17 @@
-# QUANTA Network Alpha Release Notes
+# Quanta Alpha Release Notes
 
-## Current Release: v3.2.2-alpha (The "Sync & Stability" Release)
-This is a critical protocol version bump to force a network upgrade, finalizing the fix for the massive egress bandwidth spikes caused by gossipsub fallback loops, and fixing the chain sync stalls.
+## Current Version: v3.2.3-alpha (BW-FIX-5: Strict Protocol Version Enforce)
+
+This is a fast follow-up to BW-FIX-4. We are deploying a strict network handshake check that actively drops legacy `v58` connections.
+
+### Key Changes
+- **Strict Protocol Version Enforcement**: Reject outdated `v58` nodes that attempt to connect over `RequestResponse`.
+- **Log Noise Reduction**: The `libp2p_gossipsub` duplicate publish warnings have been filtered out of the console output.
+
+## Previous Fixes (Summarized)
+
+### Previous Release: v3.2.2-alpha (The "Sync & Stability" Release)
+This was a critical protocol version bump to force a network upgrade, finalizing the fix for the massive egress bandwidth spikes caused by gossipsub fallback loops, and fixing the chain sync stalls.
 
 **What was fixed:**
 - **Protocol Version Bump**: Bumped `PROTOCOL_VERSION` from 58 to 59. This hard-forks un-upgraded nodes that are still aggressively spamming duplicate `BftValidation` gossipsub requests when validators go offline.
