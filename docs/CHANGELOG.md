@@ -1,5 +1,11 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.1-alpha] - 2026-09-02
+
+### Fixed
+- **No Peers Connectivity Issue**: Fixed a critical bug in `QuantaAuth` where nodes exchanged randomly generated `PeerId`s during the TLS handshake instead of their true Libp2p `PublicKey`. This caused `Gossipsub` and `Kademlia` to reject the connections due to signature mismatches. Nodes now exchange their true `PublicKey` within the TLS channel.
+- Bumped `PROTOCOL_VERSION` to 58.
+
 ## [v3.2.0-alpha] - 2026-09-01
 
 ### Added

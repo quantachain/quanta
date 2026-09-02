@@ -25,7 +25,7 @@ pub fn build_swarm(
     let keypair = identity::Keypair::generate_ed25519();
 
     let auth_upgrade = QuantaAuth {
-        node_id: node_id.clone(),
+        public_key: keypair.public(),
         server_config,
         client_config,
     };

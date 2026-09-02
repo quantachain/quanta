@@ -12,7 +12,7 @@ use rustls::pki_types::ServerName;
 
 #[derive(Clone)]
 pub struct QuantaAuth {
-    pub node_id: String,
+    pub public_key: libp2p::identity::PublicKey,
     pub server_config: Arc<rustls::ServerConfig>,
     pub client_config: Arc<rustls::ClientConfig>,
 }
@@ -85,15 +85,16 @@ where
             let mut len_buf = [0u8; 4];
             tls_stream.read_exact(&mut len_buf).await?;
             let len = u32::from_be_bytes(len_buf) as usize;
-            if len > 1024 { return Err(io::Error::new(io::ErrorKind::InvalidData, "ID too long")); }
-            let mut id_buf = vec![0u8; len];
-            tls_stream.read_exact(&mut id_buf).await?;
-            let _peer_id_str = String::from_utf8(id_buf).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF8"))?;
-            let peer_id = PeerId::random();
+            if len > 4096 { return Err(io::Error::new(io::ErrorKind::InvalidData, "PK too long")); }
+            let mut pk_buf = vec![0u8; len];
+            tls_stream.read_exact(&mut pk_buf).await?;
+            let remote_pk = libp2p::identity::PublicKey::try_decode_protobuf(&pk_buf)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid PK"))?;
+            let peer_id = remote_pk.to_peer_id();
             
-            let our_id = self.node_id.into_bytes();
-            tls_stream.write_all(&(our_id.len() as u32).to_be_bytes()).await?;
-            tls_stream.write_all(&our_id).await?;
+            let our_pk_bytes = self.public_key.encode_protobuf();
+            tls_stream.write_all(&(our_pk_bytes.len() as u32).to_be_bytes()).await?;
+            tls_stream.write_all(&our_pk_bytes).await?;
             
             Ok((peer_id, TlsStream::Server(tls_stream)))
         }.boxed()
@@ -114,19 +115,20 @@ where
             let domain = ServerName::try_from("quanta.node").unwrap().to_owned();
             let mut tls_stream = connector.connect(domain, socket).await?;
             
-            let our_id = self.node_id.into_bytes();
-            tls_stream.write_all(&(our_id.len() as u32).to_be_bytes()).await?;
-            tls_stream.write_all(&our_id).await?;
+            let our_pk_bytes = self.public_key.encode_protobuf();
+            tls_stream.write_all(&(our_pk_bytes.len() as u32).to_be_bytes()).await?;
+            tls_stream.write_all(&our_pk_bytes).await?;
             
             let mut len_buf = [0u8; 4];
             tls_stream.read_exact(&mut len_buf).await?;
             let len = u32::from_be_bytes(len_buf) as usize;
-            if len > 1024 { return Err(io::Error::new(io::ErrorKind::InvalidData, "ID too long")); }
-            let mut id_buf = vec![0u8; len];
-            tls_stream.read_exact(&mut id_buf).await?;
-            let _peer_id_str = String::from_utf8(id_buf).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid UTF8"))?;
+            if len > 4096 { return Err(io::Error::new(io::ErrorKind::InvalidData, "PK too long")); }
+            let mut pk_buf = vec![0u8; len];
+            tls_stream.read_exact(&mut pk_buf).await?;
+            let remote_pk = libp2p::identity::PublicKey::try_decode_protobuf(&pk_buf)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "Invalid PK"))?;
             
-            let peer_id = PeerId::random();
+            let peer_id = remote_pk.to_peer_id();
             Ok((peer_id, TlsStream::Client(tls_stream)))
         }.boxed()
     }

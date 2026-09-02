@@ -1,6 +1,18 @@
 # QUANTA Network Alpha Release Notes
 
-## Current Release: v3.2.0-alpha (The "Swarm" Release)
+## Current Release: v3.2.1-alpha (P2P Handshake Hotfix)
+This is a critical hotfix for the `v3.2.0-alpha` "Swarm" release. Operators reported that nodes were unable to connect to each other ("no peers") after upgrading.
+
+**What was fixed:**
+- **QuantaAuth `PeerId` Mismatch**: During the TLS + Falcon-512 handshake, nodes were previously exchanging randomly generated Libp2p `PeerId`s instead of their true cryptographic identities. This caused `Gossipsub` and `Kademlia` to immediately reject the connections because the `PeerId` signing the messages didn't match the connection handshake. The `QuantaAuth` module has been patched to seamlessly exchange the true `libp2p::identity::PublicKey` within the secure TLS channel, allowing peers to properly identify and connect to each other.
+
+---
+
+### 🔴 This is a mandatory upgrade. v3.2.1 nodes (QT58) are incompatible with v3.2.0 nodes (QT57).
+
+---
+
+### Previous Release: v3.2.0-alpha (The "Swarm" Release)
 This release introduces a massive architectural overhaul of the Quanta P2P networking stack. The custom raw TCP loops have been entirely replaced with the industry-standard `libp2p` stack.
 
 **Key Changes:**
