@@ -4,6 +4,8 @@
 
 ### Fixed
 - **No Peers Connectivity Issue**: Fixed a critical bug in `QuantaAuth` where nodes exchanged randomly generated `PeerId`s during the TLS handshake instead of their true Libp2p `PublicKey`. This caused `Gossipsub` and `Kademlia` to reject the connections due to signature mismatches. Nodes now exchange their true `PublicKey` within the TLS channel.
+- **Missing Routing Table Updates**: Fixed a critical bug where nodes established a TCP connection but never populated the internal `PeerManager` and `Kademlia` routing table. Nodes now correctly process `SwarmEvent::ConnectionEstablished` to extract the `SocketAddr` (supporting both IPv4 and IPv6) and add the peer to the local topology. This permanently resolves the `BFT Proposer: no peers connected` deadlock.
+- **Docker Devnet Integration**: Fixed `docker-compose.testnet.yml` startup arguments (`--db` instead of `--db-path`), fixed Docker volume permission denial crashes, and upgraded the 4-node devnet target in the `Makefile`.
 - Bumped `PROTOCOL_VERSION` to 58.
 
 ## [v3.2.0-alpha] - 2026-09-01

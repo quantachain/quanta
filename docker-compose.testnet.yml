@@ -1,0 +1,84 @@
+version: '3.8'
+
+services:
+  node1:
+    build: .
+    image: quanta:local-test
+    container_name: quanta-testnet-node1
+    command: >
+      quanta start
+      --devnet 1
+      --devnet-nodes 4
+      --validator-wallet /home/quanta/testnet_data/validator1.qua
+      --db /home/quanta/testnet_data/db1
+    ports:
+      - "3000:3000"  # API port
+      - "8333:8333"  # Network port
+    volumes:
+      - ./testnet_data:/home/quanta/testnet_data
+    networks:
+      - quanta-testnet
+
+  node2:
+    image: quanta:local-test
+    container_name: quanta-testnet-node2
+    depends_on:
+      - node1
+    command: >
+      quanta start
+      --devnet 2
+      --devnet-nodes 4
+      --validator-wallet /home/quanta/testnet_data/validator2.qua
+      --db /home/quanta/testnet_data/db2
+      --bootstrap node1:8333
+    ports:
+      - "3001:3000"
+      - "8334:8333"
+    volumes:
+      - ./testnet_data:/home/quanta/testnet_data
+    networks:
+      - quanta-testnet
+
+  node3:
+    image: quanta:local-test
+    container_name: quanta-testnet-node3
+    depends_on:
+      - node1
+    command: >
+      quanta start
+      --devnet 3
+      --devnet-nodes 4
+      --validator-wallet /home/quanta/testnet_data/validator3.qua
+      --db /home/quanta/testnet_data/db3
+      --bootstrap node1:8333
+    ports:
+      - "3002:3000"
+      - "8335:8333"
+    volumes:
+      - ./testnet_data:/home/quanta/testnet_data
+    networks:
+      - quanta-testnet
+
+  node4:
+    image: quanta:local-test
+    container_name: quanta-testnet-node4
+    depends_on:
+      - node1
+    command: >
+      quanta start
+      --devnet 4
+      --devnet-nodes 4
+      --validator-wallet /home/quanta/testnet_data/validator4.qua
+      --db /home/quanta/testnet_data/db4
+      --bootstrap node1:8333
+    ports:
+      - "3003:3000"
+      - "8336:8333"
+    volumes:
+      - ./testnet_data:/home/quanta/testnet_data
+    networks:
+      - quanta-testnet
+
+networks:
+  quanta-testnet:
+    driver: bridge

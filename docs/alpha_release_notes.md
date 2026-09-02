@@ -5,6 +5,8 @@ This is a critical hotfix for the `v3.2.0-alpha` "Swarm" release. Operators repo
 
 **What was fixed:**
 - **QuantaAuth `PeerId` Mismatch**: During the TLS + Falcon-512 handshake, nodes were previously exchanging randomly generated Libp2p `PeerId`s instead of their true cryptographic identities. This caused `Gossipsub` and `Kademlia` to immediately reject the connections because the `PeerId` signing the messages didn't match the connection handshake. The `QuantaAuth` module has been patched to seamlessly exchange the true `libp2p::identity::PublicKey` within the secure TLS channel, allowing peers to properly identify and connect to each other.
+- **Kademlia Routing Initialization Fixed**: Patched a bug where nodes connected successfully via TCP but failed to add the discovered endpoints to the local Kademlia and `PeerManager` tables, resulting in BFT proposers deadlocking with `no peers connected` indefinitely. Nodes now capture `ConnectionEstablished` events natively.
+- **Docker Devnet Restored**: Fixed volume permission crash loops (switching from root to `quanta` user inside the container), corrected `--db` CLI arguments for local `testnet` targets, and properly mapped internal Docker IPs to both IPv4 and IPv6 Multiaddrs.
 
 ---
 

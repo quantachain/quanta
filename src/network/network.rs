@@ -150,17 +150,38 @@ impl Network {
                                     libp2p::core::ConnectedPoint::Dialer { address, .. } => address,
                                     libp2p::core::ConnectedPoint::Listener { send_back_addr, .. } => send_back_addr,
                                 };
-                                if let Some(libp2p::multiaddr::Protocol::Ip4(ip)) = addr.iter().next() {
-                                    if let Some(libp2p::multiaddr::Protocol::Tcp(port)) = addr.iter().nth(1) {
-                                        let socket_addr = std::net::SocketAddr::new(std::net::IpAddr::V4(ip), port);
-                                        peer_to_addr.insert(peer_id, socket_addr);
-                                        addr_to_peer.insert(socket_addr, peer_id);
+                                swarm.behaviour_mut().kademlia.add_address(&peer_id, addr.clone());
+                                
+                                let socket_addr_opt = match addr.iter().next() {
+                                    Some(libp2p::multiaddr::Protocol::Ip4(ip)) => {
+                                        if let Some(libp2p::multiaddr::Protocol::Tcp(port)) = addr.iter().nth(1) {
+                                            Some(std::net::SocketAddr::new(std::net::IpAddr::V4(ip), port))
+                                        } else { None }
+                                    },
+                                    Some(libp2p::multiaddr::Protocol::Ip6(ip)) => {
+                                        if let Some(libp2p::multiaddr::Protocol::Tcp(port)) = addr.iter().nth(1) {
+                                            Some(std::net::SocketAddr::new(std::net::IpAddr::V6(ip), port))
+                                        } else { None }
+                                    },
+                                    _ => None,
+                                };
+                                
+                                if let Some(socket_addr) = socket_addr_opt {
+                                    peer_to_addr.insert(peer_id, socket_addr);
+                                    addr_to_peer.insert(socket_addr, peer_id);
+                                    
+                                    let swarm_tx_opt = network_clone_for_swarm.swarm_tx.read().await.clone();
+                                    if let Some(swarm_tx) = swarm_tx_opt {
+                                        if let Ok(peer) = crate::network::peer::Peer::new(socket_addr, peer_id.to_string(), swarm_tx).await {
+                                            let _ = network_clone_for_swarm.peer_manager.add_peer(std::sync::Arc::new(peer)).await;
+                                        }
                                     }
                                 }
                             }
                             libp2p::swarm::SwarmEvent::ConnectionClosed { peer_id, .. } => {
                                 if let Some(addr) = peer_to_addr.remove(&peer_id) {
                                     addr_to_peer.remove(&addr);
+                                    network_clone_for_swarm.peer_manager.remove_peer(addr).await;
                                 }
                             }
                             libp2p::swarm::SwarmEvent::Behaviour(crate::network::p2p_behaviour::QuantaBehaviourEvent::RequestResponse(
@@ -189,7 +210,11 @@ impl Network {
                     Some(cmd) = swarm_cmd_rx.recv() => {
                         match cmd {
                             SwarmCommand::Dial(addr) => {
-                                let multiaddr: Multiaddr = format!("/ip4/{}/tcp/{}", addr.ip(), addr.port()).parse().unwrap();
+                                let multiaddr: Multiaddr = if addr.is_ipv6() {
+                                    format!("/ip6/{}/tcp/{}", addr.ip(), addr.port()).parse().unwrap()
+                                } else {
+                                    format!("/ip4/{}/tcp/{}", addr.ip(), addr.port()).parse().unwrap()
+                                };
                                 let _ = swarm.dial(multiaddr);
                             }
                             SwarmCommand::SendTo(addr, msg) => {
