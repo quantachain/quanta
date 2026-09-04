@@ -1,6 +1,16 @@
 # Quanta Alpha Release Notes
 
-## Current Version: v3.2.3-alpha (BW-FIX-5: Strict Protocol Version Enforce)
+## Current Version: v3.2.4-alpha (Connection Tracking Fix)
+
+This fixes a critical bug where nodes were overwhelmed by dropped peers reconnecting, leading to "Dropping inbound stream because we are at capacity" and node freezing.
+
+### Key Changes
+- **Connection Tracking**: Fixed `SwarmCommand::Disconnect` and `SwarmEvent::ConnectionClosed` race conditions that permanently leaked libp2p connections. Outdated nodes are now cleanly dropped and disconnected without leaving ghost connections that spam `yamux` streams.
+- **Protocol Bump**: Bumped to `v60` to enforce a clean network upgrade.
+
+## Previous Fixes (Summarized)
+
+### Previous Release: v3.2.3-alpha (BW-FIX-5: Strict Protocol Version Enforce)
 
 This is a fast follow-up to BW-FIX-4. We are deploying a strict network handshake check that actively drops legacy `v58` connections.
 

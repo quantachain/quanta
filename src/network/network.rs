@@ -189,10 +189,12 @@ impl Network {
                                     }
                                 }
                             }
-                            libp2p::swarm::SwarmEvent::ConnectionClosed { peer_id, .. } => {
-                                if let Some(addr) = peer_to_addr.remove(&peer_id) {
-                                    addr_to_peer.remove(&addr);
-                                    network_clone_for_swarm.peer_manager.remove_peer(addr).await;
+                            libp2p::swarm::SwarmEvent::ConnectionClosed { peer_id, num_established, .. } => {
+                                if num_established == 0 {
+                                    if let Some(addr) = peer_to_addr.remove(&peer_id) {
+                                        addr_to_peer.remove(&addr);
+                                        network_clone_for_swarm.peer_manager.remove_peer(addr).await;
+                                    }
                                 }
                             }
                             libp2p::swarm::SwarmEvent::Behaviour(crate::network::p2p_behaviour::QuantaBehaviourEvent::RequestResponse(
@@ -240,7 +242,7 @@ impl Network {
                                 }
                             }
                             SwarmCommand::Disconnect(addr) => {
-                                if let Some(peer_id) = addr_to_peer.remove(&addr) {
+                                if let Some(peer_id) = addr_to_peer.get(&addr).cloned() {
                                     let _ = swarm.disconnect_peer_id(peer_id);
                                 }
                             }
