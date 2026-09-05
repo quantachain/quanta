@@ -30,10 +30,13 @@ pub fn build_swarm(
         client_config,
     };
 
+    let mut yamux_config = yamux::Config::default();
+    yamux_config.set_max_num_streams(8192);
+
     let transport = tcp::tokio::Transport::new(tcp::Config::default().nodelay(true))
         .upgrade(upgrade::Version::V1)
         .authenticate(auth_upgrade)
-        .multiplex(yamux::Config::default())
+        .multiplex(yamux_config)
         .timeout(Duration::from_secs(20))
         .boxed();
 

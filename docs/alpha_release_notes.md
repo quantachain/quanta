@@ -1,63 +1,24 @@
 # Quanta Alpha Release Notes
 
-## Current Version: v3.2.6-alpha — Strict Isolation + Agent Reputation
+## Current Version: v3.2.7-alpha — Fix Yamux Capacity Crash
 
-This release delivers two changes: a hard network isolation to restore block production, and the first new native contract template since launch — on-chain AI agent reputation.
+This release patches a critical network leak that was causing the node's Yamux stream capacity to max out, leading to consensus stalling (`0 valid sigs, need 1`) during heavy AlephBFT synchronization.
 
 ---
 
-### 🔴 Mandatory Upgrade — Protocol v62
-This is a **mandatory upgrade**. Nodes still running `v60` or `v61` will be **immediately rejected** and cannot participate in consensus. To rejoin: `docker-compose pull && docker-compose up -d`.
+### 🔴 Mandatory Upgrade — Protocol v63
+This is a **mandatory upgrade**. Nodes running older protocols will be rejected. The network magic has also been bumped to `QT63`. 
+To rejoin: `docker-compose pull && docker-compose up -d`.
 
 ---
 
 ### What's New
 
-#### Network Strict Isolation (Protocol v62)
-- Bumped `PROTOCOL_VERSION` to `62` and `TESTNET_MAGIC` to `QT62`.
-- **Removed all backward compatibility** from `NetworkMessage::verify()` — only `QT62` is now accepted.
-- Changed the `Version` handshake check from a permissive range (`v >= 59`) to strict equality (`v == 62`).
-- **Why this is needed**: The v61 update still allowed v60 nodes to connect via backward compat. Since those v60 nodes carry a BFT peer resolution bug, including them in the consensus set prevents 2/3 quorum from being reached, stalling block production. Dropping them forces a clean, bug-free consensus group.
-
-#### Agent Reputation Contract (Template 6) — `TEMPLATE_AGENT_REPUTATION`
-A new native contract template that brings a trust layer to the Quanta AI agent economy.
-
-**The Problem:** Quanta already has `AgentJob`, `AgentBid`, and `AgentRegistry` contracts. But there's no way for a new employer to know whether an agent is trustworthy before hiring them. This new contract solves that.
-
-**How It Works:**
-1. An agent (or their owner) deploys an `AgentReputation` contract, linking it to their wallet address.
-2. After a job is completed (`AgentJob` → status `claimed`, `AgentBid` → status `selected`), the **employer** calls `rate` on the agent's reputation contract with:
-   - `job_contract`: the completed job's contract address (on-chain proof of work)
-   - `score`: 1–5 stars
-   - `review_hash` (optional): SHA3 hash of an off-chain review text
-3. The contract enforces:
-   - **Score range** (1–5 only)
-   - **Job must be completed** — cannot rate an open or refunded job
-   - **Caller must be employer** — only the job owner can rate
-   - **Idempotency** — each job contract can only rate once (no double-rating)
-4. Aggregated stats stored on-chain: `total_jobs`, `total_score`, `avg_score_x100` (e.g. `450` = 4.50★)
-5. Emits `AgentRated` events, indexed by QuaScan explorer.
-
-**New API Endpoint:** `GET /api/agents/:address/reputation`
-```json
-{
-  "agent_address": "0xABC...",
-  "contract_address": "0xDEF...",
-  "total_jobs": 12,
-  "avg_score_x100": 467,
-  "avg_stars": "4.67",
-  "last_rated_at": 208950,
-  "reviews": [
-    {
-      "height": 208900,
-      "employer": "0x123...",
-      "job_contract": "0x456...",
-      "score": "5",
-      "review_hash": "abc123..."
-    }
-  ]
-}
-```
+#### Fixed: RequestResponse Stream Exhaustion
+- **The Bug**: Quanta uses the libp2p `RequestResponse` protocol for point-to-point messaging (such as AlephBFT signatures and fetches). Previously, the node handled incoming requests but silently dropped the response channel. Since no response was ever sent, the Yamux streams remained half-open until they timed out 20 seconds later. During intense BFT synchronization, this caused the node to rapidly exhaust Yamux's 256-stream limit, logging `WARN Dropping inbound stream because we are at capacity` and stalling consensus completely.
+- **The Fix**: The node now explicitly sends a dummy `VerAck` response back through the channel when a request is received. This cleanly and immediately closes the underlying Yamux stream, preventing any leaks.
+- **Buffer Increase**: As a secondary safety measure, the Yamux `max_num_streams` has been significantly increased from the default `256` to `8192` to handle massive bursts of concurrent network traffic in production.
+- **Protocol Bump**: Bumped `PROTOCOL_VERSION` to `63` and `TESTNET_MAGIC` to `QT63` to enforce a clean reset of the consensus participants.
 
 ---
 

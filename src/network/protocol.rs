@@ -144,13 +144,13 @@ impl From<&Block> for BlockHeader {
 // CHANGED 2026-09-05 v3.2.6-alpha: Bumped 61 → 62.
 // Strict network isolation: drop backward compatibility to fix block production.
 // Also introduces on-chain Agent Reputation contract (Template 6).
-pub const PROTOCOL_VERSION: u32 = 62;
+pub const PROTOCOL_VERSION: u32 = 63;
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"QT62"; // v3.2.6-alpha — Strict isolation + Agent Reputation
+pub const TESTNET_MAGIC: [u8; 4] = *b"QT63"; // v3.2.7-alpha — Fix Yamux capacity crash
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;

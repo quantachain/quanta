@@ -201,10 +201,11 @@ impl Network {
                                 libp2p::request_response::Event::Message { peer, message, .. }
                             )) => {
                                 match message {
-                                    libp2p::request_response::Message::Request { request, .. } => {
+                                    libp2p::request_response::Message::Request { request, channel, .. } => {
                                         if let Some(socket_addr) = peer_to_addr.get(&peer) {
                                             let _ = network_clone_for_swarm.message_tx.send((*socket_addr, request)).await;
                                         }
+                                        let _ = swarm.behaviour_mut().request_response.send_response(channel, crate::network::protocol::P2PMessage::VerAck);
                                     }
                                     _ => {}
                                 }

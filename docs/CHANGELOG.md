@@ -1,5 +1,12 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.7-alpha] - 2026-09-05
+
+### Fixed
+- **RequestResponse Stream Exhaustion**: Fixed a critical network leak where incoming `RequestResponse` messages (such as AlephBFT signatures and fetches) were processed but the response channel was ignored. This caused Yamux streams to remain half-open until they timed out after 20 seconds. The node now explicitly sends a dummy `VerAck` response to cleanly close the stream immediately.
+- **Yamux Stream Limit**: Increased the default Yamux `max_num_streams` from `256` to `8192` to provide a massive safety buffer for heavy BFT bursts in production.
+- **Protocol Bump**: Bumped `PROTOCOL_VERSION` to `63` and `TESTNET_MAGIC` to `QT63` to enforce a clean reset of the network.
+
 ## [v3.2.6-alpha] - 2026-09-05
 
 ### Added

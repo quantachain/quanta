@@ -3444,7 +3444,7 @@ dependencies = [
 
 [[package]]
 name = "quanta"
-version = "3.2.5-alpha"
+version = "3.2.6-alpha"
 dependencies = [
  "aleph-bft",
  "argon2",
