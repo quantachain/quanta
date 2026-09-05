@@ -139,13 +139,15 @@ impl From<&Block> for BlockHeader {
 // Sync deadlock fix: Bypass parallel signature verification for blocks within the active sync range.
 // CHANGED 2026-09-04 v3.2.4-alpha: Bumped 59 → 60.
 // Connection tracking fix.
-pub const PROTOCOL_VERSION: u32 = 60;
+// CHANGED 2026-09-05 v3.2.5-alpha: Bumped 60 → 61.
+// Network partition fix: backwards compatibility for versions 59 and 60.
+pub const PROTOCOL_VERSION: u32 = 61;
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"QT60"; // v3.2.4-alpha — Connection tracking fix
+pub const TESTNET_MAGIC: [u8; 4] = *b"QT61"; // v3.2.5-alpha — Cross-version handshake fix
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;
@@ -161,7 +163,7 @@ impl NetworkMessage {
 
     /// Verify message has correct network magic
     pub fn verify(&self) -> bool {
-        self.magic == NETWORK_MAGIC
+        self.magic == NETWORK_MAGIC || self.magic == *b"QT60" || self.magic == *b"QT59"
     }
 }
 

@@ -1,5 +1,10 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.5-alpha] - 2026-09-05
+
+### Fixed
+- **BFT Consensus Halt (Peer Resolution Bug)**: Fixed a critical bug introduced in v3.2.2-alpha where BFT unicast messages were silently dropped. The `handle_message` function was updated to correctly use the resolved `actual_peer` reference across all its match handlers. This ensures `node_id` is properly updated during the `P2PMessage::Version` handshake, allowing validators to correctly identify each other for AlephBFT unicast routing.
+
 ## [v3.2.4-alpha] - 2026-09-04
 
 ### Fixed
