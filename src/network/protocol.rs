@@ -137,13 +137,15 @@ impl From<&Block> for BlockHeader {
 // create_block_template state root fix from v2.5.0 proposers that embed a wrong root.
 // CHANGED 2026-09-01 v3.1.5-alpha: Bumped 55 → 56.
 // Sync deadlock fix: Bypass parallel signature verification for blocks within the active sync range.
-pub const PROTOCOL_VERSION: u32 = 59;
+// CHANGED 2026-09-04 v3.2.4-alpha: Bumped 59 → 60.
+// Connection tracking fix.
+pub const PROTOCOL_VERSION: u32 = 60;
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"QT59"; // v3.2.2-alpha — Egress spam fix
+pub const TESTNET_MAGIC: [u8; 4] = *b"QT60"; // v3.2.4-alpha — Connection tracking fix
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;

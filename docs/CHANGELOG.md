@@ -1,5 +1,11 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.4-alpha] - 2026-09-04
+
+### Fixed
+- **Connection Tracking**: Fixed a critical bug in `SwarmCommand::Disconnect` and `SwarmEvent::ConnectionClosed` that permanently leaked libp2p connections when peers repeatedly reconnected. This leak allowed disconnected outdated nodes to bypass the protocol version check and keep their gossipsub streams open, overwhelming the node with "Dropping inbound stream because we are at capacity" errors and halting the network.
+- **Protocol Version Bump**: Bumped `PROTOCOL_VERSION` to 60.
+
 ## [v3.2.3-alpha] - 2026-09-02
 
 ### Fixed
