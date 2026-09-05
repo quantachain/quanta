@@ -1,14 +1,21 @@
 # Quanta Alpha Release Notes
 
-## Current Version: v3.2.4-alpha (Connection Tracking Fix)
+## Current Version: v3.2.5-alpha (BFT Peer Resolution Fix)
+
+This release fixes a critical bug introduced in v3.2.2-alpha where BFT unicast messages were being silently dropped due to a missing peer `node_id` resolution in the message handler. This restores BFT consensus.
+
+### Key Changes
+- **Peer Resolution**: Fixed `handle_message` to correctly use the resolved `actual_peer` reference across all handlers. This ensures `node_id` is updated correctly during the `P2PMessage::Version` handshake so validators can identify each other for unicast routing.
+
+## Previous Fixes (Summarized)
+
+### Previous Release: v3.2.4-alpha (Connection Tracking Fix)
 
 This fixes a critical bug where nodes were overwhelmed by dropped peers reconnecting, leading to "Dropping inbound stream because we are at capacity" and node freezing.
 
 ### Key Changes
 - **Connection Tracking**: Fixed `SwarmCommand::Disconnect` and `SwarmEvent::ConnectionClosed` race conditions that permanently leaked libp2p connections. Outdated nodes are now cleanly dropped and disconnected without leaving ghost connections that spam `yamux` streams.
 - **Protocol Bump**: Bumped to `v60` to enforce a clean network upgrade.
-
-## Previous Fixes (Summarized)
 
 ### Previous Release: v3.2.3-alpha (BW-FIX-5: Strict Protocol Version Enforce)
 
