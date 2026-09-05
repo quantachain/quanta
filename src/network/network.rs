@@ -454,7 +454,7 @@ impl Network {
             }
             P2PMessage::Version { version, height, cumulative_work, timestamp: _, node_id, listen_port: _ } => {
                 tracing::debug!("Received Version from {}: version={}, node_id={}", addr, version, node_id);
-                if version < 59 || version > crate::network::protocol::PROTOCOL_VERSION {
+                if version != crate::network::protocol::PROTOCOL_VERSION {
                     tracing::warn!("Rejecting connection from {} due to protocol version mismatch (theirs: {}, ours: {})", addr, version, crate::network::protocol::PROTOCOL_VERSION);
                     self.peer_manager.remove_peer(addr).await;
                     if let Some(tx) = &*self.swarm_tx.read().await {

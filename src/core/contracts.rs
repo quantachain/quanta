@@ -21,6 +21,10 @@ pub const TEMPLATE_AGENT_JOB: u8 = 2;
 pub const TEMPLATE_AGENT_BID: u8 = 3;
 pub const TEMPLATE_STREAM: u8 = 4;
 pub const TEMPLATE_AGENT_REGISTRY: u8 = 5;
+/// TEMPLATE_AGENT_REPUTATION (v3.2.6-alpha): On-chain, Sybil-resistant reputation ledger for AI agents.
+/// An employer who completed an AgentJob or AgentBid contract can submit a 1-5 star rating.
+/// Ratings are linked to the completed job contract address to prevent fake reviews.
+pub const TEMPLATE_AGENT_REPUTATION: u8 = 6;
 
 #[derive(Serialize, Deserialize)]
 pub struct EscrowInitArgs {
@@ -75,6 +79,25 @@ pub struct AgentUpdateArgs {
     pub endpoint_hash: Option<String>,
     pub price_per_call: Option<u64>,
     pub active: Option<bool>,
+}
+
+/// v3.2.6-alpha: Init args for AgentReputation contract.
+/// Deployed once per agent by the agent's wallet (or their registry owner).
+#[derive(Serialize, Deserialize)]
+pub struct AgentReputationInitArgs {
+    /// The agent wallet address whose reputation this contract tracks.
+    pub agent_address: String,
+}
+
+/// v3.2.6-alpha: Rating submission args.
+#[derive(Serialize, Deserialize)]
+pub struct AgentRateArgs {
+    /// The completed job contract address (AgentJob or AgentBid) that justifies this rating.
+    pub job_contract: String,
+    /// Rating from 1 (worst) to 5 (best).
+    pub score: u8,
+    /// Optional short review text hash (sha3 of off-chain text, stored on-chain for auditability).
+    pub review_hash: Option<String>,
 }
 
 fn emit(contract: &mut ContractState, height: u64, name: &str, data: Vec<(&str, String)>) {
@@ -190,6 +213,22 @@ impl NativeContracts {
                 s.insert("active".into(), "true".into());
                 s.insert("registered_at".into(), current_height.to_string());
             }
+            TEMPLATE_AGENT_REPUTATION => {
+                let a: AgentReputationInitArgs =
+                    serde_json::from_slice(init_args).map_err(|e| e.to_string())?;
+                if a.agent_address.is_empty() {
+                    return Err("agent_address must not be empty".into());
+                }
+                s.insert("agent_address".into(), a.agent_address);
+                s.insert("total_jobs".into(), "0".into());
+                s.insert("total_score".into(), "0".into());
+                // avg_score_x100: integer representation of average * 100 (e.g. 450 = 4.50 stars)
+                s.insert("avg_score_x100".into(), "0".into());
+                s.insert("last_rated_at".into(), "0".into());
+                // Comma-separated list of job_contract addresses that have already rated,
+                // to prevent duplicate ratings from the same job.
+                s.insert("rated_jobs".into(), "".into());
+            }
             _ => return Err(format!("Unknown template_id: {}", template_id)),
         }
         let mut cs = ContractState {
@@ -258,6 +297,9 @@ impl NativeContracts {
             }
             TEMPLATE_AGENT_REGISTRY => {
                 Self::agent_registry(state, tx, &mut c, method, call_args, current_height)?
+            }
+            TEMPLATE_AGENT_REPUTATION => {
+                Self::agent_reputation(state, tx, &mut c, method, call_args, current_height)?
             }
             _ => return Err("Unknown template_id in call".into()),
         }
@@ -710,6 +752,111 @@ impl NativeContracts {
                 );
             }
             _ => return Err(format!("Unknown AgentRegistry method: {}", method)),
+        }
+        Ok(())
+    }
+
+    // -- AgentReputation (v3.2.6-alpha) ------------------------------------------
+    /// On-chain reputation ledger for AI agents.
+    /// Methods: "rate"
+    /// Guards:
+    ///   - score must be 1–5
+    ///   - the referenced job_contract must exist, be of type AgentJob or AgentBid,
+    ///     and be in "claimed" or "selected" (completed) status
+    ///   - the caller (tx.sender) must be the employer (owner) of the job contract
+    ///   - each job_contract can only rate once (idempotency)
+    fn agent_reputation(
+        state: &mut AccountState,
+        tx: &Transaction,
+        c: &mut ContractState,
+        method: &str,
+        call_args: &[u8],
+        h: u64,
+    ) -> Result<(), String> {
+        match method {
+            "rate" => {
+                let a: AgentRateArgs =
+                    serde_json::from_slice(call_args).map_err(|e| e.to_string())?;
+
+                // Guard 1: Score range
+                if a.score < 1 || a.score > 5 {
+                    return Err("score must be 1–5".into());
+                }
+
+                // Guard 2: Job contract must exist and be completed
+                let job = state
+                    .contracts
+                    .get(&a.job_contract)
+                    .ok_or_else(|| format!("Job contract {} not found", a.job_contract))?;
+                let status = job.storage.get("status").map(String::as_str).unwrap_or("");
+                if status != "claimed" && status != "selected" {
+                    return Err(format!(
+                        "Job contract {} is not completed (status={}). Only completed jobs can generate ratings.",
+                        a.job_contract, status
+                    ));
+                }
+
+                // Guard 3: Caller must be the employer (owner) of the job contract
+                if tx.sender != job.owner {
+                    return Err("Only the job employer can submit a rating".into());
+                }
+
+                // Guard 4: Idempotency — each job can only rate once
+                let rated_jobs = c.storage.get("rated_jobs").cloned().unwrap_or_default();
+                let already_rated = rated_jobs
+                    .split(',')
+                    .any(|j| j == a.job_contract);
+                if already_rated {
+                    return Err(format!("Job contract {} has already submitted a rating", a.job_contract));
+                }
+
+                // All guards passed — update reputation scores
+                let total_jobs: u64 = c.storage.get("total_jobs")
+                    .and_then(|v| v.parse().ok()).unwrap_or(0);
+                let total_score: u64 = c.storage.get("total_score")
+                    .and_then(|v| v.parse().ok()).unwrap_or(0);
+
+                let new_total_jobs  = total_jobs + 1;
+                let new_total_score = total_score + a.score as u64;
+                // avg_score_x100: e.g. 4.50 stars → 450
+                let avg_x100 = new_total_score * 100 / new_total_jobs;
+
+                c.storage.insert("total_jobs".into(),   new_total_jobs.to_string());
+                c.storage.insert("total_score".into(),  new_total_score.to_string());
+                c.storage.insert("avg_score_x100".into(), avg_x100.to_string());
+                c.storage.insert("last_rated_at".into(), h.to_string());
+
+                // Append job contract to rated_jobs (comma-separated)
+                let new_rated = if rated_jobs.is_empty() {
+                    a.job_contract.clone()
+                } else {
+                    format!("{},{}", rated_jobs, a.job_contract)
+                };
+                c.storage.insert("rated_jobs".into(), new_rated);
+
+                let mut event_data = vec![
+                    ("agent",       c.storage.get("agent_address").cloned().unwrap_or_default()),
+                    ("employer",    tx.sender.clone()),
+                    ("job_contract",a.job_contract.clone()),
+                    ("score",       a.score.to_string()),
+                    ("avg_x100",    avg_x100.to_string()),
+                    ("total_jobs",  new_total_jobs.to_string()),
+                ];
+                if let Some(rh) = a.review_hash {
+                    event_data.push(("review_hash", rh));
+                }
+                // Avoid lifetime issues: convert &str keys to owned Strings
+                let owned: Vec<(String, String)> = event_data
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v))
+                    .collect();
+                let borrowed: Vec<(&str, String)> = owned
+                    .iter()
+                    .map(|(k, v)| (k.as_str(), v.clone()))
+                    .collect();
+                emit(c, h, "AgentRated", borrowed);
+            }
+            _ => return Err(format!("Unknown AgentReputation method: {}", method)),
         }
         Ok(())
     }

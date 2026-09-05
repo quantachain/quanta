@@ -1,5 +1,14 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.6-alpha] - 2026-09-05
+
+### Added
+- **Agent Reputation Contract (Template 6)**: New native `TEMPLATE_AGENT_REPUTATION` contract that provides an on-chain, Sybil-resistant reputation ledger for AI agents. Employers who have completed an `AgentJob` or `AgentBid` contract can submit a 1–5 star rating linked to that job contract address. Each job can only rate once (idempotency guard). Scores are aggregated as `total_jobs`, `total_score`, and `avg_score_x100` (integer × 100 for precision). Emits `AgentRated` events indexed by QuaScan.
+- **API Endpoint `/api/agents/:address/reputation`**: New REST endpoint to query an agent's on-chain reputation. Returns `total_jobs`, `avg_score_x100`, `avg_stars` (human-readable), `last_rated_at` block height, and full list of reviews with employer, job contract reference, and optional review hash.
+
+### Fixed
+- **Strict Network Isolation (Protocol v62)**: Bumped `PROTOCOL_VERSION` to 62 and `TESTNET_MAGIC` to `QT62`. Removed all backward compatibility (`QT60`, `QT59` fallbacks) from `NetworkMessage::verify()`. Changed the version handshake check in `network.rs` from a range (`v >= 59`) to strict equality (`v == 62`). Nodes running `v60` or `v61` are now immediately rejected, enabling clean BFT consensus among fully upgraded validators and restoring block production.
+
 ## [v3.2.5-alpha] - 2026-09-05
 
 ### Fixed

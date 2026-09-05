@@ -951,6 +951,7 @@ pub fn create_router(
         .route("/api/contracts/:address", get(get_contract))
         .route("/api/contracts/:address/events", get(get_contract_events))
         .route("/api/agents", get(list_agents))
+        .route("/api/agents/:address/reputation", get(get_agent_reputation))
         .layer(
             ServiceBuilder::new()
                 .layer(middleware::from_fn(rate_limiter))
@@ -1118,6 +1119,63 @@ async fn list_agents(
         StatusCode::OK,
         Json(serde_json::json!({ "agents": agents, "count": count })),
     )
+}
+
+/// GET /api/agents/:address/reputation
+/// Returns the on-chain reputation score for an agent from their AgentReputation contract.
+/// Returns total_jobs, avg_score (as x100 integer), last_rated_at block, and all AgentRated events.
+async fn get_agent_reputation(
+    State(state): State<Arc<ApiState>>,
+    Path(address): Path<String>,
+) -> impl IntoResponse {
+    let blockchain = state.blockchain.clone();
+    let acc = blockchain.get_account_state_clone().await.unwrap();
+
+    // Find the AgentReputation contract whose agent_address matches the requested address
+    let rep_contract = acc.contracts.iter().find(|(_, c)| {
+        c.template_id == crate::core::contracts::TEMPLATE_AGENT_REPUTATION
+            && c.storage.get("agent_address").map(String::as_str) == Some(address.as_str())
+    });
+
+    match rep_contract {
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": format!("No reputation contract found for agent {}", address) })),
+        ),
+        Some((contract_addr, c)) => {
+            let total_jobs: u64 = c.storage.get("total_jobs")
+                .and_then(|v| v.parse().ok()).unwrap_or(0);
+            let avg_score_x100: u64 = c.storage.get("avg_score_x100")
+                .and_then(|v| v.parse().ok()).unwrap_or(0);
+            let last_rated_at: u64 = c.storage.get("last_rated_at")
+                .and_then(|v| v.parse().ok()).unwrap_or(0);
+
+            // Collect AgentRated events as reviews
+            let reviews: Vec<serde_json::Value> = c.events.iter()
+                .filter(|e| e.name == "AgentRated")
+                .map(|e| serde_json::json!({
+                    "height":       e.height,
+                    "employer":     e.data.get("employer"),
+                    "job_contract": e.data.get("job_contract"),
+                    "score":        e.data.get("score"),
+                    "review_hash":  e.data.get("review_hash"),
+                }))
+                .collect();
+
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "agent_address":   address,
+                    "contract_address": contract_addr,
+                    "total_jobs":      total_jobs,
+                    "avg_score_x100":  avg_score_x100,
+                    "avg_stars":       format!("{:.2}", avg_score_x100 as f64 / 100.0),
+                    "last_rated_at":   last_rated_at,
+                    "reviews":         reviews,
+                })),
+            )
+        }
+    }
 }
 
 #[cfg(test)]
