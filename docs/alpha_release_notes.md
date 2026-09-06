@@ -1,23 +1,23 @@
 # Quanta Alpha Release Notes
 
-## Current Version: v3.2.8-alpha — Sync Blockchain Database Self-Heal
+## Current Version: v3.2.9-alpha — Network Sync Capacity Fix
 
-This release patches a critical bug where nodes restarting from a non-zero block height were refusing to sync due to reading an artificially inflated `cumulative_work` from their database.
+This release fixes a critical syncing bottleneck where nodes dropping inbound streams ("at capacity") would fail to download blocks. The libp2p `max_negotiating_inbound_streams` limit has been increased from 128 to 2048 to support heavy testnet traffic.
 
 ---
 
-### 🔴 Mandatory Upgrade — Protocol v64
-This is a **mandatory upgrade**. Nodes running older protocols will be rejected. The network magic has also been bumped to `QT64`. 
+### 🔴 Mandatory Upgrade — Protocol v65
+This is a **mandatory upgrade**. Nodes running older protocols will be rejected. The network magic has also been bumped to `QT65`. 
 To rejoin: `docker-compose pull && docker-compose up -d`.
 
 ---
 
 ### What's New
 
-#### Fixed: Sync Blockchain (Database Self-Heal)
-- **The Bug**: Due to an older `deep_reorg` bug, some nodes had an artificially inflated `cumulative_work` persisted in their Sled database. Upon restart, this inflated local work caused nodes to refuse to sync from peers, believing their own chain was the heaviest (logging `"Already on the heaviest chain — no sync needed"`). 
-- **The Fix**: The node now strictly sanitizes the stored `cumulative_work` against the deterministic expected value (`height as u128`) on startup. Corrupted databases are instantly healed, and nodes will correctly sync without needing a reset from block 0.
-- **Protocol Bump**: Bumped `PROTOCOL_VERSION` to `64` and `TESTNET_MAGIC` to `QT64` to enforce a clean reset of the consensus participants.
+#### Fixed: Dropping inbound streams at capacity
+- **The Bug**: Under heavy network load or when synchronizing the blockchain from scratch, the node was hitting the default libp2p `SwarmBuilder` inbound stream limit (128). This caused the node to actively drop incoming `request_response` streams containing blocks, preventing synchronization.
+- **The Fix**: Explicitly configured `.with_max_negotiating_inbound_streams(2048)` in the `SwarmBuilder` to massively increase inbound capacity.
+- **Protocol Bump**: Bumped `PROTOCOL_VERSION` to `65` and `TESTNET_MAGIC` to `QT65`.
 
 ---
 
@@ -25,6 +25,7 @@ To rejoin: `docker-compose pull && docker-compose up -d`.
 
 | Version | Date | Summary |
 |---|---|---|
+| v3.2.8-alpha | 2026-09-06 | Sync Blockchain Database Self-Heal — Santized `cumulative_work` on restart. Protocol bumped to v64 |
 | v3.2.5-alpha | 2026-09-05 | BFT peer resolution fix — unicast messages were silently dropped due to missing `node_id` resolution in handshake handler |
 | v3.2.4-alpha | 2026-09-04 | Connection tracking fix — libp2p ghost connections leaked on reconnect, causing capacity errors. Protocol bumped to v60 |
 | v3.2.3-alpha | 2026-09-02 | Strict v58 handshake rejection + log noise reduction |

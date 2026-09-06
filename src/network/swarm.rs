@@ -87,7 +87,12 @@ pub fn build_swarm(
         .unwrap()
         .with_behaviour(|_key| behaviour)
         .unwrap()
-        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
+        .with_swarm_config(|c| {
+            // FIX (2026-09-06, v3.2.9-alpha): Increased max_negotiating_inbound_streams from default (128) 
+            // to 2048 to prevent "Dropping inbound stream because we are at capacity" errors during network sync.
+            c.with_idle_connection_timeout(Duration::from_secs(60))
+             .with_max_negotiating_inbound_streams(2048)
+        })
         .build();
 
     Ok(swarm)

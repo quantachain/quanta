@@ -1,5 +1,11 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.9-alpha] - 2026-09-06
+
+### Fixed
+- **Network Sync Capacity Fix**: Fixed a critical syncing bottleneck where nodes dropping inbound streams ("at capacity") would fail to download blocks. The libp2p `max_negotiating_inbound_streams` limit in `SwarmBuilder` has been increased from 128 to 2048 to support heavy testnet traffic without rejecting valid `request_response` block requests.
+- **Protocol Bump**: Bumped `PROTOCOL_VERSION` to `65` and `TESTNET_MAGIC` to `QT65` to ensure network partition from nodes dropping sync traffic.
+
 ## [v3.2.8-alpha] - 2026-09-06
 
 ### Fixed
