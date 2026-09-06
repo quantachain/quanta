@@ -607,22 +607,32 @@ impl Blockchain {
         }
 
         // Compute/load cumulative work — O(1) after first run (migration is one-time only).
+        // FIX DATE: 2026-09-06 | VERSION: v3.2.8-alpha
+        // REASON: Previously, a bug caused deep_reorg to skip resetting cumulative_work, leading 
+        // to an artificially inflated value being persisted in sled. To prevent nodes from being 
+        // permanently stuck refusing to sync (believing their inflated chain is the heaviest), 
+        // we now strictly sanitize the stored value against the deterministic expected_work on startup.
         let initial_cumulative_work = {
             let stored = storage.get_cumulative_work();
-            if stored == 0 && height > 1 {
-                tracing::info!(
-                    "[Migration] Computing cumulative work for {} blocks (one-time)…",
-                    height
-                );
-                let mut work = 0u128;
-                for h in 0..height {
-                    if let Ok(_b) = storage.load_block(h) {
-                        work = work.saturating_add(1u128); // BFT: 1 unit per block
-                    }
+            let expected_work = height as u128;
+            
+            if stored != expected_work {
+                if stored == 0 && height > 1 {
+                    tracing::info!(
+                        "[Migration] Computing cumulative work for {} blocks (one-time)…",
+                        height
+                    );
+                } else {
+                    tracing::warn!(
+                        "[Sanitize] Stored cumulative work {} differs from expected {}. Resetting...",
+                        stored, expected_work
+                    );
                 }
-                let _ = storage.set_cumulative_work(work);
-                tracing::info!("[Migration] Cumulative work = {}", work);
-                work
+                let _ = storage.set_cumulative_work(expected_work);
+                if stored == 0 && height > 1 {
+                    tracing::info!("[Migration] Cumulative work = {}", expected_work);
+                }
+                expected_work
             } else {
                 stored
             }

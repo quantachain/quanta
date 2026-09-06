@@ -1,5 +1,11 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.8-alpha] - 2026-09-06
+
+### Fixed
+- **Sync Blockchain (Database Self-Heal)**: Nodes restarting from a non-zero block height were previously reading an artificially inflated `cumulative_work` from the Sled database (caused by an older deep_reorg bug). This inflated local work caused nodes to refuse to sync from peers, believing their own chain was the heaviest (logging "Already on the heaviest chain — no sync needed"). The node now strictly sanitizes the stored `cumulative_work` against the deterministic expected value (`height as u128`) on startup. Corrupted databases are instantly healed, and nodes will correctly sync without needing a reset from block 0.
+- **Protocol Bump**: Bumped `PROTOCOL_VERSION` to `64` to enforce a clean reset of the network.
+
 ## [v3.2.7-alpha] - 2026-09-05
 
 ### Fixed

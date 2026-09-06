@@ -1,24 +1,23 @@
 # Quanta Alpha Release Notes
 
-## Current Version: v3.2.7-alpha — Fix Yamux Capacity Crash
+## Current Version: v3.2.8-alpha — Sync Blockchain Database Self-Heal
 
-This release patches a critical network leak that was causing the node's Yamux stream capacity to max out, leading to consensus stalling (`0 valid sigs, need 1`) during heavy AlephBFT synchronization.
+This release patches a critical bug where nodes restarting from a non-zero block height were refusing to sync due to reading an artificially inflated `cumulative_work` from their database.
 
 ---
 
-### 🔴 Mandatory Upgrade — Protocol v63
-This is a **mandatory upgrade**. Nodes running older protocols will be rejected. The network magic has also been bumped to `QT63`. 
+### 🔴 Mandatory Upgrade — Protocol v64
+This is a **mandatory upgrade**. Nodes running older protocols will be rejected. The network magic has also been bumped to `QT64`. 
 To rejoin: `docker-compose pull && docker-compose up -d`.
 
 ---
 
 ### What's New
 
-#### Fixed: RequestResponse Stream Exhaustion
-- **The Bug**: Quanta uses the libp2p `RequestResponse` protocol for point-to-point messaging (such as AlephBFT signatures and fetches). Previously, the node handled incoming requests but silently dropped the response channel. Since no response was ever sent, the Yamux streams remained half-open until they timed out 20 seconds later. During intense BFT synchronization, this caused the node to rapidly exhaust Yamux's 256-stream limit, logging `WARN Dropping inbound stream because we are at capacity` and stalling consensus completely.
-- **The Fix**: The node now explicitly sends a dummy `VerAck` response back through the channel when a request is received. This cleanly and immediately closes the underlying Yamux stream, preventing any leaks.
-- **Buffer Increase**: As a secondary safety measure, the Yamux `max_num_streams` has been significantly increased from the default `256` to `8192` to handle massive bursts of concurrent network traffic in production.
-- **Protocol Bump**: Bumped `PROTOCOL_VERSION` to `63` and `TESTNET_MAGIC` to `QT63` to enforce a clean reset of the consensus participants.
+#### Fixed: Sync Blockchain (Database Self-Heal)
+- **The Bug**: Due to an older `deep_reorg` bug, some nodes had an artificially inflated `cumulative_work` persisted in their Sled database. Upon restart, this inflated local work caused nodes to refuse to sync from peers, believing their own chain was the heaviest (logging `"Already on the heaviest chain — no sync needed"`). 
+- **The Fix**: The node now strictly sanitizes the stored `cumulative_work` against the deterministic expected value (`height as u128`) on startup. Corrupted databases are instantly healed, and nodes will correctly sync without needing a reset from block 0.
+- **Protocol Bump**: Bumped `PROTOCOL_VERSION` to `64` and `TESTNET_MAGIC` to `QT64` to enforce a clean reset of the consensus participants.
 
 ---
 
