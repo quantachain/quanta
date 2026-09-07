@@ -1,6 +1,6 @@
 # Quanta Alpha Release Notes
 
-## Current Version: v3.2.11-alpha
+## Current Version: v3.2.12-alpha
 
 This release delivers a comprehensive security and network audit across the P2P and AlephBFT consensus layers, fixing a critical network partition that prevented validators from forming a peer-to-peer mesh and stalling block finalization.
 
@@ -10,6 +10,7 @@ This release delivers a comprehensive security and network audit across the P2P 
 - **AlephBFT Unicast Relay Flooding (O(N³) BW Fix)**: Fixed a critical redundancy where every node blindly rebroadcast *all* AlephBFT messages — including targeted unicast votes — over Gossipsub to every peer. Only broadcast-tagged messages (tag byte `0`) are now relayed. Unicast messages (tag `1`) stay point-to-point as designed by `BW-FIX-4`.
 - **Gossipsub Infinite Re-relay Loop**: Fixed an infinite re-publish loop in `handle_new_block` and `handle_new_transaction`. These handlers were calling `broadcast_block()` / `broadcast_transaction()` even when the message originated from Gossipsub itself, causing every node to re-publish every block and transaction endlessly. Gossipsub handles its own relaying natively; the bridge into Gossipsub now only fires for messages received over direct TCP connections.
 - **Misbehavior Peer Tracking (Security)**: Fixed a silent security bypass where misbehavior scores (banning peers for invalid txs/blocks) were never applied to Gossipsub-sourced messages. The process loop now correctly resolves the peer object *before* dispatch, ensuring all handlers can score and ban malicious peers regardless of the transport path.
+- **GetAddr Starvation (Self-Healing)**: Fixed a race condition where 21 validators connecting simultaneously to the bootstrap node received empty peer lists because the node hadn't verified anyone yet. The `maintain_peers` loop now detects if the discovery table is exhausted and periodically broadcasts `GetAddr` to connected peers to self-heal the network.
 
 ### v3.2.10-alpha — Ghost Connections Fix
 - **Ghost Connections (Connection Leak)**: Fixed a bug where a single validator restarting or dropping behind Cloudflare would accumulate multiple "ghost" connections on the bootstrap node. Because `PeerManager` only checked for duplicate `node_id`s using the ephemeral libp2p `PeerId` during `ConnectionEstablished`, it failed to enforce actual Falcon-512 `node_id` uniqueness when the `Version` handshake arrived later. Added `resolve_duplicate_node_id` to strictly evict stale TCP connections sharing the same `node_id` after the `Version` message is received, ensuring the peer count correctly matches the physical number of validators.

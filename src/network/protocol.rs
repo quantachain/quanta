@@ -145,13 +145,13 @@ impl From<&Block> for BlockHeader {
 // Strict network isolation: drop backward compatibility to fix block production.
 // CHANGED 2026-09-07 v3.2.10-alpha: Bumped 65 -> 66.
 // Ghost Connection Fix
-pub const PROTOCOL_VERSION: u32 = 67; // v3.2.11-alpha (2026-09-07) — Mesh peer exchange (GetAddr), AlephBFT unicast relay fix, Gossipsub re-relay fix, misbehavior tracking
+pub const PROTOCOL_VERSION: u32 = 68; // v3.2.12-alpha (2026-09-07) — Mesh peer exchange (GetAddr), AlephBFT unicast relay fix, Gossipsub re-relay fix, misbehavior tracking, GetAddr starvation fix
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"QT67"; // v3.2.11-alpha — Mesh peer exchange + consensus audit
+pub const TESTNET_MAGIC: [u8; 4] = *b"QT68"; // v3.2.12-alpha — Mesh peer exchange + consensus audit + starvation fix
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;
