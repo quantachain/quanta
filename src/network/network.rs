@@ -1740,9 +1740,14 @@ impl Network {
         let peers = self.peer_manager.get_peers().await;
         if !peers.is_empty() {
             let (local_height, total_validators, required_quorum, validators) = {
-                let bc = self.blockchain.read().await;
-                let height = bc.get_block_count();
-                let val_map = bc.get_account_state_read().get_validators().clone();
+                let height = match self.blockchain.get_stats().await {
+                    Ok(stats) => stats.chain_length as u64,
+                    Err(_) => 0,
+                };
+                let val_map = match self.blockchain.get_account_state_clone().await {
+                    Ok(state) => state.validators,
+                    Err(_) => std::collections::HashMap::new(),
+                };
                 let total = val_map.len();
                 let quorum = (total * 2) / 3 + 1;
                 (height, total, quorum, val_map)
