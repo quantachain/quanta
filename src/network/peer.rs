@@ -175,41 +175,40 @@ impl PeerManager {
         let mut stale_idx = None;
 
         for (i, p) in peers.iter().enumerate() {
-            if let Ok(info) = p.info.try_read() {
-                if info.address == peer_addr {
-                    return Err("Peer already connected".to_string());
-                }
-                
-                if !new_peer_node_id.is_empty() && info.node_id == new_peer_node_id {
-                    let now = chrono::Utc::now().timestamp();
-                    if now - info.last_seen > 30 {
+            let info = p.info.read().await;
+            if info.address == peer_addr {
+                return Err("Peer already connected".to_string());
+            }
+            
+            if !new_peer_node_id.is_empty() && info.node_id == new_peer_node_id {
+                let now = chrono::Utc::now().timestamp();
+                if now - info.last_seen > 30 {
+                    stale_idx = Some(i);
+                    break; 
+                } else {
+                    let new_is_outbound = peer.info.read().await.is_outbound;
+                    if !new_is_outbound {
                         stale_idx = Some(i);
-                        break; 
+                        break;
                     } else {
-                        let new_is_outbound = peer.info.read().await.is_outbound;
-                        if !new_is_outbound {
-                            stale_idx = Some(i);
-                            break;
-                        } else {
-                            return Err(format!("Tie-break: rejecting our outbound connection to Node ID {} in favor of their outbound", new_peer_node_id));
-                        }
+                        return Err(format!("Tie-break: rejecting our outbound connection to Node ID {} in favor of their outbound", new_peer_node_id));
                     }
                 }
+            }
 
-                match (info.address.ip(), peer_ip) {
-                    (IpAddr::V4(a), IpAddr::V4(b)) => {
-                        let is_docker = a.octets()[0] == 172 && (16..=31).contains(&a.octets()[1]);
-                        if !a.is_loopback() && !is_docker && a.octets()[0..3] == b.octets()[0..3] {
-                            subnet_count += 1;
-                        }
+            match (info.address.ip(), peer_ip) {
+                (IpAddr::V4(a), IpAddr::V4(b)) => {
+                    let is_docker = a.octets()[0] == 172 && (16..=31).contains(&a.octets()[1]);
+                    if !a.is_loopback() && !is_docker && a.octets()[0..3] == b.octets()[0..3] {
+                        subnet_count += 1;
                     }
-                    (IpAddr::V6(a), IpAddr::V6(b)) => {
-                        if a.octets()[0..6] == b.octets()[0..6] {
-                            subnet_count += 1;
-                        }
-                    }
-                    _ => {}
                 }
+                (IpAddr::V6(a), IpAddr::V6(b)) => {
+                    if a.octets()[0..6] == b.octets()[0..6] {
+                        subnet_count += 1;
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -237,13 +236,12 @@ impl PeerManager {
         let mut peers = self.peers.write().await;
         let mut stale_idx = None;
         for (i, p) in peers.iter().enumerate() {
-            if let Ok(info) = p.info.try_read() {
-                if info.address != peer_addr && info.node_id == node_id {
-                    let now = chrono::Utc::now().timestamp();
-                    if now - info.last_seen > 30 || !info.is_outbound {
-                        stale_idx = Some(i);
-                        break;
-                    }
+            let info = p.info.read().await;
+            if info.address != peer_addr && info.node_id == node_id {
+                let now = chrono::Utc::now().timestamp();
+                if now - info.last_seen > 30 || !info.is_outbound {
+                    stale_idx = Some(i);
+                    break;
                 }
             }
         }
@@ -256,7 +254,15 @@ impl PeerManager {
 
     pub async fn remove_peer(&self, address: SocketAddr) {
         let mut peers = self.peers.write().await;
-        peers.retain(|p| !matches!(p.info.try_read(), Ok(info) if info.address == address));
+        let mut to_remove = Vec::new();
+        for (i, p) in peers.iter().enumerate() {
+            if p.info.read().await.address == address {
+                to_remove.push(i);
+            }
+        }
+        for i in to_remove.into_iter().rev() {
+            peers.remove(i);
+        }
     }
 
     pub async fn get_peers(&self) -> Vec<Arc<Peer>> {
@@ -270,10 +276,9 @@ impl PeerManager {
     pub async fn get_peer(&self, addr: &SocketAddr) -> Option<Arc<Peer>> {
         let peers = self.peers.read().await;
         for peer in peers.iter() {
-            if let Ok(info) = peer.info.try_read() {
-                if info.address == *addr {
-                    return Some(Arc::clone(peer));
-                }
+            let info = peer.info.read().await;
+            if info.address == *addr {
+                return Some(Arc::clone(peer));
             }
         }
         None

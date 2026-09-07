@@ -1,5 +1,10 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.14-alpha] - 2026-09-07
+
+### Fixed
+- **PeerManager Lock Starvation Fix**: Replaced all `try_read` non-blocking locks in the peer eviction routines with `read().await`. Fixed a critical race condition where peer deduplication was silently skipped if the peer's heartbeat lock was active during a new incoming dial. This resolves extreme peer duplication issues and stops TLS `ClientHello` handshake collisions (TCP simultaneous open issues on multiplexed streams).
+
 ## [v3.2.13-alpha] - 2026-09-07
 
 ### Added

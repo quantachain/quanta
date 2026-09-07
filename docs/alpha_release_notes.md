@@ -1,8 +1,13 @@
 # Quanta Alpha Release Notes
 
-## Current Version: v3.2.13-alpha
+## Current Version: v3.2.14-alpha
 
-This release delivers the ultimate, bulletproof fix for the Cloudflare TCP Proxy mesh isolation issue, matching industry standards for node deployments behind complex networks.
+This release patches a critical connection multiplexing bug that caused extreme duplicate peer connections and TLS handshake failures (ClientHello collisions).
+
+### v3.2.14-alpha — Duplicate Peer & TLS Collision Patch
+- **PeerManager Lock Starvation Fix**: Replaced all `try_read` non-blocking locks in the peer eviction routines with `read().await`. Previously, if a peer's heartbeat lock was active during a new incoming dial, the network would silently skip duplicate detection. This caused validators to dial and accept the exact same peer multiple times, inflating the peer count and causing TLS ClientHello handshake collisions (two outbound TCP streams crossing wires).
+
+## Previous Versions
 
 ### v3.2.13-alpha — TCP Proxy Mesh Fix (`--advertise-addr`)
 - **Proxy Blindness Fix**: Added a new CLI flag `--advertise-addr <IP>` to allow validators hidden behind Layer 4 TCP proxies (like Cloudflare Spectrum) or complex NATs to explicitly declare their real public IP to the network. This IP is embedded directly into the P2P `Version` handshake, allowing the bootstrap node to gossip the real routable IP instead of the useless proxy socket IP. This restores full mesh connectivity and AlephBFT consensus block production.
