@@ -1,14 +1,19 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.12-alpha] - 2026-09-07
+
+### Fixed
+- **GetAddr Starvation (Self-Healing)**: Added logic to `maintain_peers` loop to detect when the discovery table is exhausted but peers are needed. The node will now periodically broadcast `GetAddr` to connected peers to discover the mesh, fixing a race condition where 21 validators connecting simultaneously received empty `Addr` lists and never asked again.
+- **Protocol Bump**: Bumped `PROTOCOL_VERSION` to `68` and `TESTNET_MAGIC` to `QT68`. All v67 nodes will be rejected and must upgrade to join the mesh-enabled network.
+
 ## [v3.2.11-alpha] - 2026-09-07
 
 ### Fixed
 - **Peer Exchange (GetAddr) Fix**: Fixed a critical network partition where validators failed to discover each other and only connected to the bootstrap node. The node now sends a `GetAddr` P2P message immediately upon receiving `VerAck` (handshake complete), triggering peer exchange so all validators discover and connect to each other directly without requiring a full mesh of static bootstrap entries.
-- **Inbound Peer Tracking**: Fixed the bootstrap node silently discarding the dialable address of inbound validators. It now extracts the self-reported `listen_port` from inbound `Version` messages and adds it to its discovery table (`PeerSource::Discovered`, unverified), enabling `maintain_peers` to dial them outbound and promote them to the "tried" (verified) table for gossiping.
+- **Inbound Peer Tracking**: Fixed a bug where the bootstrap node processed inbound validator connections but failed to track their dialable address. It now extracts the self-reported `listen_port` from inbound `Version` messages and automatically adds the peer to its `discovery` table for outbound reconnections and peer gossiping.
 - **AlephBFT Unicast Relay Flooding — O(N³) bandwidth blowup**: Fixed a critical redundancy where the `AlephBFTMessage` handler rebroadcast *every* message to all peers via Gossipsub, including unicast votes (tag `1`) that `BW-FIX-4` routed directly to specific validators. Now only broadcast-tagged messages (tag `0`) are relayed. This restores the `O(N)` → `O(1)` bandwidth advantage of unicast routing.
 - **Gossipsub Infinite Re-relay Loop**: Fixed an infinite re-publish loop: `handle_new_block` and `handle_new_transaction` called `broadcast_block()` / `broadcast_transaction()` unconditionally, even when the message originated from Gossipsub. Gossipsub handles relay natively; the bridge into Gossipsub now only fires when `peer.is_some()` (i.e. the source was a direct TCP peer).
 - **Misbehavior Peer Tracking — Security bypass**: Fixed a silent security regression where invalid-signature transactions and blocks submitted via Gossipsub never accumulated misbehavior points (which should ban at 100). `process_messages` now resolves the peer once, skipping the O(N) scan for Gossipsub messages (dummy addr `0.0.0.0:0`) while correctly passing the Arc to all downstream handlers for TCP peers.
-- **Protocol Bump**: Bumped `PROTOCOL_VERSION` to `67` and `TESTNET_MAGIC` to `QT67`. All v66 nodes will be rejected and must upgrade to join the mesh-enabled network.
 
 ## [v3.2.10-alpha] - 2026-09-07
 

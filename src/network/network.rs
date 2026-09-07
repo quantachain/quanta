@@ -1674,6 +1674,11 @@ impl Network {
 
                 if peer_count == 0 && !self.config.bootstrap_nodes.is_empty() {
                     target_peers.extend(self.config.bootstrap_nodes.iter().copied());
+                } else if target_peers.is_empty() && peer_count > 0 {
+                    // ADDRMAN FIX: If we need peers but discovery table is exhausted, ask active peers for more
+                    for peer in self.peer_manager.get_peers().await {
+                        let _ = peer.send_message(P2PMessage::GetAddr).await;
+                    }
                 }
 
                 target_peers.sort_unstable();

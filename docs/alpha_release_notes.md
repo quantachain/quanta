@@ -1,12 +1,17 @@
 # Quanta Alpha Release Notes
 
-## Current Version: v3.2.11-alpha
+## Current Version: v3.2.12-alpha
 
-This release delivers a comprehensive security and network audit across the P2P and AlephBFT consensus layers, fixing a critical network partition that prevented validators from forming a peer-to-peer mesh and stalling block finalization.
+This release delivers a critical fix for a peer discovery race condition that caused validators to remain isolated from each other.
 
-### Network Layer
-- **Peer Exchange (GetAddr) Fix**: Fixed a critical network partition where validators only connected to the bootstrap node. The node now sends a `GetAddr` message immediately upon completing the handshake (`VerAck` received), triggering peer exchange so all validators discover and connect to each other directly.
-- **Inbound Peer Tracking**: Fixed the bootstrap node silently discarding the dialable address of inbound validators. It now extracts the self-reported `listen_port` from the incoming `Version` message and adds it to its discovery table, enabling future outbound reconnections and gossiping of that address to other peers.
+### v3.2.12-alpha — GetAddr Starvation Fix
+- **GetAddr Starvation (Self-Healing)**: Fixed a race condition where 21 validators connecting simultaneously to the bootstrap node received empty peer lists because the node hadn't verified anyone yet. The `maintain_peers` loop now detects if the discovery table is exhausted and periodically broadcasts `GetAddr` to connected peers to self-heal the network.
+
+## Previous Versions
+
+### v3.2.11-alpha — Mesh Discovery & Consensus Security Audit
+- **Peer Exchange (GetAddr) Fix**: Fixed a critical network partition where validators failed to discover each other and only connected to the bootstrap node. The node now sends a `GetAddr` P2P message immediately upon receiving `VerAck` (handshake complete), triggering peer exchange so all validators discover and connect to each other directly without requiring a full mesh of static bootstrap entries.
+- **Inbound Peer Tracking**: Fixed the bootstrap node silently discarding the dialable address of inbound validators. It now extracts the self-reported `listen_port` from inbound `Version` messages and adds it to its discovery table (`PeerSource::Discovered`, unverified), enabling `maintain_peers` to dial them outbound and promote them to the "tried" (verified) table for gossiping.
 - **AlephBFT Unicast Relay Flooding (O(N³) BW Fix)**: Fixed a critical redundancy where every node blindly rebroadcast *all* AlephBFT messages — including targeted unicast votes — over Gossipsub to every peer. Only broadcast-tagged messages (tag byte `0`) are now relayed. Unicast messages (tag `1`) stay point-to-point as designed by `BW-FIX-4`.
 - **Gossipsub Infinite Re-relay Loop**: Fixed an infinite re-publish loop in `handle_new_block` and `handle_new_transaction`. These handlers were calling `broadcast_block()` / `broadcast_transaction()` even when the message originated from Gossipsub itself, causing every node to re-publish every block and transaction endlessly. Gossipsub handles its own relaying natively; the bridge into Gossipsub now only fires for messages received over direct TCP connections.
 - **Misbehavior Peer Tracking (Security)**: Fixed a silent security bypass where misbehavior scores (banning peers for invalid txs/blocks) were never applied to Gossipsub-sourced messages. The process loop now correctly resolves the peer object *before* dispatch, ensuring all handlers can score and ban malicious peers regardless of the transport path.
