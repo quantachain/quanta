@@ -78,6 +78,10 @@ enum Commands {
         #[arg(short = 'b', long)]
         bootstrap: Option<String>,
 
+        /// Public IP address to advertise to the P2P network (bypasses Cloudflare/NAT proxies)
+        #[arg(long = "advertise-addr")]
+        advertise_addr: Option<String>,
+
         /// Disable P2P networking (single node mode)
         #[arg(long = "no-network")]
         no_network: bool,
@@ -293,6 +297,7 @@ async fn main() {
             rpc_port,
             db,
             bootstrap,
+            advertise_addr,
             no_network,
             validator_wallet,
             devnet,
@@ -432,6 +437,7 @@ async fn main() {
                     node_id: validator_node_id,
                     bootstrap_nodes,
                     dns_seeds: cfg.network.dns_seeds.clone(),
+                    advertise_addr,
                 };
 
                 let network = Arc::new(Network::new(network_config, blockchain.clone()));

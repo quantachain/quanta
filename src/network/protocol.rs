@@ -21,6 +21,11 @@ pub enum P2PMessage {
         // self-reports their own listen_port in the handshake so peers can store
         // the correct (IP, listen_port) tuple in the discovery table.
         listen_port: u16,
+        
+        // ADDRMAN PROXY FIX (v3.2.13-alpha): Self-reported public IP address.
+        // For nodes hiding behind Layer 4 TCP proxies (like Cloudflare Spectrum) 
+        // where the real IP is stripped.
+        advertise_addr: Option<String>,
     },
     VerAck,
 
@@ -145,13 +150,13 @@ impl From<&Block> for BlockHeader {
 // Strict network isolation: drop backward compatibility to fix block production.
 // CHANGED 2026-09-07 v3.2.10-alpha: Bumped 65 -> 66.
 // Ghost Connection Fix
-pub const PROTOCOL_VERSION: u32 = 68; // v3.2.12-alpha (2026-09-07) — Mesh peer exchange (GetAddr), AlephBFT unicast relay fix, Gossipsub re-relay fix, misbehavior tracking, GetAddr starvation fix
+pub const PROTOCOL_VERSION: u32 = 69; // v3.2.13-alpha (2026-09-07) — Added advertise_addr to Version message to fix proxy blindness
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"QT68"; // v3.2.12-alpha — Mesh peer exchange + consensus audit + starvation fix
+pub const TESTNET_MAGIC: [u8; 4] = *b"QT69"; // v3.2.13-alpha — advertise_addr proxy fix
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;

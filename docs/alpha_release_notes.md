@@ -1,59 +1,30 @@
 # Quanta Alpha Release Notes
 
-## Current Version: v3.2.12-alpha
+## Current Version: v3.2.13-alpha
 
-This release delivers a critical fix for a peer discovery race condition that caused validators to remain isolated from each other.
+This release delivers the ultimate, bulletproof fix for the Cloudflare TCP Proxy mesh isolation issue, matching industry standards for node deployments behind complex networks.
 
-### v3.2.12-alpha — GetAddr Starvation Fix
-- **GetAddr Starvation (Self-Healing)**: Fixed a race condition where 21 validators connecting simultaneously to the bootstrap node received empty peer lists because the node hadn't verified anyone yet. The `maintain_peers` loop now detects if the discovery table is exhausted and periodically broadcasts `GetAddr` to connected peers to self-heal the network.
+### v3.2.13-alpha — TCP Proxy Mesh Fix (`--advertise-addr`)
+- **Proxy Blindness Fix**: Added a new CLI flag `--advertise-addr <IP>` to allow validators hidden behind Layer 4 TCP proxies (like Cloudflare Spectrum) or complex NATs to explicitly declare their real public IP to the network. This IP is embedded directly into the P2P `Version` handshake, allowing the bootstrap node to gossip the real routable IP instead of the useless proxy socket IP. This restores full mesh connectivity and AlephBFT consensus block production.
+
+#### 🛠️ Guide: How to use `--advertise-addr`
+If your validator is connecting to a bootstrap node that is behind Cloudflare Spectrum, the bootstrap node cannot see your real IP. You **must** provide your validator's real, public VPS IP when starting the node. 
+* **Example Usage:** 
+  `./quanta --bootstrap node1.quantachain.org:8333 --advertise-addr 20.1.2.3`
+* Replace `20.1.2.3` with the actual public IP address of the server running the validator. If you do not provide this flag, the bootstrap node will fail to verify you, and you will remain isolated from the rest of the network.
+* **Custom Ports:** If you are running your node on a non-standard port (not 8333), you can include the port directly in the flag: `--advertise-addr 20.1.2.3:8334`. If you omit the port, it will automatically use your configured listen port.
 
 ## Previous Versions
 
-### v3.2.11-alpha — Mesh Discovery & Consensus Security Audit
-- **Peer Exchange (GetAddr) Fix**: Fixed a critical network partition where validators failed to discover each other and only connected to the bootstrap node. The node now sends a `GetAddr` P2P message immediately upon receiving `VerAck` (handshake complete), triggering peer exchange so all validators discover and connect to each other directly without requiring a full mesh of static bootstrap entries.
-- **Inbound Peer Tracking**: Fixed the bootstrap node silently discarding the dialable address of inbound validators. It now extracts the self-reported `listen_port` from inbound `Version` messages and adds it to its discovery table (`PeerSource::Discovered`, unverified), enabling `maintain_peers` to dial them outbound and promote them to the "tried" (verified) table for gossiping.
-- **AlephBFT Unicast Relay Flooding (O(N³) BW Fix)**: Fixed a critical redundancy where every node blindly rebroadcast *all* AlephBFT messages — including targeted unicast votes — over Gossipsub to every peer. Only broadcast-tagged messages (tag byte `0`) are now relayed. Unicast messages (tag `1`) stay point-to-point as designed by `BW-FIX-4`.
-- **Gossipsub Infinite Re-relay Loop**: Fixed an infinite re-publish loop in `handle_new_block` and `handle_new_transaction`. These handlers were calling `broadcast_block()` / `broadcast_transaction()` even when the message originated from Gossipsub itself, causing every node to re-publish every block and transaction endlessly. Gossipsub handles its own relaying natively; the bridge into Gossipsub now only fires for messages received over direct TCP connections.
-- **Misbehavior Peer Tracking (Security)**: Fixed a silent security bypass where misbehavior scores (banning peers for invalid txs/blocks) were never applied to Gossipsub-sourced messages. The process loop now correctly resolves the peer object *before* dispatch, ensuring all handlers can score and ban malicious peers regardless of the transport path.
-
-### v3.2.10-alpha — Ghost Connections Fix
-- **Ghost Connections (Connection Leak)**: Fixed a bug where a single validator restarting or dropping behind Cloudflare would accumulate multiple "ghost" connections on the bootstrap node. Because `PeerManager` only checked for duplicate `node_id`s using the ephemeral libp2p `PeerId` during `ConnectionEstablished`, it failed to enforce actual Falcon-512 `node_id` uniqueness when the `Version` handshake arrived later. Added `resolve_duplicate_node_id` to strictly evict stale TCP connections sharing the same `node_id` after the `Version` message is received, ensuring the peer count correctly matches the physical number of validators.
-- **Heartbeat Telemetry**: Enhanced the `send_heartbeats` logging to include `Synced/Syncing` counts, peer block heights, and the number of connected `Validators` vs the `Required Quorum` for AlephBFT consensus.
-- **Protocol Bump**: Bumped version to `3.2.10-alpha`, `PROTOCOL_VERSION` to `66`, and `TESTNET_MAGIC` to `QT66` to isolate the network and clear the connection leaks cleanly.
-
-### v3.2.9-alpha — Network Sync Capacity Fix
-
-This release fixes a critical syncing bottleneck where nodes dropping inbound streams ("at capacity") would fail to download blocks. The libp2p `max_negotiating_inbound_streams` limit has been increased from 128 to 2048 to support heavy testnet traffic.
-
----
-
-### 🔴 Mandatory Upgrade — Protocol v65
-This is a **mandatory upgrade**. Nodes running older protocols will be rejected. The network magic has also been bumped to `QT65`. 
-To rejoin: `docker-compose pull && docker-compose up -d`.
-
----
-
-### What's New
-
-#### Fixed: Dropping inbound streams at capacity
-- **The Bug**: Under heavy network load or when synchronizing the blockchain from scratch, the node was hitting the default libp2p `SwarmBuilder` inbound stream limit (128). This caused the node to actively drop incoming `request_response` streams containing blocks, preventing synchronization.
-- **The Fix**: Explicitly configured `.with_max_negotiating_inbound_streams(2048)` in the `SwarmBuilder` to massively increase inbound capacity.
-- **Protocol Bump**: Bumped `PROTOCOL_VERSION` to `65` and `TESTNET_MAGIC` to `QT65`.
-
----
+### v3.2.12-alpha — GetAddr Starvation Fix
+- **GetAddr Starvation (Self-Healing)**: Fixed a race condition where 21 validators connecting simultaneously to the bootstrap node received empty peer lists because the node hadn't verified anyone yet. The `maintain_peers` loop now detects if the discovery table is exhausted and periodically broadcasts `GetAddr` to connected peers to self-heal the network.
 
 ## Previous Releases (Summary)
 
 | Version | Date | Summary |
 |---|---|---|
-| v3.2.10-alpha | 2026-09-07 | Ghost Connections fix — `resolve_duplicate_node_id` evicts stale TCP connections on `node_id` collision. Heartbeat telemetry with quorum status. Protocol `66` / Magic `QT66` |
-| v3.2.8-alpha | 2026-09-06 | Sync Blockchain Database Self-Heal — Santized `cumulative_work` on restart. Protocol bumped to v64 |
-| v3.2.5-alpha | 2026-09-05 | BFT peer resolution fix — unicast messages were silently dropped due to missing `node_id` resolution in handshake handler |
-| v3.2.4-alpha | 2026-09-04 | Connection tracking fix — libp2p ghost connections leaked on reconnect, causing capacity errors. Protocol bumped to v60 |
-| v3.2.3-alpha | 2026-09-02 | Strict v58 handshake rejection + log noise reduction |
-| v3.2.2-alpha | 2026-09-02 | Sync & stability — O(1) cumulative work calc, egress spam disabled, peer liveness fix. Protocol bumped to v59 |
-| v3.2.0-alpha | 2026-09-01 | Swarm release — replaced raw TCP with libp2p Gossipsub + Kademlia DHT |
-| v3.1.5-alpha | 2026-09-01 | State actor refactoring + sync deadlock fix. Protocol bumped to v56 |
+| v3.2.12-alpha | 2026-09-07 | Mesh peer exchange (GetAddr), AlephBFT unicast relay fix, Gossipsub re-relay fix, misbehavior tracking security fix. Protocol `68` / Magic `QT68` |
+| v3.2.11-alpha | 2026-09-07 | Mesh Discovery & Consensus Security Audit. Protocol `67` / Magic `QT67` |
 
 For full history see [CHANGELOG.md](./CHANGELOG.md).
 
@@ -86,7 +57,7 @@ docker run -d \
   -v ~/quanta_data_v2:/home/quanta/quanta_data \
   -e QUANTA_WALLET_PASSWORD="YOUR_PASSWORD_HERE" \
   xd637/quanta-node:latest \
-  quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap node1.quantachain.org:8333
+  quanta start --validator-wallet /home/quanta/quanta_data/validator.qua --bootstrap node1.quantachain.org:8333 --advertise-addr YOUR_SERVER_IP
 ```
 
 ---
@@ -111,6 +82,7 @@ services:
       quanta start
       --validator-wallet /home/quanta/quanta_data/validator.qua
       --bootstrap node1.quantachain.org:8333
+      --advertise-addr YOUR_SERVER_IP
 ```
 
 **Start the Node:**

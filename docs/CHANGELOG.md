@@ -1,5 +1,13 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.13-alpha] - 2026-09-07
+
+### Added
+- **`--advertise-addr` (Cloudflare Proxy Fix)**: Added a new CLI flag `--advertise-addr <IP>` to allow validators hidden behind Layer 4 TCP proxies (like Cloudflare Spectrum) or complex NATs to explicitly declare their real public IP to the network. This IP is now embedded directly into the P2P `Version` handshake, allowing the bootstrap node to gossip the real routable IP instead of the useless proxy socket IP. This completely resolves the mesh starvation issue without breaking the AlephBFT unicast bandwidth optimizations.
+
+### Changed
+- **Protocol Bump**: Bumped `PROTOCOL_VERSION` to `69` and `TESTNET_MAGIC` to `QT69` to enforce the new `Version` handshake struct containing the `advertise_addr` field.
+
 ## [v3.2.12-alpha] - 2026-09-07
 
 ### Fixed

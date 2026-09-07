@@ -1,8 +1,8 @@
 # ============================================================
 # Dockerfile — QUANTA Blockchain Node
 # ============================================================
-# V3.2.12-alpha — Network mesh peer exchange + consensus audit
-# Image : xd637/quanta-node:3.2.12-alpha
+# V3.2.13-alpha — advertise-addr Cloudflare TCP Proxy fix
+# Image : xd637/quanta-node:3.2.13-alpha
 # Repo  : https://hub.docker.com/r/xd637/quanta-node
 #
 # Quick start (single node):
@@ -18,11 +18,11 @@
 FROM rust:bookworm AS builder
 
 # Version metadata
-LABEL version="3.2.12-alpha"
-LABEL org.quanta.network.protocol="68"
+LABEL version="3.2.13-alpha"
+LABEL org.quanta.network.protocol="69"
 LABEL org.opencontainers.image.title="Quanta Node" \
-      org.opencontainers.image.description="QuantaChain V3 node — PQC BFT, Falcon-512, X25519MLKEM768 TLS. v3.2.12-alpha: mesh peer exchange (GetAddr), AlephBFT unicast relay fix, Gossipsub re-relay fix, misbehavior tracking security fix." \
-      org.opencontainers.image.version="v3.2.12-alpha" \
+      org.opencontainers.image.description="QuantaChain V3 node — PQC BFT, Falcon-512, X25519MLKEM768 TLS. v3.2.13-alpha: added advertise-addr proxy fix." \
+      org.opencontainers.image.version="v3.2.13-alpha" \
       org.opencontainers.image.vendor="QuantaChain" \
       org.opencontainers.image.source="https://hub.docker.com/r/xd637/quanta-node" \
       org.opencontainers.image.licenses="Apache-2.0"

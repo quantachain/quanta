@@ -37,6 +37,7 @@ pub struct NetworkConfig {
     pub node_id: String,
     pub bootstrap_nodes: Vec<SocketAddr>,
     pub dns_seeds: Vec<String>,
+    pub advertise_addr: Option<String>,
 }
 
 impl Default for NetworkConfig {
@@ -47,6 +48,7 @@ impl Default for NetworkConfig {
             node_id: Uuid::new_v4().to_string(),
             bootstrap_nodes: Vec::new(),
             dns_seeds: Vec::new(),
+            advertise_addr: None,
         }
     }
 }
@@ -183,6 +185,7 @@ impl Network {
                                                 timestamp: chrono::Utc::now().timestamp(),
                                                 node_id: network_clone_for_swarm.peer_manager.local_node_id.clone(),
                                                 listen_port: network_clone_for_swarm.config.listen_addr.port(),
+                                                advertise_addr: network_clone_for_swarm.config.advertise_addr.clone(),
                                             };
                                             let _ = network_clone_for_swarm.send_to_peer(socket_addr, version_msg).await;
                                         }
@@ -458,7 +461,7 @@ impl Network {
             P2PMessage::Pong(_) => {
                 // Keep-alive response
             }
-            P2PMessage::Version { version, height, cumulative_work, timestamp: _, node_id, listen_port } => {
+            P2PMessage::Version { version, height, cumulative_work, timestamp: _, node_id, listen_port, advertise_addr } => {
                 tracing::debug!("Received Version from {}: version={}, node_id={}", addr, version, node_id);
                 if version != crate::network::protocol::PROTOCOL_VERSION {
                     tracing::warn!("Rejecting connection from {} due to protocol version mismatch (theirs: {}, ours: {})", addr, version, crate::network::protocol::PROTOCOL_VERSION);
@@ -469,9 +472,26 @@ impl Network {
                     return Ok(());
                 }
                 
-                // Reconstruct actual peer listen address and track it
-                let mut peer_addr = addr;
-                peer_addr.set_port(listen_port);
+                // ADDRMAN PROXY FIX (v3.2.13-alpha): Use advertise_addr if provided
+                let peer_addr = if let Some(adv_str) = advertise_addr {
+                    if let Ok(adv_ip) = adv_str.parse::<std::net::IpAddr>() {
+                        // User provided just the IP (e.g. "20.1.2.3")
+                        std::net::SocketAddr::new(adv_ip, listen_port)
+                    } else if let Ok(adv_sock) = adv_str.parse::<std::net::SocketAddr>() {
+                        // User provided IP and port (e.g. "20.1.2.3:8333")
+                        adv_sock
+                    } else {
+                        tracing::warn!("Failed to parse advertise_addr '{}', falling back to socket IP", adv_str);
+                        let mut p = addr;
+                        p.set_port(listen_port);
+                        p
+                    }
+                } else {
+                    let mut p = addr;
+                    p.set_port(listen_port);
+                    p
+                };
+                
                 self.discovery.add_peer(peer_addr).await;
                 
                 if let Some(p) = &peer {
