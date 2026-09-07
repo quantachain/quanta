@@ -1,6 +1,17 @@
 # Quanta Alpha Release Notes
 
-## Current Version: v3.2.10-alpha
+## Current Version: v3.2.11-alpha
+
+This release delivers a comprehensive security and network audit across the P2P and AlephBFT consensus layers, fixing a critical network partition that prevented validators from forming a peer-to-peer mesh and stalling block finalization.
+
+### Network Layer
+- **Peer Exchange (GetAddr) Fix**: Fixed a critical network partition where validators only connected to the bootstrap node. The node now sends a `GetAddr` message immediately upon completing the handshake (`VerAck` received), triggering peer exchange so all validators discover and connect to each other directly.
+- **Inbound Peer Tracking**: Fixed the bootstrap node silently discarding the dialable address of inbound validators. It now extracts the self-reported `listen_port` from the incoming `Version` message and adds it to its discovery table, enabling future outbound reconnections and gossiping of that address to other peers.
+- **AlephBFT Unicast Relay Flooding (O(N³) BW Fix)**: Fixed a critical redundancy where every node blindly rebroadcast *all* AlephBFT messages — including targeted unicast votes — over Gossipsub to every peer. Only broadcast-tagged messages (tag byte `0`) are now relayed. Unicast messages (tag `1`) stay point-to-point as designed by `BW-FIX-4`.
+- **Gossipsub Infinite Re-relay Loop**: Fixed an infinite re-publish loop in `handle_new_block` and `handle_new_transaction`. These handlers were calling `broadcast_block()` / `broadcast_transaction()` even when the message originated from Gossipsub itself, causing every node to re-publish every block and transaction endlessly. Gossipsub handles its own relaying natively; the bridge into Gossipsub now only fires for messages received over direct TCP connections.
+- **Misbehavior Peer Tracking (Security)**: Fixed a silent security bypass where misbehavior scores (banning peers for invalid txs/blocks) were never applied to Gossipsub-sourced messages. The process loop now correctly resolves the peer object *before* dispatch, ensuring all handlers can score and ban malicious peers regardless of the transport path.
+
+### v3.2.10-alpha — Ghost Connections Fix
 - **Ghost Connections (Connection Leak)**: Fixed a bug where a single validator restarting or dropping behind Cloudflare would accumulate multiple "ghost" connections on the bootstrap node. Because `PeerManager` only checked for duplicate `node_id`s using the ephemeral libp2p `PeerId` during `ConnectionEstablished`, it failed to enforce actual Falcon-512 `node_id` uniqueness when the `Version` handshake arrived later. Added `resolve_duplicate_node_id` to strictly evict stale TCP connections sharing the same `node_id` after the `Version` message is received, ensuring the peer count correctly matches the physical number of validators.
 - **Heartbeat Telemetry**: Enhanced the `send_heartbeats` logging to include `Synced/Syncing` counts, peer block heights, and the number of connected `Validators` vs the `Required Quorum` for AlephBFT consensus.
 - **Protocol Bump**: Bumped version to `3.2.10-alpha`, `PROTOCOL_VERSION` to `66`, and `TESTNET_MAGIC` to `QT66` to isolate the network and clear the connection leaks cleanly.
@@ -30,6 +41,7 @@ To rejoin: `docker-compose pull && docker-compose up -d`.
 
 | Version | Date | Summary |
 |---|---|---|
+| v3.2.10-alpha | 2026-09-07 | Ghost Connections fix — `resolve_duplicate_node_id` evicts stale TCP connections on `node_id` collision. Heartbeat telemetry with quorum status. Protocol `66` / Magic `QT66` |
 | v3.2.8-alpha | 2026-09-06 | Sync Blockchain Database Self-Heal — Santized `cumulative_work` on restart. Protocol bumped to v64 |
 | v3.2.5-alpha | 2026-09-05 | BFT peer resolution fix — unicast messages were silently dropped due to missing `node_id` resolution in handshake handler |
 | v3.2.4-alpha | 2026-09-04 | Connection tracking fix — libp2p ghost connections leaked on reconnect, causing capacity errors. Protocol bumped to v60 |

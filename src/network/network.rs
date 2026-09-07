@@ -353,12 +353,17 @@ impl Network {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(1000));
 
         while let Some((addr, msg)) = rx.recv().await {
-            // Find the peer object to pass to the handler for strike management
+            // MISBEHAVIOR FIX: Resolve the peer ONCE here and pass the Arc down to every
+            // handler. Previously, handlers (handle_new_transaction, handle_new_block, etc.)
+            // received the raw `peer` arg which could be None for Gossipsub messages
+            // (dummy addr 0.0.0.0:0), making misbehavior scoring silently a no-op.
             let mut peer_opt = None;
-            for p in self.peer_manager.get_peers().await {
-                if p.address().await == addr {
-                    peer_opt = Some(p);
-                    break;
+            if addr.port() != 0 {
+                for p in self.peer_manager.get_peers().await {
+                    if p.address().await == addr {
+                        peer_opt = Some(p);
+                        break;
+                    }
                 }
             }
 
@@ -453,7 +458,7 @@ impl Network {
             P2PMessage::Pong(_) => {
                 // Keep-alive response
             }
-            P2PMessage::Version { version, height, cumulative_work, timestamp: _, node_id, listen_port: _ } => {
+            P2PMessage::Version { version, height, cumulative_work, timestamp: _, node_id, listen_port } => {
                 tracing::debug!("Received Version from {}: version={}, node_id={}", addr, version, node_id);
                 if version != crate::network::protocol::PROTOCOL_VERSION {
                     tracing::warn!("Rejecting connection from {} due to protocol version mismatch (theirs: {}, ours: {})", addr, version, crate::network::protocol::PROTOCOL_VERSION);
@@ -463,6 +468,12 @@ impl Network {
                     }
                     return Ok(());
                 }
+                
+                // Reconstruct actual peer listen address and track it
+                let mut peer_addr = addr;
+                peer_addr.set_port(listen_port);
+                self.discovery.add_peer(peer_addr).await;
+                
                 if let Some(p) = &peer {
                     p.update_info(node_id.clone(), version, height, cumulative_work).await;
                     self.peer_manager.resolve_duplicate_node_id(addr, &node_id).await;
@@ -471,6 +482,10 @@ impl Network {
             }
             P2PMessage::VerAck => {
                 tracing::debug!("Received VerAck from {}", addr);
+                // Trigger peer exchange once handshake completes
+                if let Some(p) = &peer {
+                    let _ = p.send_message(P2PMessage::GetAddr).await;
+                }
             }
             P2PMessage::GetAddr => {
                 // ADDRMAN FIX v3.1.0-alpha (2026-08-20): Only gossip VERIFIED ("tried") peers.
@@ -510,41 +525,36 @@ impl Network {
                 use sha3::{Digest, Sha3_256};
                 let hash = hex::encode(Sha3_256::digest(&data));
 
-                let (already_seen, skip_local) = {
+                let already_seen = {
                     let mut seen = self.seen_bft.lock().unwrap();
                     let now = std::time::Instant::now();
                     match seen.get(&hash).copied() {
                         Some(time) if now.duration_since(time).as_secs() < 3 => {
-                            // Flood protection: drop completely from gossip if relayed < 3s ago
-                            // CRITICAL FIX: skip_local MUST be false so AlephBFT receives its retries!
-                            (true, false)
+                            // Flood protection: seen recently — deliver locally (retries!) but skip relay
+                            true
                         }
                         Some(_) => {
-                            // Legitimate retry after 3s. Update timestamp and relay it!
+                            // Legitimate retry after 3s — update timestamp and relay
                             seen.put(hash, now);
-                            (false, false) // pass locally and relay
+                            false
                         }
                         None => {
                             seen.put(hash, now);
-                            (false, false) // new, pass locally and relay
+                            false // new message
                         }
                     }
                 };
 
-                // Send to our local AlephBFT instance FIRST.
-                // AlephBFT relies on retries (identical messages) for reliability.
-                // If we deduplicate before sending to AlephBFT, retries are dropped locally.
-                if !skip_local {
-                    if let Some(tx) = &*tx_opt {
-                        match tx.try_send(data.clone()) {
-                            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                                tracing::warn!("BFT channel full, dropping message (Memory leak prevented)");
-                            }
-                            Err(_) => {
-                                tracing::debug!("BFT channel closed/unregistered, dropping message during sync");
-                            }
-                            Ok(_) => {}
+                // Always deliver to local AlephBFT — it relies on receiving retries for reliability.
+                if let Some(tx) = &*tx_opt {
+                    match tx.try_send(data.clone()) {
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                            tracing::warn!("BFT channel full, dropping message (Memory leak prevented)");
                         }
+                        Err(_) => {
+                            tracing::debug!("BFT channel closed/unregistered, dropping message during sync");
+                        }
+                        Ok(_) => {}
                     }
                 }
 
@@ -552,11 +562,13 @@ impl Network {
                     return Ok(());
                 }
 
-
-                // HIGH FIX: Relay the message to all peers! This eliminates the need
-                // for a "Full Mesh" network topology and allows the network to scale
-                // massively without hardcoding bootstrap IPs.
-                self.broadcast_message(P2PMessage::AlephBFTMessage(data)).await;
+                // AUDIT FIX: Only rebroadcast BROADCAST-tagged messages (tag=0).
+                // Unicast messages (tag=1) are routed directly to a specific validator
+                // by send_aleph_bft_to_validator(). Re-relaying unicasts to everyone
+                // completely nullifies BW-FIX-4 and causes O(N³) bandwidth blowup.
+                if data.first().copied() == Some(0u8) {
+                    self.broadcast_message(P2PMessage::AlephBFTMessage(data)).await;
+                }
             }
             _ => {
                 debug!("Unhandled message type from {}", addr);
@@ -622,8 +634,13 @@ impl Network {
             }
         } else {
             info!("Added new transaction to mempool, re-broadcasting");
-            // BETA FIX: Re-broadcast to propagate across all nodes in the mesh
-            self.broadcast_transaction(tx).await;
+            // AUDIT FIX: Only bridge into Gossipsub when the tx came from a direct TCP peer.
+            // If peer.is_none(), we received this via Gossipsub already — Gossipsub handles
+            // its own relaying natively. Calling broadcast_transaction() again would cause
+            // an infinite application-layer publish loop.
+            if peer.is_some() {
+                self.broadcast_transaction(tx).await;
+            }
         }
 
         Ok(())
@@ -831,7 +848,7 @@ impl Network {
                     };
                     if needs_sync {
                         tracing::warn!("Local state root diverged at hard-fork block 110,000. Requesting canonical state snapshot from peer...");
-                        if let Some(p) = peer {
+                        if let Some(p) = &peer {
                             let _ = p.send_message(P2PMessage::GetStateSnapshot {
                                 height: 110_000,
                                 expected_state_root: block.state_root.clone(),
@@ -845,9 +862,13 @@ impl Network {
                     &block.hash[..8],
                     block.index
                 );
-                // BETA FIX: Re-broadcast so nodes NOT directly connected to the miner
-                // also receive the block (essential for mesh topology with 6+ nodes).
-                self.broadcast_block(block.clone()).await;
+                // AUDIT FIX: Only bridge into Gossipsub when the block came from a direct TCP
+                // peer. If peer.is_none(), this block arrived via Gossipsub — Gossipsub already
+                // handles relay natively. Calling broadcast_block() again creates an infinite
+                // re-publish loop that consumes CPU and saturates inbound queues.
+                if peer.is_some() {
+                    self.broadcast_block(block.clone()).await;
+                }
 
                 Ok(())
             }
