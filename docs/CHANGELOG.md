@@ -1,5 +1,11 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.10-alpha] - 2026-09-07
+
+### Fixed
+- **Ghost Connections (Connection Leak)**: Fixed a bug where a single validator restarting or dropping behind Cloudflare would accumulate multiple "ghost" connections on the bootstrap node. Because `PeerManager` only checked for duplicate `node_id`s using the ephemeral libp2p `PeerId` during `ConnectionEstablished`, it failed to enforce actual Falcon-512 `node_id` uniqueness when the `Version` handshake arrived later. Added `resolve_duplicate_node_id` to strictly evict stale TCP connections sharing the same `node_id` after the `Version` message is received, ensuring the peer count correctly matches the physical number of validators.
+- **Protocol Bump**: Bumped version to `3.2.10-alpha`, `PROTOCOL_VERSION` to `66`, and `TESTNET_MAGIC` to `QT66` to isolate the network and clear the connection leaks cleanly.
+
 ## [v3.2.9-alpha] - 2026-09-06
 
 ### Fixed

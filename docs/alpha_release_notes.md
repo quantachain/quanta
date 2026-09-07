@@ -1,6 +1,11 @@
 # Quanta Alpha Release Notes
 
-## Current Version: v3.2.9-alpha — Network Sync Capacity Fix
+## Current Version: v3.2.10-alpha
+- **Ghost Connections (Connection Leak)**: Fixed a bug where a single validator restarting or dropping behind Cloudflare would accumulate multiple "ghost" connections on the bootstrap node. Because `PeerManager` only checked for duplicate `node_id`s using the ephemeral libp2p `PeerId` during `ConnectionEstablished`, it failed to enforce actual Falcon-512 `node_id` uniqueness when the `Version` handshake arrived later. Added `resolve_duplicate_node_id` to strictly evict stale TCP connections sharing the same `node_id` after the `Version` message is received, ensuring the peer count correctly matches the physical number of validators.
+- **Heartbeat Telemetry**: Enhanced the `send_heartbeats` logging to include `Synced/Syncing` counts, peer block heights, and the number of connected `Validators` vs the `Required Quorum` for AlephBFT consensus.
+- **Protocol Bump**: Bumped version to `3.2.10-alpha`, `PROTOCOL_VERSION` to `66`, and `TESTNET_MAGIC` to `QT66` to isolate the network and clear the connection leaks cleanly.
+
+### v3.2.9-alpha — Network Sync Capacity Fix
 
 This release fixes a critical syncing bottleneck where nodes dropping inbound streams ("at capacity") would fail to download blocks. The libp2p `max_negotiating_inbound_streams` limit has been increased from 128 to 2048 to support heavy testnet traffic.
 

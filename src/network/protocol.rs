@@ -143,15 +143,15 @@ impl From<&Block> for BlockHeader {
 // Network partition fix: backwards compatibility for versions 59 and 60.
 // CHANGED 2026-09-05 v3.2.6-alpha: Bumped 61 → 62.
 // Strict network isolation: drop backward compatibility to fix block production.
-// CHANGED 2026-09-06 v3.2.9-alpha: Bumped 64 -> 65.
-// Network partition fix: max_negotiating_inbound_streams increased to 2048.
-pub const PROTOCOL_VERSION: u32 = 65;
+// CHANGED 2026-09-07 v3.2.10-alpha: Bumped 65 -> 66.
+// Ghost Connection Fix
+pub const PROTOCOL_VERSION: u32 = 66;
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"QT65"; // v3.2.9-alpha — Network Sync Capacity Fix
+pub const TESTNET_MAGIC: [u8; 4] = *b"QT66"; // v3.2.10-alpha — Ghost Connection Fix
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;

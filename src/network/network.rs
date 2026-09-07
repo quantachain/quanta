@@ -465,6 +465,7 @@ impl Network {
                 }
                 if let Some(p) = &peer {
                     p.update_info(node_id.clone(), version, height, cumulative_work).await;
+                    self.peer_manager.resolve_duplicate_node_id(addr, &node_id).await;
                     let _ = p.send_message(P2PMessage::VerAck).await;
                 }
             }
@@ -1738,7 +1739,44 @@ impl Network {
     async fn send_heartbeats(&self) {
         let peers = self.peer_manager.get_peers().await;
         if !peers.is_empty() {
-            info!("Heartbeat: Pinging {} peers", peers.len());
+            let (local_height, total_validators, required_quorum, validators) = {
+                let bc = self.blockchain.read().await;
+                let height = bc.get_block_count();
+                let val_map = bc.get_account_state_read().get_validators().clone();
+                let total = val_map.len();
+                let quorum = (total * 2) / 3 + 1;
+                (height, total, quorum, val_map)
+            };
+            
+            let mut synced_count = 0;
+            let mut syncing_count = 0;
+            let mut connected_validators = 0;
+            let mut heights: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+
+            for peer in &peers {
+                if let Ok(info) = peer.info.try_read() {
+                    let peer_height = info.height;
+                    *heights.entry(peer_height).or_insert(0) += 1;
+                    
+                    if peer_height >= local_height.saturating_sub(1) && peer_height <= local_height + 1 {
+                        synced_count += 1;
+                    } else {
+                        syncing_count += 1;
+                    }
+                    
+                    if validators.contains_key(&info.node_id) {
+                        connected_validators += 1;
+                    }
+                }
+            }
+            
+            let mut height_details = String::new();
+            for (h, c) in heights {
+                height_details.push_str(&format!(" [H:{} => {} peers]", h, c));
+            }
+
+            info!("Heartbeat: Total peers: {} | Synced: {} | Syncing: {} | Heights:{} | Quorum: {}/{} connected (Need {})", 
+                peers.len(), synced_count, syncing_count, height_details, connected_validators, total_validators, required_quorum);
         }
         for peer in peers {
             let peer = Arc::clone(&peer);

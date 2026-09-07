@@ -233,6 +233,27 @@ impl PeerManager {
         self.banned_ips.write().await.put(ip, expiry);
     }
 
+    pub async fn resolve_duplicate_node_id(&self, peer_addr: SocketAddr, node_id: &str) {
+        let mut peers = self.peers.write().await;
+        let mut stale_idx = None;
+        for (i, p) in peers.iter().enumerate() {
+            if let Ok(info) = p.info.try_read() {
+                if info.address != peer_addr && info.node_id == node_id {
+                    let now = chrono::Utc::now().timestamp();
+                    if now - info.last_seen > 30 || !info.is_outbound {
+                        stale_idx = Some(i);
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some(idx) = stale_idx {
+            let evicted_addr = peers[idx].address().await;
+            warn!("Evicting stale peer {} (duplicate node_id {}) — keeping {}", evicted_addr, node_id, peer_addr);
+            peers.remove(idx);
+        }
+    }
+
     pub async fn remove_peer(&self, address: SocketAddr) {
         let mut peers = self.peers.write().await;
         peers.retain(|p| !matches!(p.info.try_read(), Ok(info) if info.address == address));
