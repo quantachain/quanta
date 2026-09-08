@@ -1,5 +1,11 @@
 # QuantaChain CHANGELOG
 
+## [v3.2.15-alpha] - 2026-09-08
+### Fixed
+- **BFT Consensus:** Fixed an issue where AlephBFT unicast votes were silently dropped if a direct TCP connection was not available due to an incomplete mesh topology. Votes are now safely routed via Gossipsub as a fallback, ensuring they reach their destination.
+- **Peer Tracking:** Fixed a lock contention issue (`try_read` -> `read().await`) in the heartbeat that caused connected peers to incorrectly report a height of 0.
+- **Mesh Healing:** Added a lightweight, DDoS-resistant active peer discovery mechanism. When connected to fewer peers than the BFT quorum requires, the node will politely query up to 3 peers per minute for new addresses to heal the mesh.
+
 ## [v3.2.14-alpha] - 2026-09-07
 
 ### Fixed

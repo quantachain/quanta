@@ -150,13 +150,13 @@ impl From<&Block> for BlockHeader {
 // Strict network isolation: drop backward compatibility to fix block production.
 // CHANGED 2026-09-07 v3.2.10-alpha: Bumped 65 -> 66.
 // Ghost Connection Fix
-pub const PROTOCOL_VERSION: u32 = 69; // v3.2.13-alpha (2026-09-07) — Added advertise_addr to Version message to fix proxy blindness
+pub const PROTOCOL_VERSION: u32 = 70; // v3.2.15-alpha (2026-09-08) — BFT Unicast Fallback & Mesh Healing
 
 pub const MAX_MESSAGE_SIZE: usize = 8 * 1024 * 1024; // 8MB — 2× the 4MB block limit; headroom for bincode wrapper overhead
 pub const PING_INTERVAL_SECS: u64 = 60;
 
 /// Network magic bytes for Quanta Testnet.
-pub const TESTNET_MAGIC: [u8; 4] = *b"QT69"; // v3.2.13-alpha — advertise_addr proxy fix
+pub const TESTNET_MAGIC: [u8; 4] = *b"QT70"; // v3.2.15-alpha — BFT Unicast Fallback & Mesh Healing
 
 /// Default to Testnet magic for current Alpha phase
 pub const NETWORK_MAGIC: [u8; 4] = TESTNET_MAGIC;

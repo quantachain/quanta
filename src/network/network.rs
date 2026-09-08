@@ -1196,11 +1196,10 @@ impl Network {
                 return;
             }
         }
-        // If we didn't find the validator, they are offline or not connected yet.
-        // DO NOT broadcast! Broadcasting unicast messages intended for offline validators
-        // causes massive Gossipsub spam and O(N^3) bandwidth explosion.
-        // AlephBFT internally handles retries, so we can safely drop it.
-        tracing::trace!("Validator {} not found among peers, dropping unicast AlephBFT message", validator_address);
+        // Fallback to Gossipsub if we don't have a direct TCP connection.
+        // Gossipsub deduplication ensures this routes efficiently without N^3 spam.
+        tracing::warn!("Validator {} not connected directly — routing via Gossipsub", validator_address);
+        self.broadcast_aleph_bft(data).await;
     }
 
     /// Synchronize blockchain from peers
@@ -1805,19 +1804,18 @@ impl Network {
             let mut heights: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
 
             for peer in &peers {
-                if let Ok(info) = peer.info.try_read() {
-                    let peer_height = info.height;
-                    *heights.entry(peer_height).or_insert(0) += 1;
-                    
-                    if peer_height >= local_height.saturating_sub(1) && peer_height <= local_height + 1 {
-                        synced_count += 1;
-                    } else {
-                        syncing_count += 1;
-                    }
-                    
-                    if validators.contains_key(&info.node_id) {
-                        connected_validators += 1;
-                    }
+                let info = peer.info.read().await;
+                let peer_height = info.height;
+                *heights.entry(peer_height).or_insert(0) += 1;
+                
+                if peer_height >= local_height.saturating_sub(1) && peer_height <= local_height + 1 {
+                    synced_count += 1;
+                } else {
+                    syncing_count += 1;
+                }
+                
+                if validators.contains_key(&info.node_id) {
+                    connected_validators += 1;
                 }
             }
             
@@ -1828,6 +1826,15 @@ impl Network {
 
             info!("Heartbeat: Total peers: {} | Synced: {} | Syncing: {} | Heights:{} | Quorum: {}/{} connected (Need {})", 
                 peers.len(), synced_count, syncing_count, height_details, connected_validators, total_validators, required_quorum);
+                
+            // Mesh healing: If below quorum, ask a few peers (max 3) for addresses.
+            // This runs once per minute, so 3 messages/min is extremely lightweight and prevents DDoS.
+            if connected_validators < required_quorum {
+                for (i, peer) in peers.iter().enumerate() {
+                    if i >= 3 { break; }
+                    let _ = peer.send_message(P2PMessage::GetAddr).await;
+                }
+            }
         }
         for peer in peers {
             let peer = Arc::clone(&peer);

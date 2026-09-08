@@ -1,13 +1,19 @@
 # Quanta Alpha Release Notes
 
-## Current Version: v3.2.14-alpha
+## Current Version: v3.2.15-alpha
 
-This release patches a critical connection multiplexing bug that caused extreme duplicate peer connections and TLS handshake failures (ClientHello collisions).
+This release resolves a critical network halt issue where BFT consensus stalled due to incomplete mesh topologies.
+
+### v3.2.15-alpha — BFT Gossip Fallback & Mesh Healing
+- **BFT Consensus Unicast Fallback:** Fixed an issue where AlephBFT unicast votes were silently dropped if a direct TCP connection was not available to the target validator. Votes are now safely routed via Gossipsub as a fallback, ensuring they reach their destination even in incomplete mesh topologies without causing spam.
+- **Heartbeat Lock Fix:** Replaced `try_read` with `read().await` in the heartbeat peer counter. This fixes a cosmetic issue where connected peers incorrectly reported a chain height of 0 because their lock was momentarily busy.
+- **Aggressive Mesh Healing:** Added a lightweight active peer discovery mechanism to the heartbeat. When a node is connected to fewer peers than the BFT quorum requires, it will politely query up to 3 peers per minute for new addresses to heal the mesh.
+
+## Previous Versions
 
 ### v3.2.14-alpha — Duplicate Peer & TLS Collision Patch
 - **PeerManager Lock Starvation Fix**: Replaced all `try_read` non-blocking locks in the peer eviction routines with `read().await`. Previously, if a peer's heartbeat lock was active during a new incoming dial, the network would silently skip duplicate detection. This caused validators to dial and accept the exact same peer multiple times, inflating the peer count and causing TLS ClientHello handshake collisions (two outbound TCP streams crossing wires).
 
-## Previous Versions
 
 ### v3.2.13-alpha — TCP Proxy Mesh Fix (`--advertise-addr`)
 - **Proxy Blindness Fix**: Added a new CLI flag `--advertise-addr <IP>` to allow validators hidden behind Layer 4 TCP proxies (like Cloudflare Spectrum) or complex NATs to explicitly declare their real public IP to the network. This IP is embedded directly into the P2P `Version` handshake, allowing the bootstrap node to gossip the real routable IP instead of the useless proxy socket IP. This restores full mesh connectivity and AlephBFT consensus block production.
